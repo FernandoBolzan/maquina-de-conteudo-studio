@@ -2,7 +2,9 @@
 
 ## State
 
-- O app desktop Electron/React integra PostNow, VideoGo, Orquestrador Maestro, marcas, aprovação por hash, exportação e derivação de projetos imagem↔vídeo. Linux AppImage e `.deb` x86_64 foram reconstruídos e testados; onboarding e criação de projeto/marca passaram na UI do AppImage em workspace descartável. A validação de instaladores e runtime Windows/macOS permanece pendente.
+- App Electron/React integra PostNow, VideoGo, Orquestrador Maestro, marcas, aprovação por hash, exportação e derivação imagem↔vídeo; inclui integração ElevenLabs documentada no README e spec ativa. Release pública v0.1.1 tem AppImage/deb Linux x86_64, NSIS Windows x64 e DMG/ZIP macOS arm64. Localmente, AppImage v0.1.1 abriu em workspace descartável e UI de projeto/narração/Preferências passou; `.deb` metadata verificado sem apt install. Windows/macOS ainda não foram instalados nem testados nativamente.
+- ElevenLabs: `safeStorage` encrypts the local key; preferences manage voice selection/IVC; Studio saves editorial/spoken text per scene, hash-binds approval to text/voice/model, requires explicit confirmation before `eleven_v4` synthesis, and requires individual audio approval before render. The child-only key env and `VIDEOGO_NO_VOICE_CACHE=1` avoid settings/args/log/cache persistence.
+- Verification: Studio typecheck/lint/7 tests/smoke/build and Chromium 390 px visual pass; VideoGo typecheck/49 core + 20 flicker/externalaudio E2E/build pass. No live paid TTS or clone; no native Windows/macOS runtime.
 
 ## Commands
 
@@ -21,11 +23,12 @@ orquestrador-maestro check-dev-gates --project-path . --strict
 
 ## Constraints And Risks
 
-- Windows e macOS exigem validação nativa de NSIS/DMG, PTY, diálogos, permissões e caminhos. Tentativas cruzadas atuais no Linux falharam ao recompilar `node-pty` com node-gyp; wine/PowerShell/xcrun indisponíveis. QEMU não tem `/dev/kvm` nem mídia/disco Windows; não há hosts SSH. Builds/run de macOS exigem host macOS.
-- CLI logins são interativos e permanecem nos CLIs oficiais; geração paga de modelos requer autorização do usuário.
-- Autoatualização usa a release estável mais recente de `FernandoBolzan/maquina-de-conteudo-studio`; `package.json` é fonte SemVer, tags anotadas `vX.Y.Z` disparam `.github/workflows/release.yml`. Linux AppImage atualiza pelo app; `.deb` pelo gerenciador do sistema. Consulte `DEV/RUNBOOKS/RELEASES.md`.
-- Pacotes Linux são x86_64: AppImage e Debian. O builder usa o ícone Electron padrão enquanto não houver ícones de distribuição configurados.
+- Windows/macOS exigem validação nativa de instaladores, PTY, diálogos e caminhos. A Actions run `42045235690` compilou/publicou Windows x64 e macOS arm64; build de CI não equivale a teste de instalação/runtime.
+- O smoke (`scripts/smoke.ts`) aceita `MDC_SMOKE_POSTNOW`, `MDC_SMOKE_VIDEOGO` e `MDC_SMOKE_MAESTRO`; defaults PostNow/VideoGo são irmãos e Maestro usa caminho Linux somente no Linux. Smoke passou com defaults e overrides no Linux; smoke nativo pendente.
+- CLI logins são interativos e permanecem nos CLIs oficiais; geração paga de modelos/voz requer autorização do usuário.
+- Autoatualização usa a release estável mais recente de `FernandoBolzan/maquina-de-conteudo-studio`; `package.json` é fonte SemVer e tags anotadas `vX.Y.Z` acionam `.github/workflows/release.yml`. `workflow_dispatch` também publica a tag selecionada; usar só com autorização. Linux AppImage atualiza pelo app; `.deb` pelo gerenciador. Consulte `DEV/RUNBOOKS/RELEASES.md`.
+- Pacotes Linux são x86_64. O builder usa o ícone Electron padrão enquanto não houver ícones de distribuição configurados. A UI bloqueia guardar API key se o cofre do sistema não estiver disponível; neste host Linux não havia Secret Service/KWallet operacional.
 
 ## Next Context
 
-Artefatos Linux em `release/Máquina de Conteúdo (Studio)-0.1.0.AppImage` e `release/maquina-de-conteudo_0.1.0_amd64.deb`. AppImage executável e testado em sessão gráfica; `npm start` está novamente aberto após recuperação de Xwayland. Consulte `DEV/VERIFY.md` e `DEV/HANDOFF.md` para evidências e limites.
+- Artefatos públicos v0.1.1: AppImage/deb Linux x86_64; instalador NSIS Windows x64; DMG/ZIP macOS arm64. O feed AppImage foi consultado pelo app e informou “versão atual”; atualização entre versões distintas não foi testada. Pacotes locais: `release/maquina-de-conteudo-0.1.1-x86_64.AppImage` (122.062.829 bytes) e `release/maquina-de-conteudo-0.1.1-amd64.deb` (92.381.148 bytes). AppImage aberto em perfil/workspace temporários; `.deb` não instalado com apt. Evidências: `DEV/VERIFY.md`.

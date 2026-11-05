@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, lstat, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, parse, resolve } from 'node:path';
-import type { EngineId, EngineStatus, Settings } from '../../shared/contracts.js';
+import type { EngineDependency, EngineId, EngineStatus, Project, Settings } from '../../shared/contracts.js';
 import type { RunSpec, Services } from '../context.js';
-import { environmentWithExecutables, requireTool, requireVersion, resolveTool, toolEnvironment } from './tools.js';
+import { postnowRuntimeStatus, renderCarousel } from '../content/carousel.js';
+import { environmentWithExecutables, requireTool, requireVersion, resolveTool, toolEnvironment, toolStatus } from './tools.js';
 
 export const repositories: Record<EngineId, string> = {
   videogo: 'FernandoBolzan/VideoGo',
@@ -66,10 +67,37 @@ async function inspect(engine: EngineId, root: string, built: boolean): Promise<
   return manifest.version;
 }
 
+function versionAtLeast(version: string | undefined, major: number, minor: number): boolean {
+  const [foundMajor = 0, foundMinor = 0] = (version ?? '').split('.').map(Number);
+  return foundMajor > major || (foundMajor === major && foundMinor >= minor);
+}
+
+async function engineDependencies(engine: EngineId, services: Services): Promise<EngineDependency[]> {
+  const specs = engine === 'postnow' ? []
+    : engine === 'videogo' ? [{ id: 'node', name: 'Node.js', required: '22+', major: 22, minor: 0 }, { id: 'npm', name: 'npm', required: 'incluído com Node.js', major: 0, minor: 0 }, { id: 'ffmpeg', name: 'FFmpeg', required: 'instalado', major: 0, minor: 0 }, { id: 'ffprobe', name: 'FFprobe', required: 'instalado', major: 0, minor: 0 }]
+      : [{ id: 'node', name: 'Node.js', required: '20.19+', major: 20, minor: 19 }, { id: 'npm', name: 'npm', required: 'incluído com Node.js', major: 0, minor: 0 }];
+  const dependencies: EngineDependency[] = await Promise.all(specs.map(async spec => {
+    const status = await toolStatus(spec.id, services);
+    let installed = status.installed;
+    if (spec.id === 'node' || spec.id === 'python') installed &&= versionAtLeast(status.version, spec.major, spec.minor);
+    return { id: spec.id, name: spec.name, required: spec.required, installed, version: status.version,
+      guidance: installed ? `${spec.name} pronto.` : spec.id === 'ffprobe' ? 'Instale o pacote FFmpeg da sua distribuição, que inclui ffprobe.' : status.installed ? `Atualize para ${spec.required} ou mais recente e reabra o Studio.` : `Instale ${spec.name} e execute o diagnóstico novamente.` };
+  }));
+  if (engine === 'postnow') {
+    const runtime = await postnowRuntimeStatus(services);
+    const pythonReady = versionAtLeast(runtime.pythonVersion, 3, 11);
+    dependencies.push({ id: 'python', name: 'Python', required: '3.11+', installed: pythonReady, ...(runtime.pythonVersion ? { version: runtime.pythonVersion } : {}),
+      guidance: pythonReady ? `Python ${runtime.pythonVersion} pronto no ambiente usado pelo PostNow.` : runtime.pythonVersion ? 'Atualize o Python selecionado pelo PostNow para 3.11 ou mais recente.' : 'Instale Python 3.11+ ou conecte uma instalação que tenha um ambiente virtual válido.' });
+    dependencies.push({ id: 'pillow', name: 'Pillow', required: 'instalado no Python usado pelo PostNow', installed: !!runtime.pillowVersion, ...(runtime.pillowVersion ? { version: runtime.pillowVersion } : {}),
+      guidance: runtime.pillowVersion ? `Pillow ${runtime.pillowVersion} pronto.` : 'Instale Pillow no Python que o PostNow usa para renderizar; depois execute o teste local.' });
+  }
+  return dependencies;
+}
+
 export async function engineStatuses(services: Services): Promise<EngineStatus[]> {
   return Promise.all((Object.keys(repositories) as EngineId[]).map(async id => {
     const path = services.getSettings().enginePaths[id];
-    const result: EngineStatus = { id, repository: `https://github.com/${repositories[id]}`, installed: false };
+    const result: EngineStatus = { id, repository: `https://github.com/${repositories[id]}`, installed: false, dependencies: await engineDependencies(id, services) };
     if (!path) return result;
     result.path = path;
     try { result.version = await inspect(id, path, true); result.installed = true; } catch { /* Broken paths remain visible so the user can relink them. */ }
@@ -147,6 +175,62 @@ async function health(engine: EngineId, root: string, services: Services): Promi
       const output = await checkedCapture(services, node, [entry, 'context', 'brief', '--project-path', services.dataDir, '--task', 'Verificar contexto local de instalação', '--max-chars', '1000', '--json'], { cwd, env, timeoutMs: 30000 }, 'Maestro não conseguiu montar um contexto local. Nenhuma chamada de modelo foi executada.');
       JSON.parse(output);
     }
+  }
+}
+
+export async function testEngine(engine: EngineId, services: Services): Promise<{ message: string }> {
+  const root = services.getSettings().enginePaths[engine];
+  if (!root) throw new Error('Instale ou vincule este motor antes de executar o teste local.');
+  await health(engine, root, services);
+  const testRoot = join(services.dataDir, 'engine-tests');
+  await mkdir(testRoot, { recursive: true, mode: 0o700 });
+  const directory = await mkdtemp(join(testRoot, `${engine}-`));
+  try {
+    if (engine === 'postnow') {
+      await mkdir(join(directory, 'generated'), { recursive: true });
+      await mkdir(join(directory, 'prompts'), { recursive: true });
+      await writeFile(join(directory, 'project.json'), JSON.stringify({
+        schema_version: 1, type: 'carousel', title: 'Teste local do Studio', page_count: 1,
+        pages: [{ page: 1, headline: 'Teste local', body: 'Renderização isolada', copy: 'Teste local\nRenderização isolada' }],
+      }));
+      const project: Project = { id: randomUUID(), title: 'Teste local do Studio', kind: 'image', createdAt: new Date().toISOString(), path: directory, brief: 'Teste local de renderização' };
+      const job = await renderCarousel(project, undefined, services);
+      const completed = await services.waitJob(job.id);
+      if (completed.status !== 'succeeded') throw new Error(`O teste local do PostNow falhou. Consulte o job ${job.id}.`);
+      const image = await readFile(join(directory, 'generated', 'slide-01.png'));
+      if (image.toString('hex', 0, 8) !== '89504e470d0a1a0a' || image.readUInt32BE(16) !== 1080 || image.readUInt32BE(20) !== 1350) throw new Error('PostNow terminou sem gerar uma imagem PNG válida de 1080 × 1350.');
+      return { message: 'PostNow renderizou um slide de teste 1080 × 1350. A pasta temporária foi removida.' };
+    }
+    const node = await requireVersion('node', engine === 'videogo' ? 22 : 20, engine === 'videogo' ? 0 : 19, services);
+    const entry = join(root, engine === 'videogo' ? 'dist/cli/index.js' : 'bin/orquestrador-maestro.js');
+    if (engine === 'maestro') {
+      const result = await services.capture(node, [entry, 'context', 'brief', '--project-path', directory, '--task', 'Teste local do Studio', '--max-chars', '1000', '--json'], { cwd: directory, env: await toolEnvironment(services), timeoutMs: 30000 });
+      if (result.code !== 0) throw new Error('Maestro não concluiu o teste local de contexto. Nenhuma chamada de IA foi feita.');
+      JSON.parse(result.stdout);
+      return { message: 'Maestro montou um contexto local de teste. Nenhum modelo foi chamado e a pasta temporária foi removida.' };
+    }
+    const storyboard = {
+      schema: 'videogo.storyboard/v1', status: 'ready', id: 'studio-local-test', title: 'Teste local do Studio',
+      language: 'pt-BR', objective: 'Validar renderização local', audience: 'Teste', format: 'reels', style: 'auto', fps: 30,
+      durationTargetSeconds: 3, tone: ['claro'],
+      scenes: [{ id: 'studio-test-scene', purpose: 'hook', engine: 'auto', targetSeconds: 3, narration: '', onScreen: ['Teste local'],
+        visual: { kind: 'typography', direction: 'Cartão simples para validar o render.', layout: 'none', camera: 'static' },
+        audio: { sfx: [], sfxCues: [], sourceAudio: false }, sources: [] }],
+      soundDesign: { whooshes: false }, review: { factual: false, visual: false, audio: false },
+    };
+    const storyboardPath = join(directory, 'storyboard.json');
+    const outputPath = join(directory, 'test.mp4');
+    await writeFile(storyboardPath, JSON.stringify(storyboard));
+    const job = await services.run({ title: 'VideoGo: teste local isolado (voz demo silenciosa)', executable: node,
+      args: [entry, 'project', 'render', storyboardPath, '--voice', 'demo', '--output', outputPath],
+      cwd: root, env: await toolEnvironment(services), timeoutMs: 10 * 60 * 1000 });
+    const completed = await services.waitJob(job.id);
+    if (completed.status !== 'succeeded') throw new Error(`O teste local do VideoGo falhou. Consulte o job ${job.id}.`);
+    const probe = await services.capture(await requireTool('ffprobe', services), ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', outputPath], { timeoutMs: 15000 });
+    if (probe.code !== 0 || !(Number(probe.stdout.trim()) > 0)) throw new Error('VideoGo não gerou um vídeo MP4 válido no teste local.');
+    return { message: 'VideoGo renderizou um vídeo de teste sem voz paga. A pasta temporária foi removida.' };
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 }
 

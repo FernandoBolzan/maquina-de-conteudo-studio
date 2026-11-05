@@ -12,6 +12,8 @@ export async function handleAgents(action: string, payload: Record<string, unkno
   const id = safeId(payload.id);
   const provider = payload.provider;
   if (provider !== 'codex' && provider !== 'claude') throw new Error('Provedor inválido; escolha Codex ou Claude.');
+  const model = payload.model === undefined || payload.model === '' ? undefined : text(payload, 'model', 100).trim();
+  if (model && !/^[\w./:-]+$/.test(model)) throw new Error('Modelo inválido; use o identificador aceito pelo CLI selecionado.');
   const request = text(payload, 'prompt', 30000);
   const root = await workspace(services);
   // Reserve before any asynchronous preparation; rendering uses the same workspace queue.
@@ -72,13 +74,13 @@ export async function handleAgents(action: string, payload: Record<string, unkno
     ].join('\n\n');
     const contextPath = join(projectContextDir, `${session}.txt`);
     await atomicText(contextPath, context);
-    await atomicJson(join(sessionDir, 'session.json'), { id: session, projectId: id, provider, createdAt: new Date().toISOString(), requestPath, contextPath, maestro: maestroNotice });
+    await atomicJson(join(sessionDir, 'session.json'), { id: session, projectId: id, provider, ...(model ? { model } : {}), createdAt: new Date().toISOString(), requestPath, contextPath, maestro: maestroNotice });
     // A short positional prompt avoids OS argument-length limits; the request itself lives in the context file.
     const prompt = `Leia ${JSON.stringify(contextPath)} para o pedido e contexto deste projeto. Trabalhe apenas nesta pasta (${project.path}) e atualize os arquivos do projeto conforme solicitado.`;
     const args = provider === 'codex'
-      ? ['exec', '--skip-git-repo-check', '--cd', project.path, '--sandbox', 'workspace-write', '--approve-for-me', '--color', 'always', prompt]
-      : ['-p', '--permission-mode', 'acceptEdits', '--add-dir', project.path, prompt];
-    const job = await services.run({ title: `${provider === 'codex' ? 'Codex' : 'Claude'}: ${project.title}`, executable, args, cwd: project.path, env, projectId: id, interactive: false, timeoutMs: 20 * 60 * 1000 });
+      ? ['exec', ...(model ? ['--model', model] : []), '--skip-git-repo-check', '--cd', project.path, '--sandbox', 'workspace-write', '--approve-for-me', '--color', 'always', prompt]
+      : [...(model ? ['--model', model] : []), '-p', '--permission-mode', 'acceptEdits', '--add-dir', project.path, prompt];
+    const job = await services.run({ title: `${provider === 'codex' ? 'Codex' : 'Claude'}${model ? ` · ${model}` : ''}: ${project.title}`, executable, args, cwd: project.path, env, projectId: id, interactive: false, timeoutMs: 20 * 60 * 1000 });
     void services.waitJob(job.id).then(async finished => {
       if (finished.status === 'succeeded' && project.kind === 'image') {
         try {

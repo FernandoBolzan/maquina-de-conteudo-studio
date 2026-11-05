@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell, session, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell, session, Menu, safeStorage } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import updater from 'electron-updater';
@@ -28,6 +28,17 @@ async function start(): Promise<void> {
   autoUpdater.on('error', error => { window?.webContents.send('maquina:event', { type: 'output', jobId: 'system', data: `Atualização: ${error.message}\n` }); });
   runtime = new Runtime(process.env.MDC_DATA_DIR || app.getPath('userData'), {
     assetPrefix: 'media://asset/',
+    secureStorageAvailable: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || !['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend())),
+    encryptSecret: value => {
+      if (!safeStorage.isEncryptionAvailable() || (process.platform === 'linux' && ['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend()))) throw new Error('O cofre seguro do sistema não está disponível.');
+      return safeStorage.encryptString(value).toString('base64');
+    },
+    decryptSecret: value => {
+      if (!safeStorage.isEncryptionAvailable() || (process.platform === 'linux' && ['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend()))) throw new Error('O cofre seguro do sistema não está disponível.');
+      const encrypted = Buffer.from(value, 'base64');
+      if (!encrypted.length || encrypted.toString('base64') !== value) throw new Error('Credencial cifrada inválida.');
+      return safeStorage.decryptString(encrypted);
+    },
     pickFile: async options => {
       const properties: Array<'openDirectory' | 'createDirectory' | 'openFile' | 'multiSelections'> = options?.directory ? ['openDirectory', 'createDirectory'] : options?.multiple ? ['openFile', 'multiSelections'] : ['openFile'];
       const result = await dialog.showOpenDialog({ properties, filters: options?.extensions?.length ? [{ name: 'Arquivos', extensions: options.extensions }] : undefined });

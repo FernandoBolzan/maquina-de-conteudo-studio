@@ -1,37 +1,43 @@
 # Verify — Máquina de Conteúdo (Studio)
 
 - Date: 2026-11-05
-- Scope: Onboarding inicial, ciclo Codex/Claude e baseline de release/empacotamento Linux.
-- Passed: typecheck, lint, `npm test` (5/5), smoke, build AppImage/deb, QA Chromium do onboarding/projeto/marca, consulta CLI estável e gates strict.
-- Failed: `npm run dist:windows` e `npm run dist:mac` falham em cross-build no host Linux; run `42040288628` compilou os três alvos nativos, mas falhou ao enviar artefatos com nome contendo `:`.
-- Pending: publicação da release após corrigir nome inválido de artefato no workflow; download/update real, instalação manual Windows/macOS, assinatura/notarização, instalação real de CLI e login.
+- Scope: release pública `v0.1.1`, feeds do updater, pacote Linux e fluxos visuais no AppImage.
+- Passed: Actions run `42045235690` concluiu builds Linux/Windows/macOS e publicação. Os feeds públicos `latest-linux.yml`, `latest.yml` e `latest-mac.yml` apontam para assets existentes com nomes correspondentes.
+- Observed: a primeira consulta do updater retornou HTTP 504; uma consulta posterior pela UI do AppImage informou “Você está na versão atual (0.1.1)”. Não houve download nem instalação de atualização.
+- Pending: instalação/fluxos nativos Windows/macOS, assinatura/notarização, macOS Intel, instalação do `.deb` via `apt` e update real entre versões diferentes.
 
 ## Latest Verification
 
-- `npm run typecheck`: passou após contrato de onboarding, migração de perfil, state de CLI e handlers.
-- `npm test`: passou, 5/5; inclui instalação nova vs. config legada, consentimento, comparação semântica e ciclo gerenciado Codex 1.2.0 → 1.3.0 → rollback 1.2.0. Versão staged inválida não substitui a instalação ativa.
+- `npm run typecheck`: passou.
 - `npm run lint`: passou.
-- `npm run smoke`: passou; runtime criou projetos/marcas, derivou conteúdo e cancelou PTY.
-- `npm run build`: passou; Vite reporta chunk do renderer de 599,59 kB (>500 kB).
-- Preview real da renderer + Runtime: onboarding exibido e concluído para a tela Projetos; Chromium em 1280/900, 768/900 e 390/844 sem overflow horizontal, sem botões sem nome e sem erros de console.
-- Consulta de versões reais ocorreu ao abrir o Setup; nenhuma instalação/atualização real de CLI, login ou geração paga foi executada.
-- `orquestrador-maestro check-dev-gates --project-path . --strict`: passou; alertou hotspots recorrentes já existentes em `package.json` (4 entradas) e `src/main/electron.ts` (3 entradas).
+- `npm test`: passou, 7/7; inclui segurança da chave ElevenLabs e bloqueio de síntese antes da aprovação explícita.
+- `npm run smoke`: passou com defaults Linux e com `MDC_SMOKE_POSTNOW`, `MDC_SMOKE_VIDEOGO`, `MDC_SMOKE_MAESTRO`.
+- `npm run build`: passou; chunk renderer 615,40 kB excede o aviso de 500 kB.
+- `npm run dist:linux`: passou; AppImage local 122.062.829 bytes e `.deb` 92.381.148 bytes. `dpkg-deb --field` confirma pacote `maquina-de-conteudo`, versão `0.1.1`, arquitetura `amd64`.
+- AppImage 0.1.1 abriu em perfil e workspace temporários; projetos/marcas começaram vazios. Criado projeto VideoGo temporário; painel de narração exibiu controles e manteve salvar/aprovar/gerar bloqueados sem configuração. Nenhuma API ElevenLabs, voz clonada ou geração paga foi acionada.
+- Preferências: `safeStorage` sem cofre seguro neste host Linux; a UI bloqueou guardar API key e não recorreu a texto puro. O workspace de QA foi isolado em `/tmp`; nenhum projeto real foi alterado.
+- Console do renderer e erros do browser: vazios durante a sessão de QA. Consulta do updater na UI registrou versão atual `0.1.1`; nenhum pacote foi baixado.
+- VideoGo real: render de storyboard de teste concluído com `--voice demo`, saída MP4 validada com `ffprobe`; pasta temporária removida.
+- Maestro real: contexto local de teste validado sem chamada de modelo; pasta temporária removida.
+- PostNow: UI detectou Python 3.12.3 e ausência de Pillow no ambiente selecionado; render não executado e dependência não instalada.
+- UI Chromium: Setup e Preferências verificados em 390/768/1280/1440 px; zero overflow horizontal, zero botões sem nome e zero erros novos. Estado de atualização disponível testado anteriormente com IPC simulado, sem baixar pacote.
+- `orquestrador-maestro check-dev-gates --project-path . --strict`: passou com 12 entradas. Avisou hotspots no histórico (`package.json` 5; workflow release, `DEV/**` e README 3 cada; `src/main/electron.ts` 3). O worklog mostra mudanças distintas de versão/dependências, correções do workflow, atualizações documentais e recursos do Electron; não demonstra uma causa técnica única. `check-recurrence --write` não estava disponível no PATH (exit 127); nenhum patch de código foi feito por esse aviso.
 
-## Auditoria atual do worktree
+## Validação local prévia à publicação
 
-- Cadeia executada: `npm run typecheck && npm run lint && npm test && npm run smoke && npm run dist:linux`; todos passaram. `npm test`: 5/5.
-- O AppImage reconstruído (x86_64) abriu por FUSE sem `--no-sandbox`/`--appimage-extract-and-run`. Em perfil e workspace temporários, onboarding concluiu, projeto e marca foram criados pela UI, Setup abriu, consulta de versão estável Codex/Claude indicou estado current; nenhum erro do renderer.
-- `release/linux-unpacked/maquina-de-conteudo` retornou para `app.updateCheck` a instrução de atualizar `.deb` pelo gerenciador do sistema; nenhum erro do renderer.
-- Artefatos atuais: AppImage executável de 121.033.584 bytes e `.deb` amd64 de 92.216.380 bytes. `dpkg-deb --field` confirma pacote `maquina-de-conteudo`, versão `0.1.0`, arquitetura `amd64`.
-- `npm run dist:windows` e `npm run dist:mac` localmente falham no rebuild de `node-pty` por cross-compilation; o GitHub Actions executou os três builds nativos com sucesso. Nenhum instalador Windows/macOS foi instalado ou testado manualmente; os artefatos do run não foram carregados por erro de nome.
-- `orquestrador-maestro check-dev-gates --project-path . --strict`: passou; recorrência histórica em `package.json` e `src/main/electron.ts` avisada, não bloqueante.
-- O processo normal encerrou com X connection error; o relançamento falhou enquanto X não estava acessível. Após Xwayland ficar alcançável (`xdpyinfo`), `npm start` voltou a iniciar com `ELECTRON_WINDOW_READY`; serviço `maquina-desktop-live` está pronto.
-- Portabilidade do harness: `npm test` usa FFmpeg e symlink; `npm run smoke` depende de `../PostNow`, `../VideoGo` e do caminho fixo Linux de Maestro. O smoke só foi validado no layout Linux atual; testes nativos ainda dependem de tornar esses paths configuráveis/provisionados.
-## Execução inicial de release
+- No snapshot anterior ao bump de versão: typecheck, lint, `npm test` (6/6), `npm run smoke`, smoke com overrides, build e `dist:linux` passaram.
+- Aquele build local 0.1.0 produziu AppImage 121.374.248 bytes e `.deb` 92.272.280 bytes; o AppImage abriu em perfil temporário e o `.deb` teve metadata verificado, sem instalação `apt`.
+- Actions run `42040288628` construiu `v0.1.0`, mas uploads falharam por `:` nos nomes. A run `42041326153` corrigiu uploads, mas macOS recebeu HTTP 504 durante empacotamento. A run `42042527532` publicou a release `v0.1.0`.
+- O feed v0.1.0 referia nomes que não correspondiam aos assets publicados. O template `artifactName` foi corrigido no código de release e o pacote foi bumpado para `0.1.1`.
+- No snapshot anterior à publicação de `v0.1.1`, os builds locais foram gerados e smoke paths ficaram configuráveis por `MDC_SMOKE_POSTNOW`, `MDC_SMOKE_VIDEOGO` e `MDC_SMOKE_MAESTRO`. Depois, a Actions run `42045235690` publicou os manifests corrigidos.
 
-- Commit inicial `80cc1e5` publicado em `main`; tag anotada `v0.1.0` publicada.
-- GitHub Actions run `42040288628`: validação da tag e builds `dist:linux`, `dist:windows`, `dist:mac` passaram; os três uploads falharam por nomes inválidos contendo `:` (`release-dist:linux`, etc.).
-- O job `publish` não executou; a API pública não mostra release. Corrigido localmente para nomes `release-${{ runner.os }}` e adicionado `workflow_dispatch` para reconstruir a mesma tag sem retarget. Fix ainda precisa ser enviado antes do retry.
+## Histórico de publicação
+
+- Commit inicial `80cc1e5` e tag anotada `v0.1.0` foram publicados; release permanece imutável.
+- Primeiro upload falhou com nomes inválidos; tentativa seguinte teve falha transitória HTTP 504 no build macOS.
+- Retry manual `42042527532` publicou `v0.1.0` e todos os assets.
+- Commit `77cf59c` corrigiu `artifactName` para alinhar feeds e assets; tag anotada `v0.1.1` disparou Actions run `42045235690`, sucesso nos três builds e publicação.
+- API pública confirma `v0.1.1` como latest. `latest-linux.yml`, `latest-mac.yml` e `latest.yml` foram lidos; os caminhos dos pacotes Linux, macOS e Windows correspondem aos nomes dos assets.
 
 ## Commands
 
@@ -61,9 +67,9 @@ orquestrador-maestro check-dev-gates --project-path . --strict
 
 ## Not Verified Here
 
-- Live GitHub release lookup/download/install was not exercised because no tag/release was published.
-- GitHub Actions orchestration, native Windows/macOS installers, signing/notarization, and their update flows remain unverified on their native hosts.
-- Paid model-generation requests and interactive authentication were not invoked; they require user authorization.
+- Lookup público da release e leitura dos três feeds foram exercitados; a consulta pelo app informou que `0.1.1` já era a versão atual. Nenhum download/instalação de update foi tentado.
+- Instalação manual do `.deb` com apt, instalação/fluxos nativos Windows/macOS, assinatura/notarização e macOS Intel não foram exercitados.
+- Geração paga ElevenLabs, clonagem real e autenticação interativa não foram acionadas.
 
 ## Review
 
@@ -79,8 +85,15 @@ action: Added the official product homepage and correct top-level desktopName me
 During CDP inspection, the test harness navigated an AppImage window to the development renderer path; the IPC origin guard correctly rejected that mismatched page and displayed “Origem não autorizada.” Reopening the AppImage's own `app.asar` renderer path, then restarting `npm start` at its matching development path, loaded both normally with no renderer errors. No project data was modified by this navigation.
 
 ## Outcome
+- Passaram typecheck, lint, 7/7 testes, smoke com defaults/overrides, build e `dist:linux`; QA do AppImage e gates DEV strict passaram.
+- Linux v0.1.1: AppImage abriu em workspace descartável, fluxo de projeto/narração e Preferências observados; `.deb` metadata verificado, sem instalação apt.
+- Release pública `v0.1.1` e feeds Linux/Windows/macOS confirmados. Windows x64 e macOS arm64 foram compilados/publicados por Actions, mas ainda sem instalação/execução em hosts nativos.
 
-- Passed: typecheck, lint, `npm test` 5/5, smoke, build, onboarding no Chromium e ciclo gerenciado Codex install/update/rollback; DEV gates em modo strict passaram com alerta de recorrência não bloqueante.
-- Earlier release evidence: Linux AppImage/deb, abertura AppImage, guarda de update `.deb` e fluxo de projeto em workspace descartável.
-- Failed: Nenhum teste Linux da tarefa atual; tentativa Linux→Windows cross-build falhou ao reconstruir `node-pty` com `node-gyp`.
-- Limits: Instalações reais de CLI e autenticação não foram executadas; Windows/macOS nativos, assinatura/notarização, GitHub Actions e update remoto seguem pendentes.
+## 2026-11-05 — ElevenLabs v4 no Studio
+
+- Studio: `npm run typecheck`, `npm run lint`, `npm test` (7/7) e `npm run build` passaram. Vite reportou bundle renderer 616.16 kB acima do aviso de 500 kB.
+- Runtime offline simulou `/v2/voices` e cofre cifrado: key ausente de `settings.json` e armazenada cifrada; sintetização bloqueada antes de aprovar; mudança no texto após aprovação invalidou o hash; zero chamadas TTS. Nenhuma API externa real foi chamada.
+- `npm run smoke` passou: 3 projetos, 1 marca, VideoGo ligado, PTY cancelado conforme cenário.
+- QA Chromium no preview compilado: projeto VideoGo de teste, edição/salvamento do texto, botões Aprovar/Gerar bloqueados sem cofre/voz, Preferências com instruções de API/clonagem; viewport 390×844 com `scrollWidth=390`, erros de console/renderer vazios.
+- VideoGo: `npm run typecheck`, `npm test` (49 core + 20 flicker), `npm run test:external-audio` e `npm run build` passaram. E2E confirmou render audível com fixture sintética e `--voice demo` sem duplicação.
+- Não executado: chamada ElevenLabs paga ou clonagem real; escuta humana de voz Eleven v4; testes Electron nativos Windows/macOS.

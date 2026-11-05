@@ -20,12 +20,18 @@ npm run dist:mac      # dmg + zip; build, open, and verify permissions on macOS
 ```
 
 The current verified Linux artifacts are:
-- `release/Máquina de Conteúdo (Studio)-0.1.0.AppImage`
-- `release/maquina-de-conteudo_0.1.0_amd64.deb`
+- `release/maquina-de-conteudo-0.1.1-x86_64.AppImage` — 122,062,829 bytes; launched from FUSE in a disposable profile/workspace.
+- `release/maquina-de-conteudo-0.1.1-amd64.deb` — 92,381,148 bytes; `dpkg-deb --field` reports package `maquina-de-conteudo`, version `0.1.1`, architecture `amd64`; not installed with apt.
 
-The AppImage is executable and launches directly; the deb metadata can be checked with `dpkg-deb --info`.
+The public `v0.1.1` release also provides a Windows x64 NSIS installer and macOS arm64 DMG/ZIP. Windows/macOS native installation and user flows remain unverified. The public updater manifests match the published artifact names; signatures/notarization were not validated. AppImage supports user-confirmed in-app updates; `.deb` updates through the system package manager.
 
-Windows and macOS packages require native-host build and runtime checks. A Linux build is not evidence that native installers, PTY, filesystem dialogs, authentication, or signing work on those systems. The GitHub-tag release workflow is defined in `DEV/RUNBOOKS/RELEASES.md`; it does not sign/notarize binaries. AppImage supports automatic updates on Linux, while `.deb` updates through the system package manager.
+## Automated suite and prerequisites
+
+- `npm test` atualmente executa sete testes Node, incluindo proteção da chave ElevenLabs e bloqueio de TTS até aprovação explícita; não usa API key real nem faz chamada paga.
+- Testes de runtime usam `ffmpeg` para criar fixture PNG e criam symlink. Instale FFmpeg no host; Windows também precisa permitir symlink (Developer Mode ou privilégios adequados).
+- `npm run smoke` cria e remove uma raiz de dados/workspace temporária. Exercita criação de marca e projetos, derivação de imagem/vídeo com FFmpeg, manifesto de exportação, preflight de motores, entrada/redimensionamento/cancelamento de PTY e eventos.
+- Os caminhos aceitam `MDC_SMOKE_POSTNOW`, `MDC_SMOKE_VIDEOGO` e `MDC_SMOKE_MAESTRO`. PostNow e VideoGo mantêm os defaults de diretórios irmãos; Maestro tem default Linux `/usr/local/lib/node_modules/@iapro/orquestrador-maestro-cli` apenas no Linux. Windows/macOS precisam de `MDC_SMOKE_MAESTRO`; smoke nativo ainda não foi executado.
+- Latest command outcomes and artifact sizes: [`VERIFY.md`](VERIFY.md). User installation steps and the platform status matrix: [`../README.md`](../README.md).
 
 ## Release and update contract
 
@@ -33,8 +39,8 @@ Windows and macOS packages require native-host build and runtime checks. A Linux
 - Pushing a matching tag starts `.github/workflows/release.yml`. Three native builds must succeed before GitHub creates the stable release with installers and updater metadata.
 - Packaged UI flow: check for update, review offered version, explicitly confirm download/install, then restart. The fixed feed is `FernandoBolzan/maquina-de-conteudo-studio`; no environment variable is required.
 - Do not publish a release without electron-updater `latest*.yml` metadata. Do not overwrite published tags; recovery is a higher SemVer version.
-- No release has been published or tag pushed by local validation.
-## User-flow smoke
+- A release pública `v0.1.1` foi publicada após a Actions run `42045235690`; três builds nativos e uploads concluíram. Os manifests públicos correspondem aos nomes dos assets. Runtime/instalação Windows/macOS permanecem por validar nativamente; histórico de runs está em [`VERIFY.md`](VERIFY.md).
+## Manual user-flow checks
 
 - Launch the Electron window and inspect navigation, project creation, and brand creation in a disposable workspace.
 - Render a carousel using a healthy PostNow environment; verify 1080x1350 output and slide previews.

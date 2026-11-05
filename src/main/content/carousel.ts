@@ -166,6 +166,20 @@ for idx, page in enumerate(pages):
     print(f"RENDERED:{out_file}")
 `;
 
+export async function postnowRuntimeStatus(services: Services): Promise<{ pythonVersion?: string; pillowVersion?: string }> {
+  try {
+    const python = await findPillowPython(services);
+    const env = await toolEnvironment(services);
+    const [versionResult, pillowResult] = await Promise.all([
+      services.capture(python, ['--version'], { cwd: services.dataDir, env, timeoutMs: 15000 }),
+      services.capture(python, ['-c', 'import PIL; print(PIL.__version__)'], { cwd: services.dataDir, env, timeoutMs: 15000 }),
+    ]);
+    const pythonVersion = (versionResult.stdout + '\n' + versionResult.stderr).match(/\b(\d+\.\d+(?:\.\d+)?)/)?.[1];
+    const pillowVersion = pillowResult.code === 0 ? pillowResult.stdout.trim().match(/^\d+(?:\.\d+){1,3}(?:[-+][\w.-]+)?$/)?.[0] : undefined;
+    return { pythonVersion, pillowVersion };
+  } catch { return {}; }
+}
+
 async function findPillowPython(services: Services): Promise<string> {
   const postnowRoot = services.getSettings().enginePaths.postnow;
   if (postnowRoot) {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BookOpen, CheckCircle2, ChevronRight, CloudDownload, ExternalLink, FolderOpen, KeyRound, Link2, PackagePlus, RefreshCw, RotateCcw, ShieldAlert, Wrench } from 'lucide-react';
-import type { CliId, CliOperationResult, CliUpdateStatus, EngineId, EngineStatus, Job, Provider, Settings, SetupStatus, ToolStatus } from '../shared/contracts';
+import { AudioLines, BookOpen, CheckCircle2, ChevronRight, CloudDownload, ExternalLink, FolderOpen, KeyRound, Link2, Mic2, PackagePlus, Play, RefreshCw, RotateCcw, ShieldAlert, Trash2, Wrench } from 'lucide-react';
+import type { CliId, CliOperationResult, CliUpdateStatus, ElevenLabsVoice, EngineId, EngineStatus, Job, Provider, Settings, SetupStatus, ToolStatus } from '../shared/contracts';
 import { ErrorNotice, ExternalLabel, Loading, PageHeading } from './components';
 import { errorMessage, invoke, type ScreenProps } from './state';
 
@@ -71,6 +71,15 @@ export function Setup({ snapshot, run, busy, confirm, openJob, refresh, onGoProj
     const job = await run(`install-${tool.id}`, () => invoke<Job>('setup.install', { tool: tool.id, confirm: true }), `${tool.name} instalado.`);
     if (job) openJob(job);
     await load(); await refresh();
+  }
+  async function testEngine(engine: EngineStatus) {
+    const title = engineLabels[engine.id].title;
+    if (!await confirm(`Testar ${title}`, 'O Studio vai executar uma verificação local em uma pasta temporária isolada e apagá-la ao terminar. VideoGo e PostNow renderizam um arquivo de teste; Maestro apenas verifica a montagem de contexto, sem chamar IA.', 'Executar teste local')) return;
+    await run(`engine-${engine.id}-test`, async () => {
+      const result = await invoke<{ message: string }>('setup.engineTest', { engine: engine.id, confirm: true });
+      await load();
+      return result;
+    }, `${title}: teste local concluído.`);
   }
   async function manage(engine: EngineStatus, operation: 'install' | 'update' | 'rollback') {
     const label = operation === 'install' ? 'Instalar' : operation === 'update' ? 'Atualizar' : 'Restaurar versão anterior de';
@@ -183,8 +192,16 @@ export function Setup({ snapshot, run, busy, confirm, openJob, refresh, onGoProj
               <div className="setup-card-head"><div><strong>{meta.title}</strong><small className="mono-note">{engine.version ? `v${engine.version}` : 'Não instalado'}</small></div><span className={`status-pill ${engine.installed ? 'ok' : 'warn'}`}>{engine.installed ? 'Pronto' : 'Opcional'}</span></div>
               <p>{meta.role}</p><p className="field-help">{meta.access}</p>
               {engine.path && <p className="mono-path" title={engine.path}>{engine.path}</p>}
+              <ul className="engine-dependencies" aria-label={`Dependências de ${meta.title}`}>
+                {engine.dependencies.map(dependency => <li key={dependency.id}>
+                  <span className={`status-pill ${dependency.installed ? 'ok' : 'warn'}`}>{dependency.installed ? 'Pronto' : 'Atenção'}</span>
+                  <span><strong>{dependency.name}</strong><small>{dependency.required}{dependency.version ? ` · ${dependency.version}` : ''}. {dependency.guidance}</small></span>
+                  {!dependency.installed && status.tools.find(tool => tool.id === dependency.id) && <button type="button" className="button small ghost" disabled={busy.has(`install-${dependency.id}`)} onClick={() => { const tool = status.tools.find(item => item.id === dependency.id); if (tool) void install(tool); }}>Instalar</button>}
+                </li>)}
+              </ul>
               <div className="card-actions">
                 {!engine.installed ? <button type="button" className="button small primary" disabled={busy.has(`engine-${engine.id}-install`)} onClick={() => { void manage(engine, 'install'); }}><CloudDownload size={14} />Instalar motor</button> : <button type="button" className="button small" disabled={busy.has(`engine-${engine.id}-update`)} onClick={() => { void manage(engine, 'update'); }}><RefreshCw size={14} />Atualizar</button>}
+                <button type="button" className="button small primary" disabled={!engine.installed || engine.dependencies.some(dependency => !dependency.installed) || busy.has(`engine-${engine.id}-test`)} onClick={() => { void testEngine(engine); }}><Play size={14} />Testar localmente</button>
                 <button type="button" className="button small" disabled={busy.has(`link-${engine.id}`)} onClick={() => { void link(engine); }}><Link2 size={14} />Vincular pasta</button>
                 <button type="button" className="button small" disabled={!engine.installed || busy.has(`engine-${engine.id}-rollback`)} onClick={() => { void manage(engine, 'rollback'); }}><RotateCcw size={14} />Reverter versão</button>
                 <button type="button" className="button small ghost" onClick={() => { void invoke('app.external', { url: engine.repository }); }}><ExternalLabel>Repositório</ExternalLabel></button>
@@ -195,7 +212,7 @@ export function Setup({ snapshot, run, busy, confirm, openJob, refresh, onGoProj
       </section>
 
       <section className="setup-section">
-        <div className="section-heading"><div><h2>Ferramentas necessárias no computador ({status.platform})</h2><p className="field-help">Node.js, Python, FFmpeg e Git são dependências técnicas. O Studio avisa quando alguma faltar e pede confirmação antes de instalar.</p></div></div>
+        <div className="section-heading"><div><h2>Ferramentas necessárias no computador ({status.platform})</h2><p className="field-help">Node.js, Python, FFmpeg, FFprobe e Git são dependências técnicas. O Studio avisa quando alguma faltar e pede confirmação antes de instalar.</p></div></div>
         <div className="tool-list">
           {status.tools.filter(tool => tool.id !== 'codex' && tool.id !== 'claude').map(tool => (
             <div className="tool-row" key={tool.id}>
@@ -212,11 +229,72 @@ export function Setup({ snapshot, run, busy, confirm, openJob, refresh, onGoProj
   </>;
 }
 
+function storedUpdateCheck(): string {
+  try { return window.localStorage.getItem('maquina-studio.update-check-at') ?? ''; } catch { return ''; }
+}
+
 export function Preferences({ snapshot, run, refresh, busy, confirm }: ScreenProps) {
   const [provider, setProvider] = useState<Provider>(snapshot.settings.provider);
   const [updateNote, setUpdateNote] = useState('');
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [lastUpdateCheck, setLastUpdateCheck] = useState(storedUpdateCheck);
+  const [elevenKey, setElevenKey] = useState('');
+  const [elevenError, setElevenError] = useState('');
+  const [voices, setVoices] = useState<ElevenLabsVoice[]>([]);
+  const [voiceName, setVoiceName] = useState('');
+  const [speakerAuthorized, setSpeakerAuthorized] = useState(false);
+  const elevenLabs = snapshot.integrations.elevenLabs;
 
+  const loadVoices = useCallback(async () => {
+    setElevenError('');
+    try { setVoices(await invoke<ElevenLabsVoice[]>('elevenlabs.voices')); }
+    catch (error) { setElevenError(errorMessage(error)); }
+  }, []);
+  useEffect(() => {
+    if (elevenLabs.configured) void loadVoices();
+    else setVoices([]);
+  }, [elevenLabs.configured, loadVoices]);
+
+
+  async function saveElevenLabsKey() {
+    const key = elevenKey;
+    if (!key.trim()) return;
+    await run('elevenlabs-save', async () => {
+      await invoke('elevenlabs.configure', { key });
+      setElevenKey('');
+      await refresh();
+      await loadVoices();
+    }, 'API key validada e armazenada no cofre do sistema.');
+  }
+  async function clearElevenLabsKey() {
+    if (!await confirm('Remover a API key ElevenLabs', 'A chave cifrada será apagada do dispositivo. Projetos e áudios já gerados não serão removidos.', 'Remover chave')) return;
+    await run('elevenlabs-clear', async () => {
+      await invoke('elevenlabs.clear');
+      setVoices([]);
+      setElevenKey('');
+      await refresh();
+    }, 'API key removida.');
+  }
+  async function cloneVoice() {
+    if (!speakerAuthorized) { setElevenError('Confirme que a voz é sua ou que você tem autorização explícita.'); return; }
+    if (!voiceName.trim()) { setElevenError('Informe um nome para a voz clonada.'); return; }
+    const samplePath = await invoke<string | undefined>('app.pick', { extensions: ['wav', 'mp3', 'm4a', 'flac', 'ogg'] });
+    if (!samplePath) return;
+    if (!await confirm('Enviar amostra para clonagem', 'A amostra será enviada à ElevenLabs para criar um clone instantâneo. Só prossiga se a voz for sua ou se você tiver autorização explícita; a operação pode consumir créditos. A amostra não será guardada pelo Studio.', 'Enviar e criar clone')) return;
+    await run('elevenlabs-clone', async () => {
+      await invoke('elevenlabs.clone', { name: voiceName.trim(), samplePath, speakerAuthorized: true, confirm: true });
+      setVoiceName('');
+      setSpeakerAuthorized(false);
+      await loadVoices();
+    }, 'Voz clonada adicionada à biblioteca da conta.');
+  }
+  async function deleteClone(voice: ElevenLabsVoice) {
+    if (!await confirm(`Excluir o clone “${voice.name}”`, 'A voz será removida permanentemente da conta ElevenLabs. Áudios já gerados no projeto permanecem locais.', 'Excluir clone')) return;
+    await run(`elevenlabs-delete-${voice.id}`, async () => {
+      await invoke('elevenlabs.deleteClone', { voiceId: voice.id, confirm: true });
+      await loadVoices();
+    }, 'Clone removido da ElevenLabs.');
+  }
   async function pickWorkspace() {
     const picked = await invoke<string | undefined>('app.pick', { directory: true });
     if (!picked) return;
@@ -236,8 +314,11 @@ export function Preferences({ snapshot, run, refresh, busy, confirm }: ScreenPro
   async function checkUpdates() {
     await run('update-check', async () => {
       const result = await invoke<{ available: boolean; version?: string; message: string }>('app.updateCheck');
+      const checkedAt = new Date().toISOString();
       setUpdateAvailable(result.available);
       setUpdateNote(result.message + (result.version ? ` (${result.version})` : ''));
+      setLastUpdateCheck(checkedAt);
+      try { window.localStorage.setItem('maquina-studio.update-check-at', checkedAt); } catch { /* Show this session's result even when local storage is unavailable. */ }
     });
   }
   async function installUpdate() {
@@ -249,7 +330,7 @@ export function Preferences({ snapshot, run, refresh, busy, confirm }: ScreenPro
   }
 
   return <>
-    <PageHeading eyebrow="PREFERÊNCIAS DO ESTÚDIO" title="Preferências" description="Defina onde seus projetos ficam salvos, qual agente abre por padrão e consulte atualizações do aplicativo." />
+    <PageHeading eyebrow="PREFERÊNCIAS DO ESTÚDIO" title="Preferências" description="Configure VideoGo/ElevenLabs, defina onde seus projetos ficam salvos e consulte atualizações do aplicativo." />
     <div className="setup-stack">
       <section className="setup-card">
         <div className="setup-card-head"><strong>Workspace de projetos e marcas</strong><span className="status-pill ok">Local</span></div>
@@ -259,6 +340,42 @@ export function Preferences({ snapshot, run, refresh, busy, confirm }: ScreenPro
           <button className="button small" disabled={busy.has('save-workspace')} onClick={() => { void pickWorkspace(); }}><FolderOpen size={14} />Escolher outra pasta</button>
           <button className="button small" onClick={() => { void run('open-workspace', () => invoke('app.open', { path: snapshot.settings.workspace })); }}><ExternalLink size={14} />Abrir no sistema</button>
         </div>
+      </section>
+      <section className="setup-card elevenlabs-card">
+        <div className="setup-card-head">
+          <strong><AudioLines size={16} />ElevenLabs para VideoGo</strong>
+          <span className={`status-pill ${elevenLabs.configured ? 'ok' : 'warn'}`}>{elevenLabs.configured ? 'Conectado' : 'Não configurado'}</span>
+        </div>
+        <p>VideoGo gera narração com Eleven v4 apenas após a aprovação do roteiro. A key é validada pelo processo principal e cifrada com o cofre do sistema; não aparece nas preferências públicas.</p>
+        {!elevenLabs.secureStorageAvailable && <p className="warning-text" role="alert">O cofre seguro do sistema não está disponível. No Linux, configure um keyring (Secret Service/KWallet); o Studio não salva a key em texto puro.</p>}
+        {elevenLabs.error && <p className="warning-text" role="alert">{elevenLabs.error}</p>}
+        <div className="elevenlabs-instructions">
+          <p>Crie a API key em ElevenLabs → Settings → API Keys. Habilite acesso para listar vozes, Text to Speech e gerenciamento de vozes. Confirme créditos e elegibilidade de clonagem na sua conta; os escopos disponíveis variam por conta.</p>
+          <div className="card-actions">
+            <button type="button" className="button small ghost" onClick={() => { void invoke('app.external', { url: 'https://elevenlabs.io/app/settings/api-keys' }); }}><ExternalLink size={14} />Criar API key</button>
+            <button type="button" className="button small ghost" onClick={() => { void invoke('app.external', { url: 'https://elevenlabs.io/docs/eleven-api/guides/how-to/voices/instant-voice-cloning' }); }}><ExternalLink size={14} />Guia oficial de clonagem</button>
+          </div>
+        </div>
+        <label htmlFor="elevenlabs-api-key">API key
+          <input id="elevenlabs-api-key" type="password" value={elevenKey} autoComplete="new-password" spellCheck={false} onChange={event => setElevenKey(event.target.value)} placeholder={elevenLabs.configured ? '•••••••••••••••••••• (já configurada)' : 'Cole a API key da ElevenLabs'} />
+        </label>
+        <div className="card-actions">
+          <button type="button" className="button small primary" disabled={!elevenKey.trim() || !elevenLabs.secureStorageAvailable || busy.has('elevenlabs-save')} onClick={() => { void saveElevenLabsKey(); }}><KeyRound size={14} />Validar e guardar</button>
+          {elevenLabs.configured && <button type="button" className="button small" disabled={busy.has('elevenlabs-clear')} onClick={() => { void clearElevenLabsKey(); }}><Trash2 size={14} />Remover API key</button>}
+          {elevenLabs.configured && <button type="button" className="button small" disabled={busy.has('elevenlabs-voices')} onClick={() => { void run('elevenlabs-voices', loadVoices, 'Biblioteca de vozes atualizada.'); }}><RefreshCw size={14} />Atualizar vozes</button>}
+        </div>
+        {elevenLabs.configured && <p className="field-help">A key fica no processo principal e é encaminhada apenas à chamada autorizada do VideoGo; não é gravada nos argumentos nem no histórico do job.</p>}
+        {elevenError && <p className="warning-text" role="status">{elevenError}</p>}
+        {elevenLabs.configured && <div className="voice-library">
+          <div className="section-heading"><h3><Mic2 size={15} />Vozes da conta ({voices.length})</h3><span className="field-help">Selecione a voz no projeto. Clones podem exigir créditos.</span></div>
+          {voices.length ? <ul>{voices.map(voice => <li key={voice.id}><span><strong>{voice.name}</strong><small>{voice.category}{voice.language ? ` · ${voice.language}` : ''}</small></span>{voice.isClone && <button type="button" className="button small ghost" disabled={busy.has(`elevenlabs-delete-${voice.id}`)} onClick={() => { void deleteClone(voice); }}><Trash2 size={13} />Excluir clone</button>}</li>)}</ul> : <p className="field-help">Nenhuma voz retornada. Atualize a lista ou confira as permissões da key.</p>}
+          <label>Nome do novo clone
+            <input value={voiceName} maxLength={100} onChange={event => setVoiceName(event.target.value)} placeholder="Ex.: Minha voz narradora" />
+          </label>
+          <label className="consent-check"><input type="checkbox" checked={speakerAuthorized} onChange={event => setSpeakerAuthorized(event.target.checked)} />Confirmo que esta é minha voz ou que tenho autorização explícita para gravar, clonar e gerar fala.</label>
+          <button type="button" className="button small" disabled={!elevenLabs.configured || !speakerAuthorized || !voiceName.trim() || busy.has('elevenlabs-clone')} onClick={() => { void cloneVoice(); }}><Mic2 size={14} />Escolher amostra e clonar voz</button>
+          <p className="field-help">Use gravação limpa, uma pessoa e sem música/ruído. A amostra é enviada à ElevenLabs e não fica armazenada pelo Studio.</p>
+        </div>}
       </section>
 
       <section className="setup-card">
@@ -273,8 +390,9 @@ export function Preferences({ snapshot, run, refresh, busy, confirm }: ScreenPro
       </section>
 
       <section className="setup-card">
-        <div className="setup-card-head"><strong>Atualização do aplicativo desktop</strong><span className="mono-note">v{snapshot.version}</span></div>
-        <p>{updateNote || 'Verifique se há uma nova versão publicada no canal configurado pelo mantenedor.'}</p>
+        <div className="setup-card-head"><strong>Atualização do aplicativo desktop</strong><span className={`status-pill ${updateAvailable ? 'warn' : 'ok'}`}>{updateAvailable ? 'Atualização disponível' : `v${snapshot.version}`}</span></div>
+        <p className={updateAvailable ? 'warning-text' : ''} role="status">{updateNote || 'Verifique se há uma nova versão publicada no canal configurado pelo mantenedor.'}</p>
+        <p className="field-help">{lastUpdateCheck ? `Última verificação: ${new Date(lastUpdateCheck).toLocaleString('pt-BR')}` : 'Ainda não foi feita uma verificação nesta instalação.'}</p>
         <div className="card-actions">
           <button className="button small" disabled={busy.has('update-check')} onClick={() => { void checkUpdates(); }}><RefreshCw size={14} />Verificar atualização</button>
           {updateAvailable && <button className="button small primary" disabled={busy.has('update-install')} onClick={() => { void installUpdate(); }}><CloudDownload size={14} />Baixar e instalar</button>}

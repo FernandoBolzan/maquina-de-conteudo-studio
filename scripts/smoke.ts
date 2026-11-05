@@ -7,7 +7,18 @@ import { Runtime } from '../src/main/runtime.js';
 import { capture } from '../src/main/supervisor.js';
 import type { Brand, Project, ProjectDetail, SetupStatus, Snapshot } from '../src/shared/contracts.js';
 
+function smokePath(name: string, fallback?: string): string {
+  const configured = process.env[name]?.trim();
+  if (configured) return resolve(configured);
+  if (fallback) return resolve(fallback);
+  throw new Error(`Defina ${name} com o caminho necessário para executar o smoke.`);
+}
+
 async function main(): Promise<void> {
+  const postnowPath = smokePath('MDC_SMOKE_POSTNOW', '../PostNow');
+  const videogoPath = smokePath('MDC_SMOKE_VIDEOGO', '../VideoGo');
+  const maestroFallback = process.platform === 'linux' ? '/usr/local/lib/node_modules/@iapro/orquestrador-maestro-cli' : undefined;
+  const maestroPath = smokePath('MDC_SMOKE_MAESTRO', maestroFallback);
   const root = await mkdtemp(join(tmpdir(), 'mdc-smoke-'));
   const dataDir = join(root, 'data');
   const workspace = join(root, 'workspace');
@@ -18,6 +29,9 @@ async function main(): Promise<void> {
     const events: string[] = [];
     runtime = new Runtime(dataDir, {
       assetPrefix: 'media://asset/',
+      secureStorageAvailable: () => false,
+      encryptSecret: () => { throw new Error('Secure storage unavailable in smoke tests.'); },
+      decryptSecret: () => { throw new Error('Secure storage unavailable in smoke tests.'); },
       pickFile: async () => undefined,
       openPath: async () => undefined,
       openExternal: async () => undefined,
@@ -107,14 +121,11 @@ async function main(): Promise<void> {
     assert.ok(derivedImageDetail.assets.some(a => a.kind === 'image' && a.name.endsWith('.png')), 'Quadro PNG extraído deve existir');
 
     // Unprepared PostNow checkout without .venv/Pillow must be rejected by health check
-    const postnowSibling = resolve(process.cwd(), '../PostNow');
-    await assert.rejects(() => runtime!.invoke('setup.link', { engine: 'postnow', path: postnowSibling, confirm: true }), /PostNow falhou no diagnóstico/);
+    await assert.rejects(() => runtime!.invoke('setup.link', { engine: 'postnow', path: postnowPath, confirm: true }), /PostNow falhou no diagnóstico/);
 
     // Link built VideoGo and Orquestrador Maestro installations and verify health checks pass
-    const videogoSibling = resolve(process.cwd(), '../VideoGo');
-    await runtime.invoke('setup.link', { engine: 'videogo', path: videogoSibling, confirm: true });
-    const maestroGlobal = '/usr/local/lib/node_modules/@iapro/orquestrador-maestro-cli';
-    await runtime.invoke('setup.link', { engine: 'maestro', path: maestroGlobal, confirm: true });
+    await runtime.invoke('setup.link', { engine: 'videogo', path: videogoPath, confirm: true });
+    await runtime.invoke('setup.link', { engine: 'maestro', path: maestroPath, confirm: true });
 
     // Exercise interactive PTY job, resize, input, and cancellation
     const interactiveJob = await runtime.services.run({

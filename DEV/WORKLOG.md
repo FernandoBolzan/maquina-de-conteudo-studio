@@ -1,10 +1,44 @@
 # Worklog — Máquina de Conteúdo
 
+
+## 2026-11-05 — Fluxo Studio ElevenLabs v4 e narração aprovada
+- Spec: `DEV/SPECS/ACTIVE.md`
+- Changed: `src/main/elevenlabs.ts`, `src/main/runtime.ts`, `src/main/projects.ts`, `src/renderer/Setup.tsx`, `src/renderer/Studio.tsx`, contratos, testes e instruções de uso.
+- Reason: Configurar key cifrada, escolher/clonar voz e gerar áudio por cena somente após aprovação hash-bound da narração; cada clipe também requer aprovação antes do render final.
+- Verified: typecheck, lint, 7/7 testes, smoke, build; teste offline de segredo e bloqueio pré-aprovação; Chromium preview em 390 px sem overflow e sem erros. VideoGo: typecheck, core 49/49, flicker 20/20, E2E de áudio externo e build.
+- Limits: nenhuma API paga ou clonagem real; no preview sem cofre, key e voz permanecem indisponíveis. Correção do mantenedor em `listVoices`/`cloneVoice` do VideoGo não foi tocada.
+## 2026-11-05 — QA final Linux e release v0.1.1
+
+- Spec: `DEV/SPECS/ACTIVE.md`
+- Changed: `package.json`, `package-lock.json`, workflow de release, smoke configurável e documentação de uso/verificação em `README.md`/`DEV/**`.
+- Published: release pública `v0.1.1`; Actions run `42045235690` concluiu build e publicação Linux, Windows e macOS. Feeds públicos e nomes dos assets foram conferidos.
+- Reason: alinhar `artifactName` aos manifests do updater e documentar somente o que foi comprovado por plataforma.
+- Verified: typecheck, lint, 7/7 testes, smoke Linux default/overrides, build, `dist:linux` e `check-dev-gates --strict` (12 entradas; aviso de recorrência registrado em `DEV/VERIFY.md`); AppImage abriu em workspace isolado, projeto VideoGo e bloqueios de narração sem key/voz verificados. Preferências bloqueou salvar key sem cofre do sistema. Consulta do updater informou versão atual; console/renderer errors vazios.
+- Limits: `.deb` não instalado com apt; Windows/macOS nativos, assinatura/notarização e macOS Intel não validados. Sem key, clone ou geração ElevenLabs paga. Update entre versões distintas não exercitado.
+- Next context: `v0.1.1` pública; manifests e nomes alinhados. Próxima lacuna: instalação/fluxos em hosts nativos; não republicar sem necessidade/autorização.
+
+
+## 2026-11-05 — Diagnóstico e testes locais dos motores
+- Spec: `DEV/SPECS/ACTIVE.md`
+- Changed: dependências tipadas/diagnóstico e receitas FFprobe, testes consentidos em diretório temporário, aviso/data de atualização, UI responsiva e README; fixtures ajustadas ao contrato de armazenamento seguro já presente no worktree.
+- Reason: Explicar o que cada motor precisa, permitir verificar o render sem tocar projetos do usuário e tornar o estado de atualização visível sem interromper a criação.
+- Verified: typecheck, test (6/6), smoke e build; lint focado nos arquivos deste recurso. Preview Chromium validado em 390/768/1280/1440 sem overflow, botões sem nome ou erros novos. VideoGo produziu MP4 local com `--voice demo`; Maestro montou contexto sem chamar IA; aviso de update disponível foi exercitado com resposta IPC simulada.
+- Limits: `npm run lint` ainda falha em três símbolos não usados de `src/main/projects.ts` (`NarrationState`, `listElevenLabsVoices`, `narrationState`), código de narração em evolução fora deste escopo. PostNow foi diagnosticado sem Pillow no ambiente selecionado, portanto o render smoke não foi executado; nenhum pacote/dep foi instalado. Update remoto não disponível no preview.
+- Next context: Instalar/vincular PostNow com Pillow para exercitar render; resolver lint da integração de narração antes de considerar a qualidade global concluída.
+
+## 2026-11-05 — Documentação final, smoke configurável e estado real de release
+- Spec: `DEV/SPECS/ACTIVE.md`
+- Changed: `README.md`, `scripts/smoke.ts`, `src/main/setup.ts`, `src/main/setup/engines.ts`, documentação de testes, verificação, handoff e release.
+- Reason: Documentar o uso/build Linux sem prometer compatibilidade não testada; tornar os paths do smoke configuráveis e registrar a evidência real dos builds nativos no GitHub Actions.
+- Verified: typecheck, lint, `npm test` (6/6), smoke com defaults Linux e com overrides, build, `dist:linux`; AppImage atual abriu e o `.deb` apresenta metadados corretos.
+- Release/platform status: Actions run `42040288628` construiu os três alvos para `v0.1.0`, mas nenhum upload foi salvo por nomes com `:`. A correção está na `main`; ainda não há release. O dispatch manual publica e não foi executado; Windows/macOS runtime permanece não testado.
+- Next context: Para distribuir o worktree atual, autorização para nova versão/tag/publicação é necessária; depois instalar e exercitar os pacotes em hosts nativos Windows/macOS.
+
 ## 2026-11-05 — Primeira publicação GitHub e recuperação do release workflow
 - Changed: `.gitignore`, `.github/workflows/release.yml`, `DEV/RUNBOOKS/RELEASES.md`
 - Published: commit `80cc1e5` em `main`; tag anotada `v0.1.0` enviada ao GitHub.
 - Verified: typecheck, lint, tests (5/5), smoke, build, pack e workflow YAML válidos; os três builds nativos do Actions passaram, mas upload-artifact falhou porque `release-dist:linux/mac/windows` continha `:`.
-- Next context: corrigir nomes de artefato, disparar workflow manual em `main` para a tag existente, verificar assets e release.
+- Next context: nomes corrigidos na `main`; a execução manual compila a tag e publica. Não há assets/release; não executar sem autorização. Para o worktree atual será necessária versão/tag superior.
 
 ## 2026-11-05 — Auditoria final do pacote Linux e alvos nativos
 - Spec: DEV/SPECS/ACTIVE.md
