@@ -51,7 +51,9 @@ jobs:
             release/*.exe
             release/*.dmg
             release/*.zip
-            release/*.yml
+            release/latest.yml
+            release/latest-linux.yml
+            release/latest-mac.yml
             release/*.blockmap
           if-no-files-found: error
           retention-days: 2

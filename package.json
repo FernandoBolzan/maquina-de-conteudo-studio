@@ -1,6 +1,6 @@
 {
   "name": "maquina-de-conteudo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Estúdio local de criação de conteúdo com Codex e Claude Code",
@@ -48,6 +48,7 @@
   "build": {
     "appId": "com.maquinadeconteudo.studio",
     "productName": "Máquina de Conteúdo (Studio)",
+    "artifactName": "${name}-${version}-${arch}.${ext}",
     "publish": [
       {
         "provider": "github",
