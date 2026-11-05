@@ -10,10 +10,10 @@
 ## 2026-11-05 — QA final Linux e release v0.1.1
 
 - Spec: `DEV/SPECS/ACTIVE.md`
-- Changed: `package.json`, `package-lock.json`, workflow de release, smoke configurável e documentação de uso/verificação em `README.md`/`DEV/**`.
+- Changed: `package.json`, `package-lock.json`, workflow de release, smoke configurável e README com guia completo, links diretos v0.1.1, instalação, motores, segurança e status por plataforma; documentação operacional em `DEV/**`.
 - Published: release pública `v0.1.1`; Actions run `42045235690` concluiu build e publicação Linux, Windows e macOS. Feeds públicos e nomes dos assets foram conferidos.
-- Reason: alinhar `artifactName` aos manifests do updater e documentar somente o que foi comprovado por plataforma.
-- Verified: typecheck, lint, 7/7 testes, smoke Linux default/overrides, build, `dist:linux` e `check-dev-gates --strict` (12 entradas; aviso de recorrência registrado em `DEV/VERIFY.md`); AppImage abriu em workspace isolado, projeto VideoGo e bloqueios de narração sem key/voz verificados. Preferências bloqueou salvar key sem cofre do sistema. Consulta do updater informou versão atual; console/renderer errors vazios.
+- Reason: alinhar `artifactName` aos manifests do updater e oferecer uma página inicial completa com downloads versionados, uso e limites sustentados por evidência.
+- Verified: typecheck, lint, 7/7 testes, smoke Linux default/overrides, build, `dist:linux` e `check-dev-gates --strict` (12 entradas; aviso de recorrência em `DEV/VERIFY.md`); AppImage abriu em workspace isolado, projeto VideoGo e bloqueios de narração sem key/voz verificados. Links do README conferidos com os assets e manifests públicos v0.1.1; instrução de desenvolvimento conferida com `MDC_DEV_URL`. Console/renderer errors vazios.
 - Limits: `.deb` não instalado com apt; Windows/macOS nativos, assinatura/notarização e macOS Intel não validados. Sem key, clone ou geração ElevenLabs paga. Update entre versões distintas não exercitado.
 - Next context: `v0.1.1` pública; manifests e nomes alinhados. Próxima lacuna: instalação/fluxos em hosts nativos; não republicar sem necessidade/autorização.
 

@@ -1,10 +1,10 @@
 # Handoff — Máquina de Conteúdo (Studio)
 
 - Updated: 2026-11-05
-- Entry: integração Studio ↔ VideoGo/ElevenLabs v4, clonagem consentida e aprovação hash-bound de áudio; configuração de voz está em Motores & Setup.
+- Entry: integração Studio ↔ VideoGo/ElevenLabs v4, clonagem consentida e aprovação hash-bound de áudio; README completo com downloads versionados e limites por plataforma.
 - Spec: `DEV/SPECS/ACTIVE.md`
 - Changed: `src/main/elevenlabs.ts`, `src/main/runtime.ts`, `src/main/projects.ts`, `src/shared/contracts.ts`, `src/renderer/Setup.tsx`, `src/renderer/VideoGoVoiceSetup.tsx`, `src/renderer/Studio.tsx`, testes, README e `DEV/**`; prompt completo em `DEV/WORKFLOWS/PROMPT-ADAPTACAO-ELEVENLABS-VIDEOGO.md`.
-- Verified: Studio typecheck, lint, 7/7 tests, smoke, build e Chromium preview: configuração em Motores & Setup, removida de Preferências; viewport 390 px sem overflow ou erros. VideoGo typecheck, 49/49 core, 20/20 flicker, E2E áudio externo e build passaram anteriormente. Nenhuma chamada paga ou clonagem real.
+- Verified: Studio typecheck, lint, 7/7 testes, smoke, build e Chromium preview; configuração em Motores & Setup, removida de Preferências; viewport 390 px sem overflow ou erros. README links v0.1.1 conferidos com assets/manifests públicos; desenvolvimento validado com `MDC_DEV_URL`. VideoGo typecheck, 49/49 core, 20/20 flicker, E2E áudio externo e build passaram anteriormente. Nenhuma chamada paga ou clonagem real.
 
 
 ## Snapshot

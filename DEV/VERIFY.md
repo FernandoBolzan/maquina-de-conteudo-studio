@@ -22,6 +22,7 @@
 - PostNow: UI detectou Python 3.12.3 e ausência de Pillow no ambiente selecionado; render não executado e dependência não instalada.
 - UI Chromium: Setup e Preferências verificados em 390/768/1280/1440 px; zero overflow horizontal, zero botões sem nome e zero erros novos. Estado de atualização disponível testado anteriormente com IPC simulado, sem baixar pacote.
 - `orquestrador-maestro check-dev-gates --project-path . --strict`: passou com 12 entradas. Avisou hotspots no histórico (`package.json` 5; workflow release, `DEV/**` e README 3 cada; `src/main/electron.ts` 3). O worklog mostra mudanças distintas de versão/dependências, correções do workflow, atualizações documentais e recursos do Electron; não demonstra uma causa técnica única. `check-recurrence --write` não estava disponível no PATH (exit 127); nenhum patch de código foi feito por esse aviso.
+- README: links diretos da v0.1.1 conferidos com a lista pública de assets e `latest-linux.yml`, `latest.yml`, `latest-mac.yml`; comandos de desenvolvimento conferidos com `MDC_DEV_URL` em `src/main/electron.ts`.
 
 ## Validação local prévia à publicação
 
