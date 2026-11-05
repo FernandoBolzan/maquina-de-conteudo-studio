@@ -1,10 +1,10 @@
 # Handoff — Máquina de Conteúdo (Studio)
 
 - Updated: 2026-11-05
-- Entry: integração Studio ↔ VideoGo/ElevenLabs v4, clonagem consentida e aprovação hash-bound de áudio.
+- Entry: integração Studio ↔ VideoGo/ElevenLabs v4, clonagem consentida e aprovação hash-bound de áudio; configuração de voz está em Motores & Setup.
 - Spec: `DEV/SPECS/ACTIVE.md`
-- Changed: `src/main/elevenlabs.ts`, `src/main/runtime.ts`, `src/main/projects.ts`, `src/shared/contracts.ts`, `src/renderer/Setup.tsx`, `src/renderer/Studio.tsx`, testes, README e `DEV/**`; prompt completo em `DEV/WORKFLOWS/PROMPT-ADAPTACAO-ELEVENLABS-VIDEOGO.md`.
-- Verified: Studio typecheck, lint, 7/7 testes, smoke, build e Chromium preview mobile sem overflow; VideoGo typecheck, 49/49 core, 20/20 flicker, E2E áudio externo e build. Nenhuma chamada paga ou clonagem real.
+- Changed: `src/main/elevenlabs.ts`, `src/main/runtime.ts`, `src/main/projects.ts`, `src/shared/contracts.ts`, `src/renderer/Setup.tsx`, `src/renderer/VideoGoVoiceSetup.tsx`, `src/renderer/Studio.tsx`, testes, README e `DEV/**`; prompt completo em `DEV/WORKFLOWS/PROMPT-ADAPTACAO-ELEVENLABS-VIDEOGO.md`.
+- Verified: Studio typecheck, lint, 7/7 tests, smoke, build e Chromium preview: configuração em Motores & Setup, removida de Preferências; viewport 390 px sem overflow ou erros. VideoGo typecheck, 49/49 core, 20/20 flicker, E2E áudio externo e build passaram anteriormente. Nenhuma chamada paga ou clonagem real.
 
 
 ## Snapshot
@@ -27,6 +27,7 @@
 - Preferências mantém a data da última consulta e exibe disponibilidade inline; baixar/instalar segue consentido. O teste do estado disponível usou resposta IPC simulada, não feed remoto.
 
 ## Recent Entries
+- 2026-11-05: Setup ElevenLabs movido de Preferências para Motores & Setup, sob a seção de motores de conteúdo; Preferências agora fica restrita ao workspace, agente e atualização.
 
 - 2026-11-05: QA final do AppImage 0.1.1 em workspace descartável; projeto VideoGo e bloqueios de narração sem key/voz observados. Update checker retornou versão atual; sem download.
 - 2026-11-05: typecheck, lint, 7/7 testes, smoke default/overrides, build, `dist:linux` e `check-dev-gates --strict` passaram.

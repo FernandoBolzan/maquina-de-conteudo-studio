@@ -2,8 +2,8 @@
 
 ## State
 
-- App Electron/React integra PostNow, VideoGo, Orquestrador Maestro, marcas, aprovação por hash, exportação e derivação imagem↔vídeo; inclui integração ElevenLabs documentada no README e spec ativa. Release pública v0.1.1 tem AppImage/deb Linux x86_64, NSIS Windows x64 e DMG/ZIP macOS arm64. Localmente, AppImage v0.1.1 abriu em workspace descartável e UI de projeto/narração/Preferências passou; `.deb` metadata verificado sem apt install. Windows/macOS ainda não foram instalados nem testados nativamente.
-- ElevenLabs: `safeStorage` encrypts the local key; preferences manage voice selection/IVC; Studio saves editorial/spoken text per scene, hash-binds approval to text/voice/model, requires explicit confirmation before `eleven_v4` synthesis, and requires individual audio approval before render. The child-only key env and `VIDEOGO_NO_VOICE_CACHE=1` avoid settings/args/log/cache persistence.
+- App Electron/React integra PostNow, VideoGo, Orquestrador Maestro, marcas, aprovação por hash, exportação e derivação imagem↔vídeo; inclui integração ElevenLabs documentada no README e spec ativa. A configuração de voz fica em Motores & Setup, junto ao VideoGo; Preferências mantém workspace, agente e atualização. Release pública v0.1.1 tem AppImage/deb Linux x86_64, NSIS Windows x64 e DMG/ZIP macOS arm64. Localmente, AppImage v0.1.1 abriu em workspace descartável e UI de projeto/narração/Setup passou; `.deb` metadata verificado sem apt install. Windows/macOS ainda não foram instalados nem testados nativamente.
+- ElevenLabs: `safeStorage` encrypts the local key; Motores & Setup gerencia key, vozes e IVC; Studio saves editorial/spoken text per scene, hash-binds approval to text/voice/model, requires explicit confirmation before `eleven_v4` synthesis, and requires individual audio approval before render. The child-only key env and `VIDEOGO_NO_VOICE_CACHE=1` avoid settings/args/log/cache persistence.
 - Verification: Studio typecheck/lint/7 tests/smoke/build and Chromium 390 px visual pass; VideoGo typecheck/49 core + 20 flicker/externalaudio E2E/build pass. No live paid TTS or clone; no native Windows/macOS runtime.
 
 ## Commands

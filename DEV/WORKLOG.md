@@ -87,3 +87,8 @@
 - Changed: package.json, tsconfig.json, tsconfig.main.json, vite.config.ts, eslint.config.js, index.html, src/shared/contracts.ts, src/main/**, src/renderer/**, scripts/smoke.ts, scripts/preview.ts, tests/runtime.test.ts, DEV/**
 - Verified: npm run typecheck && npm run lint && npm test && npm run smoke && npm run build && orquestrador-maestro check-dev-gates --project-path . --strict
 - Next context: Executar npm start no ambiente gráfico ou empacotar releases com dist:linux / dist:windows
+
+## 2026-11-05 — Setup de voz no lugar do motor
+- Changed: `src/renderer/VideoGoVoiceSetup.tsx`, `src/renderer/Setup.tsx`, README e `DEV/**`
+- Reason: Colocar chave, biblioteca/clonagem e instruções ElevenLabs em Motores & Setup, junto ao VideoGo; Preferências fica com preferências do Studio.
+- Verified: design discovery `@./components` resolved (0.90); baseline Chromium captured before editing. Studio typecheck/lint, 7/7 tests, smoke, build and Chromium location check passed; 390 px viewport had no horizontal overflow or page errors. Vite retains the 618.93 kB chunk warning.

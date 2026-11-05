@@ -16,7 +16,7 @@ Entregar o aplicativo desktop **Máquina de Conteúdo (Studio)** (Electron + Rea
 - Setup exibe o estado/versionamento por dependência de cada motor e orientação acionável para corrigir ausências ou versões incompatíveis; VideoGo discrimina FFmpeg e FFprobe.
 - Testes locais de PostNow/VideoGo renderizam apenas em pasta temporária descartável, sem voz paga e sem alterar projetos; Maestro testa contexto local sem chamar IA. Cada execução exige consentimento.
 - Preferências mostra aviso inline de atualização e data da última consulta concluída, persistidos localmente.
-- Preferências integra ElevenLabs para VideoGo: validação da chave, armazenamento cifrado com `safeStorage`, catálogo de vozes e clonagem com autorização explícita.
+- Motores & Setup configura ElevenLabs para VideoGo: validação da chave, armazenamento cifrado com `safeStorage`, catálogo de vozes e clonagem com autorização explícita.
 - Studio mantém narração editorial e texto falado por cena, seleciona voz, usa tags Eleven v4 e IPA, exige aprovação hash-bound antes da síntese e aprovação individual do áudio antes do render final.
 - Geração paga executa VideoGo em processo filho com chave apenas no ambiente, modelo `eleven_v4` e cache de voz/transcrição desativado no fluxo privado.
 - Releases e autoatualização desktop: SemVer em `package.json`, tags anotadas `vX.Y.Z`, GitHub Releases no repositório `FernandoBolzan/maquina-de-conteudo-studio` e confirmação explícita do usuário para instalar.

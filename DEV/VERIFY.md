@@ -97,3 +97,9 @@ During CDP inspection, the test harness navigated an AppImage window to the deve
 - QA Chromium no preview compilado: projeto VideoGo de teste, edição/salvamento do texto, botões Aprovar/Gerar bloqueados sem cofre/voz, Preferências com instruções de API/clonagem; viewport 390×844 com `scrollWidth=390`, erros de console/renderer vazios.
 - VideoGo: `npm run typecheck`, `npm test` (49 core + 20 flicker), `npm run test:external-audio` e `npm run build` passaram. E2E confirmou render audível com fixture sintética e `--voice demo` sem duplicação.
 - Não executado: chamada ElevenLabs paga ou clonagem real; escuta humana de voz Eleven v4; testes Electron nativos Windows/macOS.
+## 2026-11-05 — Setup ElevenLabs em Motores & Setup
+
+- Design-system discovery resolveu `@./components` com confiança 0.90; mudança de posição reaproveita os componentes e estilos existentes, sem redesign.
+- O painel de API key, biblioteca, clonagem e instruções está agora em Motores & Setup, após os cartões dos motores de conteúdo. Preferências não contém mais configuração ElevenLabs.
+- Chromium preview: baseline captured on Preferências before editing. After build, “Voz e narração do VideoGo” is visible in Motores & Setup after the content-engine cards; Preferências has no ElevenLabs or voice-setup text. At 390×844, document `scrollWidth=390`; no browser errors.
+- Studio gates passed: `npm run typecheck`, `npm run lint`, `npm test` (7/7), `npm run smoke` and `npm run build`. Vite reports the existing renderer chunk warning at 618.93 kB (>500 kB).
