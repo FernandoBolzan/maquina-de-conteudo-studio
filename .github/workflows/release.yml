@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing stable tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -23,18 +29,22 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - name: Validate stable tag matches package version
-        run: node -e "const tag = process.env.GITHUB_REF_NAME; const expected = 'v' + require('./package.json').version; if (!/^v\\d+\\.\\d+\\.\\d+$/.test(tag) || tag !== expected) { console.error('Expected matching stable SemVer tag:', expected, 'got', tag); process.exit(1); }"
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: node -e "const tag = process.env.RELEASE_TAG; const expected = 'v' + require('./package.json').version; if (!/^v\\d+\\.\\d+\\.\\d+$/.test(tag) || tag !== expected) { console.error('Expected matching stable SemVer tag:', expected, 'got', tag); process.exit(1); }"
         shell: bash
       - run: npm run ${{ matrix.script }}
       - uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.script }}
+          name: release-${{ matrix.os }}
           path: |
             release/*.AppImage
             release/*.deb
@@ -57,5 +67,5 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.release_tag || github.ref_name }}
         run: gh release create "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes --verify-tag

@@ -3,8 +3,8 @@
 - Date: 2026-11-05
 - Scope: Onboarding inicial, ciclo Codex/Claude e baseline de release/empacotamento Linux.
 - Passed: typecheck, lint, `npm test` (5/5), smoke, build AppImage/deb, QA Chromium do onboarding/projeto/marca, consulta CLI estável e gates strict.
-- Failed: Nenhum teste funcional Linux falhou. `npm run dist:windows` e `npm run dist:mac` foram tentados no host Linux; ambos falharam no rebuild nativo de `node-pty` (`node-gyp does not support cross-compiling native modules from source`).
-- Pending: Instalação e validação nativas Windows/macOS, assinatura/notarização, release/update remoto, instalação real de CLI e login.
+- Failed: `npm run dist:windows` e `npm run dist:mac` falham em cross-build no host Linux; run `42040288628` compilou os três alvos nativos, mas falhou ao enviar artefatos com nome contendo `:`.
+- Pending: publicação da release após corrigir nome inválido de artefato no workflow; download/update real, instalação manual Windows/macOS, assinatura/notarização, instalação real de CLI e login.
 
 ## Latest Verification
 
@@ -23,9 +23,15 @@
 - O AppImage reconstruído (x86_64) abriu por FUSE sem `--no-sandbox`/`--appimage-extract-and-run`. Em perfil e workspace temporários, onboarding concluiu, projeto e marca foram criados pela UI, Setup abriu, consulta de versão estável Codex/Claude indicou estado current; nenhum erro do renderer.
 - `release/linux-unpacked/maquina-de-conteudo` retornou para `app.updateCheck` a instrução de atualizar `.deb` pelo gerenciador do sistema; nenhum erro do renderer.
 - Artefatos atuais: AppImage executável de 121.033.584 bytes e `.deb` amd64 de 92.216.380 bytes. `dpkg-deb --field` confirma pacote `maquina-de-conteudo`, versão `0.1.0`, arquitetura `amd64`.
-- Tentativas atuais `npm run dist:windows` e `npm run dist:mac` falharam durante reconstrução de `node-pty` por cross-compilation não suportada pelo node-gyp. Host Linux x86_64; wine, wine64, `powershell.exe`, xcrun e codesign indisponíveis. QEMU existe, mas não há `/dev/kvm` nem mídia/disco Windows; nenhum SSH host está configurado. API pública do GitHub retornou zero execuções de workflow e zero releases. Nenhum instalador Windows/macOS foi produzido ou testado.
+- `npm run dist:windows` e `npm run dist:mac` localmente falham no rebuild de `node-pty` por cross-compilation; o GitHub Actions executou os três builds nativos com sucesso. Nenhum instalador Windows/macOS foi instalado ou testado manualmente; os artefatos do run não foram carregados por erro de nome.
 - `orquestrador-maestro check-dev-gates --project-path . --strict`: passou; recorrência histórica em `package.json` e `src/main/electron.ts` avisada, não bloqueante.
 - O processo normal encerrou com X connection error; o relançamento falhou enquanto X não estava acessível. Após Xwayland ficar alcançável (`xdpyinfo`), `npm start` voltou a iniciar com `ELECTRON_WINDOW_READY`; serviço `maquina-desktop-live` está pronto.
+- Portabilidade do harness: `npm test` usa FFmpeg e symlink; `npm run smoke` depende de `../PostNow`, `../VideoGo` e do caminho fixo Linux de Maestro. O smoke só foi validado no layout Linux atual; testes nativos ainda dependem de tornar esses paths configuráveis/provisionados.
+## Execução inicial de release
+
+- Commit inicial `80cc1e5` publicado em `main`; tag anotada `v0.1.0` publicada.
+- GitHub Actions run `42040288628`: validação da tag e builds `dist:linux`, `dist:windows`, `dist:mac` passaram; os três uploads falharam por nomes inválidos contendo `:` (`release-dist:linux`, etc.).
+- O job `publish` não executou; a API pública não mostra release. Corrigido localmente para nomes `release-${{ runner.os }}` e adicionado `workflow_dispatch` para reconstruir a mesma tag sem retarget. Fix ainda precisa ser enviado antes do retry.
 
 ## Commands
 

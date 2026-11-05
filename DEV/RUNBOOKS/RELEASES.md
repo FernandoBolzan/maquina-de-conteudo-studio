@@ -26,4 +26,6 @@ O workflow não assina/notariza binários. Assinatura e validação nativa de ca
 
 ## Recuperação
 
-Se a publicação falhar, não mova uma tag já publicada. Corrija a causa e faça uma nova versão SemVer/tag; isso preserva a imutabilidade e evita que usuários recebam conteúdo diferente sob a mesma versão. Se uma release publicada tiver artefatos inválidos, despublique-a/retire-a da distribuição manualmente e publique uma versão corretiva superior.
+- Se um build falhar antes da publicação, preserve a tag existente. Corrija o workflow na `main`; depois execute manualmente `.github/workflows/release.yml` na branch `main`, informando a tag estável existente (`gh workflow run release.yml --repo FernandoBolzan/maquina-de-conteudo-studio --ref main -f release_tag=vX.Y.Z`). O workflow compila o código dessa tag e valida a versão antes de publicar.
+- Se a tag ainda não foi publicada como release e a falha exige alterar o código do produto, não reutilize a versão/tag: publique uma versão SemVer superior.
+- Se uma release publicada tiver artefatos inválidos, retire-a da distribuição e publique uma versão corretiva superior. Nunca mova uma tag de release já publicada.

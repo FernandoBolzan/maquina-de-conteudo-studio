@@ -1,11 +1,17 @@
 # Worklog — Máquina de Conteúdo
 
+## 2026-11-05 — Primeira publicação GitHub e recuperação do release workflow
+- Changed: `.gitignore`, `.github/workflows/release.yml`, `DEV/RUNBOOKS/RELEASES.md`
+- Published: commit `80cc1e5` em `main`; tag anotada `v0.1.0` enviada ao GitHub.
+- Verified: typecheck, lint, tests (5/5), smoke, build, pack e workflow YAML válidos; os três builds nativos do Actions passaram, mas upload-artifact falhou porque `release-dist:linux/mac/windows` continha `:`.
+- Next context: corrigir nomes de artefato, disparar workflow manual em `main` para a tag existente, verificar assets e release.
+
 ## 2026-11-05 — Auditoria final do pacote Linux e alvos nativos
 - Spec: DEV/SPECS/ACTIVE.md
-- Changed: somente evidências operacionais em `DEV/**`; nenhum código de runtime alterado nesta auditoria.
+- Changed: `README.md` e documentação de instalação, verificação, testes reproduzíveis e limites por plataforma em `DEV/**`; nenhum código de runtime alterado nesta tarefa.
 - Reason: Revalidar o worktree atual e separar comportamento comprovado no Linux de builds que exigem hosts Windows/macOS.
-- Verified: typecheck, lint, 5/5 testes, smoke, build AppImage/deb e gates strict; AppImage abriu sem flags de bypass; onboarding, criação de projeto/marca, diagnóstico Setup e estado estável Codex/Claude passaram; `.deb` mostrou o caminho de update pelo gerenciador do sistema. `npm start` foi restaurado após Xwayland voltar a aceitar conexões.
-- Limits: `dist:windows` e `dist:mac` tentados no Linux falharam no rebuild de `node-pty` via node-gyp. QEMU existe, mas não há `/dev/kvm` nem imagem/VM Windows local; também não há hosts SSH configurados. GitHub Actions/releases públicas: zero execuções e zero releases. Testes nativos e publicação remota seguem pendentes.
+- Verified: typecheck, lint, 5/5 testes, smoke, build AppImage/deb e gates strict; AppImage e fluxos onboarding/projeto/marca/Setup passaram; processo `npm start` foi restaurado após recuperação de Xwayland.
+- Limits: `dist:windows` e `dist:mac` tentados no Linux falharam no rebuild de `node-pty` via node-gyp. Não há hosts nativos/SSH nem VM Windows. O smoke também depende de paths Linux fixos; CLIs reais/login, release e atualização remota não foram exercitados.
 
 
 ## 2026-11-05 — Onboarding e Gestão Segura dos CLIs
