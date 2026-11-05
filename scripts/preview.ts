@@ -59,6 +59,9 @@ async function main(): Promise<void> {
 
   const runtime = new Runtime(dataDir, {
     assetPrefix: '/__maquina/media/',
+    secureStorageAvailable: () => false,
+    encryptSecret: () => { throw new Error('Secure storage unavailable in browser preview.'); },
+    decryptSecret: () => { throw new Error('Secure storage unavailable in browser preview.'); },
     pickFile: async () => undefined,
     openPath: async () => undefined,
     openExternal: async () => undefined,

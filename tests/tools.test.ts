@@ -14,6 +14,7 @@ function makeServices(root: string, latest: { codex: string; claude: string }): 
   return {
     dataDir: join(root, 'data'),
     getSettings: () => settings,
+    getElevenLabsKey: () => undefined,
     saveSettings: async update => Object.assign(settings, update),
     run: async spec => {
       const id = `job-${++nextJob}`;

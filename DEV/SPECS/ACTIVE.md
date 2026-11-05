@@ -13,22 +13,31 @@ Entregar o aplicativo desktop **Máquina de Conteúdo (Studio)** (Electron + Rea
 - Derivação imagem → vídeo e vídeo → imagem via FFmpeg.
 - Onboarding guiado na primeira execução, com configuração opcional, explicações simples e preservação do fluxo de perfis existentes.
 - Diagnóstico de versão estável para Codex/Claude Code; instalação/atualização privada, validação antes de ativar, rollback e consentimento explícito sem alterar CLIs globais.
-- Diagnóstico, login oficial interativo e gestão consentida dos motores locais.
+- Setup exibe o estado/versionamento por dependência de cada motor e orientação acionável para corrigir ausências ou versões incompatíveis; VideoGo discrimina FFmpeg e FFprobe.
+- Testes locais de PostNow/VideoGo renderizam apenas em pasta temporária descartável, sem voz paga e sem alterar projetos; Maestro testa contexto local sem chamar IA. Cada execução exige consentimento.
+- Preferências mostra aviso inline de atualização e data da última consulta concluída, persistidos localmente.
+- Preferências integra ElevenLabs para VideoGo: validação da chave, armazenamento cifrado com `safeStorage`, catálogo de vozes e clonagem com autorização explícita.
+- Studio mantém narração editorial e texto falado por cena, seleciona voz, usa tags Eleven v4 e IPA, exige aprovação hash-bound antes da síntese e aprovação individual do áudio antes do render final.
+- Geração paga executa VideoGo em processo filho com chave apenas no ambiente, modelo `eleven_v4` e cache de voz/transcrição desativado no fluxo privado.
 - Releases e autoatualização desktop: SemVer em `package.json`, tags anotadas `vX.Y.Z`, GitHub Releases no repositório `FernandoBolzan/maquina-de-conteudo-studio` e confirmação explícita do usuário para instalar.
 
 ## Out Of Scope
 
-- Backend SaaS em nuvem, cobranças ou faturamento remoto.
-- Armazenamento de credenciais pelo aplicativo.
-- Certificação de pacotes, assinatura/notarização ou publicação sem chaves e contas do mantenedor.
+- Backend SaaS, cobrança/faturamento, serviço de armazenamento ou processamento de dados no servidor. Roteiros e amostras de voz só são enviados à ElevenLabs quando a ação autorizada do usuário exigir, sob os termos do provedor.
 
 ## Acceptance
 
 - `npm run typecheck`, `npm run lint`, `npm test`, `npm run smoke` e `npm run build` passam.
+- A chave ElevenLabs armazenada nunca aparece em settings persistidos, respostas IPC posteriores ao renderer, argumentos do CLI ou logs; sem cofre seguro, salvar é bloqueado em vez de recorrer a texto puro.
+- No fluxo Studio, a síntese é bloqueada até a aprovação explícita da narração; mudanças de texto, fonética, tags ou voz invalidam a aprovação, e o render final exige clipes gerados e aprovação individual.
+- Testes offline verificam autorização anterior a TTS, proteção da key, preservação de tags/IPA, associação atômica dos áudios e compatibilidade com áudio externo.
 - Instalação nova abre onboarding; perfis existentes sem estado de onboarding não são interrompidos.
 - Codex/Claude distinguem CLI ausente, atualizado, desatualizado, externo e consulta indisponível; cópia gerenciada atualiza com validação e rollback.
 - Nenhuma instalação/atualização de CLI modifica a cópia global; ações de instalação exigem confirmação explícita.
 - Fluxos de usuário exercitados em app Electron real: marca, projeto, renderização do carrossel (incluindo mensagem útil quando faltar Pillow), aprovação, derivação imagem↔vídeo, render VideoGo e diagnóstico de motores.
+- Diagnósticos por motor refletem o runtime realmente selecionado; VideoGo distingue FFmpeg/FFprobe e PostNow confirma Python/Pillow no mesmo ambiente usado no render.
+- Testes consentidos de VideoGo/PostNow validam artefato de render temporário; Maestro valida contexto local sem modelo. Resultados identificam explicitamente quando dependências impedem o teste.
+- Preferências exibe data persistente da última consulta concluída; update disponível aparece inline e download continua consentido.
 - `npm run dist:linux` produz instaladores Linux; ao menos um pacote é aberto e executado em ambiente Linux compatível.
 - Windows NSIS instala, abre e valida PTY, diálogos e caminhos no Windows nativo.
 - macOS dmg/zip abre e valida permissões, subprocessos e caminhos em macOS nativo.
@@ -60,10 +69,11 @@ Entregar o aplicativo desktop **Máquina de Conteúdo (Studio)** (Electron + Rea
 - Fluxos visuais em Electron real e verificações de pacote Linux.
 - `npm run dist:windows` + instalação e smoke em Windows nativo.
 - `npm run dist:mac` + abertura e smoke em macOS nativo.
+- Smoke suporta caminhos configuráveis por `MDC_SMOKE_POSTNOW`, `MDC_SMOKE_VIDEOGO` e `MDC_SMOKE_MAESTRO`; defaults mantêm irmãos PostNow/VideoGo e Maestro Linux. FFmpeg e permissão de symlink são pré-requisitos; executar o smoke em Windows/macOS nativos ainda está pendente.
 - `orquestrador-maestro check-dev-gates --project-path . --strict`
 
 ## Status
 
-- State: active — Linux code, user flows, packaging, onboarding and managed Codex/Claude CLI lifecycle verified; native Windows/macOS builds and runtime validation pending.
+- State: active — release `v0.1.1` publicada; integração ElevenLabs implementada localmente; Linux AppImage verificado. Restam teste nativo Windows/macOS, assinatura/notarização e atualização entre versões; nenhuma síntese/clonagem paga real foi feita.
 - Owner: Maestro & Orquestrador
 - Last updated: 2026-11-05

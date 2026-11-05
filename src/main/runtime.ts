@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename, realpath } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, realpath, rm } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, relative, isAbsolute, extname } from 'node:path';
@@ -10,10 +10,12 @@ import { Supervisor, capture } from './supervisor.js';
 import { handleProjects } from './projects.js';
 import { handleAgents } from './agents.js';
 import { handleSetup } from './setup.js';
+import { cloneElevenLabsVoice, deleteElevenLabsClone, listElevenLabsVoices, validateElevenLabsKey } from './elevenlabs.js';
 
 export interface Host {
   pickFile: Services['pickFile']; openPath: Services['openPath']; openExternal: Services['openExternal'];
-  assetPrefix: string; update(action: string, payload: Record<string, unknown>): Promise<unknown>;
+  assetPrefix: string; secureStorageAvailable(): boolean; encryptSecret(value: string): string; decryptSecret(value: string): string;
+  update(action: string, payload: Record<string, unknown>): Promise<unknown>;
 }
 const MEDIA: Record<string, true> = { '.png': true, '.jpg': true, '.jpeg': true, '.webp': true, '.gif': true, '.avif': true, '.svg': true, '.mp4': true, '.webm': true, '.mov': true, '.mkv': true, '.m4v': true, '.mp3': true, '.wav': true, '.ogg': true, '.m4a': true, '.flac': true, '.pdf': true, '.txt': true, '.md': true, '.json': true, '.srt': true, '.vtt': true, '.ass': true };
 export function within(root: string, path: string): boolean { const part = relative(root, path); return part === '' || (!part.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && part !== '..' && !isAbsolute(part)); }
@@ -22,6 +24,8 @@ export class Runtime {
   readonly services: Services;
   private settings!: Settings;
   private media = new Map<string, string>();
+  private elevenLabsKey?: string;
+  private elevenLabsSecretError?: string;
   private saving = Promise.resolve();
   constructor(readonly dataDir: string, private host: Host, private emit: (event: AppEvent) => void, readonly version = '0.1.0') {
     this.supervisor = new Supervisor(join(dataDir, 'history'), emit);
@@ -29,7 +33,7 @@ export class Runtime {
       dataDir, getSettings: () => structuredClone(this.settings), saveSettings: update => this.saveSettings(update),
       run: spec => this.supervisor.run(spec), capture, waitJob: id => this.supervisor.wait(id), jobs: () => this.supervisor.list(), emit,
       pickFile: options => host.pickFile(options), openPath: path => host.openPath(path), openExternal: url => host.openExternal(url),
-      assetUrl: path => this.assetUrl(path),
+      assetUrl: path => this.assetUrl(path), getElevenLabsKey: () => this.elevenLabsKey,
     };
   }
   async init(): Promise<void> {
@@ -44,6 +48,13 @@ export class Runtime {
     }
     await mkdir(this.settings.workspace, { recursive: true });
     this.settings.workspace = await realpath(this.settings.workspace);
+    try {
+      const encrypted = await readFile(join(this.dataDir, 'elevenlabs.key'), 'utf8');
+      if (!this.host.secureStorageAvailable()) throw new Error('O cofre do sistema não está disponível.');
+      this.elevenLabsKey = this.host.decryptSecret(encrypted);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') this.elevenLabsSecretError = 'A chave salva não pôde ser aberta com segurança. Configure-a novamente.';
+    }
     await this.supervisor.init();
   }
   async saveSettings(update: Partial<Settings>): Promise<Settings> {
@@ -78,7 +89,9 @@ export class Runtime {
   async invoke(action: string, payload: Record<string, unknown> = {}): Promise<unknown> {
     if (typeof action !== 'string' || action.length > 80 || !payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Requisição inválida.');
     if (action === 'app.snapshot') return {
-      settings: structuredClone(this.settings), projects: await handleProjects('projects.list', {}, this.services), brands: await handleProjects('brands.list', {}, this.services), jobs: this.supervisor.list(), version: this.version,
+      settings: structuredClone(this.settings), projects: await handleProjects('projects.list', {}, this.services), brands: await handleProjects('brands.list', {}, this.services), jobs: this.supervisor.list(),
+      integrations: { elevenLabs: { configured: !!this.elevenLabsKey, secureStorageAvailable: this.host.secureStorageAvailable(), ...(this.elevenLabsSecretError ? { error: this.elevenLabsSecretError } : {}) } },
+      version: this.version,
     } as Snapshot;
     if (action === 'app.settings') {
       const update: Partial<Settings> = {};
@@ -89,9 +102,49 @@ export class Runtime {
     }
     if (action === 'app.pick') return this.host.pickFile({ directory: payload.directory === true, multiple: payload.multiple === true, extensions: Array.isArray(payload.extensions) ? payload.extensions.filter((v): v is string => typeof v === 'string' && /^[a-z0-9]+$/i.test(v)) : undefined });
     if (action === 'app.open') { const path = await realpath(text(payload, 'path')); if (!within(this.settings.workspace, path) && !within(this.dataDir, path)) throw new Error('Pasta não autorizada.'); return this.host.openPath(path); }
-    if (action === 'app.external') { const url = new URL(text(payload, 'url')); if (url.protocol !== 'https:' || !['github.com','claude.ai','platform.openai.com','chatgpt.com','nodejs.org','cli.github.com'].includes(url.hostname)) throw new Error('Endereço externo não autorizado.'); return this.host.openExternal(url.href); }
+    if (action === 'app.external') { const url = new URL(text(payload, 'url')); if (url.protocol !== 'https:' || !['github.com','claude.ai','platform.openai.com','chatgpt.com','nodejs.org','cli.github.com','elevenlabs.io'].includes(url.hostname)) throw new Error('Endereço externo não autorizado.'); return this.host.openExternal(url.href); }
     if (action === 'app.updateCheck' || action === 'app.updateInstall') return this.host.update(action, payload);
     if (action === 'jobs.list') return this.supervisor.list();
+    if (action === 'elevenlabs.status') return { configured: !!this.elevenLabsKey, secureStorageAvailable: this.host.secureStorageAvailable(), ...(this.elevenLabsSecretError ? { error: this.elevenLabsSecretError } : {}) };
+    if (action === 'elevenlabs.configure') {
+      if (!this.host.secureStorageAvailable()) throw new Error('O cofre de credenciais do sistema está indisponível. Configure um keyring do sistema e tente novamente.');
+      const key = text(payload, 'key', 512);
+      await validateElevenLabsKey(key);
+      const encrypted = this.host.encryptSecret(key);
+      const path = join(this.dataDir, 'elevenlabs.key');
+      await writeFile(`${path}.tmp`, encrypted, { mode: 0o600 });
+      await rename(`${path}.tmp`, path);
+      this.elevenLabsKey = key;
+      this.elevenLabsSecretError = undefined;
+      this.emit({ type: 'refresh' });
+      return { configured: true, secureStorageAvailable: true };
+    }
+    if (action === 'elevenlabs.clear') {
+      await rm(join(this.dataDir, 'elevenlabs.key'), { force: true });
+      this.elevenLabsKey = undefined;
+      this.elevenLabsSecretError = undefined;
+      this.emit({ type: 'refresh' });
+      return { configured: false, secureStorageAvailable: this.host.secureStorageAvailable() };
+    }
+    if (action === 'elevenlabs.voices') {
+      if (!this.elevenLabsKey) throw new Error(this.elevenLabsSecretError || 'Configure a API key ElevenLabs primeiro.');
+      return listElevenLabsVoices(this.elevenLabsKey);
+    }
+    if (action === 'elevenlabs.clone') {
+      if (!this.elevenLabsKey) throw new Error(this.elevenLabsSecretError || 'Configure a API key ElevenLabs primeiro.');
+      if (payload.speakerAuthorized !== true) throw new Error('Confirme que a voz é sua ou que você tem autorização expressa para cloná-la.');
+      if (payload.confirm !== true) throw new Error('A clonagem envia a amostra à ElevenLabs e pode consumir créditos; confirme a operação.');
+      const voice = await cloneElevenLabsVoice(this.elevenLabsKey, text(payload, 'name', 100), text(payload, 'samplePath', 4096), this.services);
+      this.emit({ type: 'refresh' });
+      return voice;
+    }
+    if (action === 'elevenlabs.deleteClone') {
+      if (!this.elevenLabsKey) throw new Error(this.elevenLabsSecretError || 'Configure a API key ElevenLabs primeiro.');
+      if (payload.confirm !== true) throw new Error('Confirme a remoção permanente da voz clonada na ElevenLabs.');
+      await deleteElevenLabsClone(this.elevenLabsKey, text(payload, 'voiceId', 128));
+      this.emit({ type: 'refresh' });
+      return { deleted: true };
+    }
     if (action === 'jobs.cancel') return this.supervisor.cancel(text(payload, 'id', 100));
     if (action === 'jobs.input') { if (typeof payload.data !== 'string') throw new Error('Entrada inválida.'); return this.supervisor.input(text(payload, 'id', 100), payload.data); }
     if (action === 'jobs.resize') return this.supervisor.resize(text(payload, 'id', 100), Number(payload.cols), Number(payload.rows));

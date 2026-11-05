@@ -14,6 +14,7 @@ export interface Services {
   openPath(path: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   assetUrl(path: string): string;
+  getElevenLabsKey(): string | undefined;
 }
 export function text(payload: Record<string, unknown>, key: string, max = 10000): string {
   const value = payload[key];

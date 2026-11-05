@@ -1,55 +1,31 @@
-# Prompt — Adaptar o VideoGo para narração ElevenLabs externa
+# Prompt — Integração de narração ElevenLabs no VideoGo/Studio
 
-Copie o prompt abaixo e execute-o com um agente dentro do repositório do **VideoGo**.
+Copie o prompt abaixo e execute-o dentro do repositório **VideoGo** quando for necessário portar ou revisar a integração do motor. O fluxo atual do Studio também depende do contrato de storyboard descrito aqui.
 
 ```text
-Adapte este repositório do VideoGo para receber e renderizar narração gerada externamente pelo Máquina de Conteúdo (Studio).
+Implemente e verifique a geração de narração ElevenLabs v4 pelo VideoGo para projetos controlados pelo Máquina de Conteúdo (Studio), preservando o suporte existente a áudio externo por cena.
 
-Objetivo: o Studio será responsável por configurar a API key, selecionar ou clonar a voz, obter aprovação humana da narração e chamar o ElevenLabs v4. O VideoGo deve consumir os arquivos de áudio locais já gerados e incorporá-los ao vídeo. NÃO implemente chamadas à API ElevenLabs no VideoGo e NÃO receba, armazene, leia ou repasse API keys.
+Contexto obrigatório:
+- O storyboard `videogo.storyboard/v1` já suporta `scenes[].audio.narration` com `assetPath`, `startOffsetSeconds` e `gain`; render, validação de caminhos e mixagem já existem. Estude-os e estenda-os, não crie um segundo contrato.
+- O Studio configura e valida a API key, lista vozes, oferece clonagem com consentimento, edita a narração e registra aprovação humana vinculada por hash ao texto, `spokenText`, voz e modelo `eleven_v4`.
+- O VideoGo recebeu uma correção de vozes do mantenedor. Preserve-a. Não reescreva nem reverta `listVoices`, `cloneVoice`, a listagem de vozes ou a clonagem existente para implementar a geração de áudio.
+- A geração é feita por `VoiceService` existente. O Studio inicia apenas o comando pago autorizado e injeta `ELEVENLABS_API_KEY` no ambiente do processo filho; a chave não entra em argumento, storyboard, configuração persistente ou logs. O fluxo Studio usa `VIDEOGO_NO_VOICE_CACHE=1` para não guardar transcrição/áudio no cache privado do motor.
 
-Antes de alterar:
-1. Inspecione o CLI de renderização, o schema real do storyboard, a implementação de áudio/mixagem, os testes e a documentação.
-2. Identifique os arquivos e interfaces reais envolvidos. Não presuma que nomes ou formatos descritos abaixo já existem.
-3. Preserve o comportamento de projetos antigos e o fluxo atual sem áudio.
-4. Depois da inspeção, implemente a integração completa — não pare em um plano ou scaffold.
+Contrato esperado:
+1. O comando é `project narration <storyboard.json> --generate-audio --voice <id> --allow-paid`.
+2. O comando de geração exige voz real e `--allow-paid`, força `ELEVENLABS_MODEL=eleven_v4` e valida o storyboard e a equivalência das palavras antes de qualquer chamada paga.
+3. Use `scene.audio.spokenText` quando presente; preserve tags de áudio Eleven v4 (por exemplo `[whispers]`, `[excited]`) e fonética IPA inline entre barras (`/…/`). Não envie SSML. Tags não mudam as palavras comparadas; uma transcrição IPA pode substituir o nome difícil correspondente.
+4. Gere um áudio por cena com `scene.narration` preenchido. Copie respostas válidas para uma pasta temporária local do projeto, valide faixa e duração, e só publique a pasta final e atualize o storyboard depois que todas as cenas forem geradas com sucesso. Falha parcial não pode deixar storyboard alterado nem clipes parciais publicados.
+5. Grave no storyboard a referência local já suportada: `scene.audio.narration = { "assetPath": "assets/audio/narration/<id>/<scene>.mp3", "startOffsetSeconds": 0, "gain": 1 }`. Mantenha `scene.narration` e `scene.audio.spokenText`.
+6. O render deve continuar a consumir as faixas externas sem duplicar voz, respeitar offset/duração/ganho, mixar música, SFX e áudio original existentes, e recusar arquivos inválidos ou caminhos fora do projeto sem fallback silencioso.
+7. O Studio já é responsável pela aprovação humana e impede que sua ação de geração seja iniciada antes dela. O CLI não consegue provar uma aprovação visual externa; em uso direto ele exige confirmação explícita `--allow-paid`. Não afirme que essa flag autentica a aprovação do Studio.
+8. Nenhuma transcrição ou chave deve aparecer em log ou cache do caminho privado do Studio. Não altere a governança de aprovação dos projetos no motor.
 
-Contrato desejado com o Studio:
-- O Studio usa o storyboard `videogo.storyboard/v1`, que já contém `scenes[].narration` e `scenes[].audio`.
-- Estenda esse contrato de forma opcional e compatível para aceitar áudio externo de narração por cena. Preferência inicial:
-  `scene.audio.narration = { "assetPath": "assets/audio/narration/scene-1.mp3", "startOffsetSeconds": 0, "gain": 1 }`
-- `assetPath` deve ser relativo à raiz do projeto. Documente claramente o campo final escolhido, seus valores e defaults. Se a estrutura existente pedir outro formato, use o formato natural do VideoGo, mas mantenha um contrato explícito e estável para o Studio.
-- O storyboard deve continuar carregando o texto original em `scene.narration`; o áudio associado não substitui a narração textual.
-- Quando houver narração externa configurada, o render deve usar esse arquivo e NÃO sintetizar uma segunda voz demo. O argumento atual `--voice demo` não pode sobrescrever nem duplicar áudio externo.
-- Se o campo de narração externa estiver ausente, projetos antigos e o fluxo atual devem continuar funcionando.
-- Se estiver presente mas o arquivo estiver ausente, inválido ou fora da pasta do projeto, interrompa o render com erro acionável. Não faça fallback silencioso para demo ou para outro arquivo.
-- Restrinja caminhos à raiz do projeto; rejeite caminhos absolutos, traversal (`..`), symlinks escapando do projeto e arquivos não suportados.
-- Integre a faixa de voz ao render final e à sincronização das cenas com as ferramentas de mídia já usadas pelo VideoGo. Preserve o comportamento de trilha, SFX, áudio original e mixagem existentes; não os descarte sem uma opção documentada.
-- Trate offsets, ganho/volume, duração e finalização de áudio conforme o pipeline real. Não corte a fala de forma silenciosa quando ela exceder a duração visual da cena; defina e documente o comportamento adotado.
-- Não registre texto da narração, conteúdo de áudio, nomes pessoais ou credenciais nos logs.
+Antes de editar, examine CLI, `VoiceService`, schema, render, cache, testes e documentação. Faça mudanças compatíveis com projetos antigos e aproveite padrões existentes. Não toque na listagem/clonagem de vozes atual do mantenedor. Não faça chamadas pagas reais.
 
-Requisitos de implementação:
-- Atualize schema/validação, CLI de render, composição/mixagem, tipos e documentação onde necessário.
-- Mantenha o caminho antigo para projetos sem os novos campos.
-- Se houver opções de render/CLI relevantes, mantenha argumentos existentes e documente a precedência entre configuração do storyboard e flags.
-- Não altere nem autoaprove o estado de aprovação do projeto: aprovação da narração e do áudio é responsabilidade do Studio.
-- Não acople o motor a Electron, IPC, settings do Studio ou endpoints ElevenLabs.
-- Escreva testes determinísticos com arquivos de áudio de fixture; testes não podem chamar APIs pagas nem depender de rede.
-- Inclua testes para: storyboard legado sem áudio; storyboard com áudio válido produzindo render audível; campo presente com arquivo ausente; caminho inseguro fora do projeto; formato inválido; interação com áudio de origem/SFX/música já existentes; e garantia de que `--voice demo` não duplica uma faixa externa.
-- Rode os comandos reais de teste, lint, typecheck e build disponíveis neste repositório. Corrija falhas relacionadas à mudança.
+Testes determinísticos offline devem cobrir IPA/tags e rejeição de palavras divergentes, geração completa e falha parcial atômica, associação de áudio externo, compatibilidade legada, rejeição de caminho/asset inválido, e `--voice demo` sem duplicação. Use geradores/probes injetados ou fixtures locais; não teste apenas cópias/encaminhamento.
 
-Critérios de conclusão:
-1. Um storyboard válido com `scene.audio.narration.assetPath` renderiza um vídeo que contém a voz fornecida, usando o pipeline suportado pelo VideoGo.
-2. Projetos antigos continuam renderizando como antes.
-3. Áudio configurado mas inválido nunca é ignorado nem substituído silenciosamente.
-4. Caminhos externos à raiz do projeto são recusados.
-5. Nenhuma API key ou chamada ElevenLabs foi adicionada ao motor.
-6. Testes e verificações do repositório passam.
+Rode os comandos disponíveis de typecheck, teste, build e smoke local de áudio externo. Não alegue validação de voz real sem chamada aprovada e evidência auditiva.
 
-Ao terminar, responda com:
-- arquivos alterados;
-- contrato exato que o Studio deve gravar no storyboard;
-- comando/argumentos de render e precedência do `--voice`;
-- comportamento de sincronização e mixagem;
-- testes e verificações executados, com resultados;
-- limitações restantes.
+Ao concluir, informe arquivos, contrato gravado, comando e condição de autorização, cache/privacidade, precedência e mixagem, verificações e limites. Não faça commit nem push sem pedido expresso.
 ```

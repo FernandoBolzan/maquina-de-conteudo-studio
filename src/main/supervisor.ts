@@ -11,7 +11,7 @@ import { executableArgs } from './executable.js';
 
 const MAX_LOG = 128 * 1024;
 function redact(text: string): string {
-  return text.replace(/(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{16,})/g, '[credencial ocultada]');
+  return text.replace(/(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{16,}|(?:sk|xi)[_-][A-Za-z0-9_-]{16,})/g, '[credencial ocultada]');
 }
 interface Running { job: Job; child?: ChildProcess; pty?: IPty; pending: string; timer?: NodeJS.Timeout; deadline?: NodeJS.Timeout; done: Promise<Job>; resolve: (job: Job) => void; cancelling: boolean; }
 export class Supervisor {

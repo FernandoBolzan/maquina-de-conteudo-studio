@@ -3,6 +3,7 @@
 | Path | Purpose |
 |---|---|
 | `README.md` | Short operational documentation entrypoint |
+| `../README.md` | User-facing overview, Linux installation, development commands, platform status, and test limits |
 | `HANDOFF.md` | Current snapshot for the next AI or human |
 | `CONTEXT.md` | Current state, constraints, commands, and risks |
 | `SPECS/ACTIVE.md` | Active objective, scope, acceptance, and status |

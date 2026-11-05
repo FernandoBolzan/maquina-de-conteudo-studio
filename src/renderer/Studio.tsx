@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, AudioLines, Check, CheckCheck, ChevronLeft, ChevronRight, Download, FileText, Film, FolderOpen, Image, Layers, Play, Plus, Save, Send, Sparkles, TerminalSquare, WandSparkles } from 'lucide-react';
-import type { Asset, Job, Project, ProjectDetail, Provider } from '../shared/contracts';
+import { ArrowLeft, ArrowRight, AudioLines, Check, CheckCheck, ChevronLeft, ChevronRight, Download, FileText, Film, FolderOpen, Image, Layers, Mic2, Play, Plus, Save, Send, Sparkles, TerminalSquare, WandSparkles } from 'lucide-react';
+import type { Asset, ElevenLabsVoice, Job, NarrationState, Project, ProjectDetail, Provider } from '../shared/contracts';
 import { Empty, ErrorNotice, Loading } from './components';
 import { errorMessage, invoke, useJobs, type ScreenProps } from './state';
 import { ActivityCard } from './Console';
+import { MODEL_CATALOG } from './model-catalog';
 
 function Media({ projectId, asset }: { projectId: string; asset: Asset }) {
   const [content, setContent] = useState<string | null>(null);
@@ -48,14 +49,24 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const [notes, setNotes] = useState('');
   const [prompt, setPrompt] = useState('');
   const [provider, setProvider] = useState<Provider>(snapshot.settings.provider);
+  const [model, setModel] = useState('');
+  const [customModel, setCustomModel] = useState('');
   const [editor, setEditor] = useState<'brief' | 'notes'>('brief');
+  const [narration, setNarration] = useState<NarrationState | null>(null);
+  const [voices, setVoices] = useState<ElevenLabsVoice[]>([]);
+  const [voiceError, setVoiceError] = useState('');
+  const [narrationError, setNarrationError] = useState('');
+  const [narrationDraft, setNarrationDraft] = useState<NarrationState | null>(null);
+  const [narrationJobId, setNarrationJobId] = useState<string | null>(null);
   const jobs = useJobs();
   const projectJobs = jobs.filter(job => job.projectId === id);
   const running = projectJobs.find(job => job.status === 'running');
+  const narrationJobStatus = projectJobs.find(job => job.id === narrationJobId)?.status;
+  const selectedModelInfo = MODEL_CATALOG[provider].find(option => option.id === model);
 
   useEffect(() => {
     let active = true;
-    setDetail(null); setLoadError('');
+    setDetail(null); setLoadError(''); setNarration(null); setNarrationDraft(null); setNarrationJobId(null);
     void invoke<ProjectDetail>('projects.detail', { id }).then(project => {
       if (active) { setDetail(project); setBrief(project.brief); setNotes(project.notes); }
     }).catch(error => { if (active) setLoadError(errorMessage(error)); });
@@ -67,6 +78,45 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
     void invoke<ProjectDetail>('projects.detail', { id }).then(project => { if (active) setDetail(project); }).catch(error => { if (active) setLoadError(errorMessage(error)); });
     return () => { active = false; };
   }, [id, snapshot]);
+  useEffect(() => {
+    if (!detail || detail.kind !== 'video') { setNarration(null); return; }
+    let active = true;
+    setNarrationError('');
+    void invoke<NarrationState>('projects.narration', { id })
+      .then(value => { if (active) { setNarration(value); setNarrationDraft(value); } })
+      .catch(error => { if (active) setNarrationError(errorMessage(error)); });
+    return () => { active = false; };
+  }, [detail?.kind, id, reload]);
+
+  useEffect(() => {
+    if (!narrationJobId || !narrationJobStatus || narrationJobStatus === 'running') return;
+    let active = true;
+    void (async () => {
+      let latest: NarrationState | undefined;
+      const attempts = narrationJobStatus === 'succeeded' ? 20 : 1;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        latest = await invoke<NarrationState>('projects.narration', { id });
+        if (!active) return;
+        if (latest.audioReady || narrationJobStatus !== 'succeeded') break;
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      if (!active || !latest) return;
+      setNarration(latest); setNarrationDraft(latest);
+      if (narrationJobStatus === 'succeeded' && !latest.audioReady) setNarrationError('O VideoGo terminou, mas a associação dos áudios ainda não foi confirmada. Recarregue o projeto e revise os assets.');
+      setNarrationJobId(null);
+    })().catch(error => { if (active) setNarrationError(errorMessage(error)); });
+    return () => { active = false; };
+  }, [id, narrationJobId, narrationJobStatus]);
+
+  useEffect(() => {
+    let active = true;
+    setVoiceError('');
+    if (!snapshot.integrations.elevenLabs.configured) { setVoices([]); return; }
+    void invoke<ElevenLabsVoice[]>('elevenlabs.voices')
+      .then(value => { if (active) setVoices(value); })
+      .catch(error => { if (active) setVoiceError(errorMessage(error)); });
+    return () => { active = false; };
+  }, [snapshot.integrations.elevenLabs.configured]);
 
   if (loadError) return <><button className="button ghost" onClick={onBack}><ArrowLeft size={16} />Projetos</button><ErrorNotice message={loadError} /><button className="button" onClick={() => setReload(value => value + 1)}>Tentar novamente</button></>;
   if (!detail) return <Loading label="Abrindo projeto…" />;
@@ -78,6 +128,33 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const approved = project.assets.filter(asset => asset.approved);
   const dirty = brief !== project.brief || notes !== project.notes;
   const brand = snapshot.brands.find(item => item.id === project.brandId);
+  const narrationDirty = Boolean(narration && narrationDraft && (
+    narration.voiceId !== narrationDraft.voiceId ||
+    narration.scenes.length !== narrationDraft.scenes.length ||
+    narration.scenes.some((scene, index) => scene.id !== narrationDraft.scenes[index]?.id || scene.narration !== narrationDraft.scenes[index]?.narration || scene.spokenText !== narrationDraft.scenes[index]?.spokenText)
+  ));
+  const hasNarration = Boolean(narrationDraft?.scenes.some(scene => scene.narration.trim()));
+
+  async function saveNarration() {
+    if (!narrationDraft) return;
+    const result = await run('save-narration', () => invoke<NarrationState>('projects.narration.save', {
+      id, voiceId: narrationDraft.voiceId, scenes: narrationDraft.scenes,
+    }), 'Narração salva no projeto.');
+    if (result) { setNarration(result); setNarrationDraft(result); await refresh(); }
+  }
+  async function approveNarration() {
+    if (!narration || narrationDirty || !narrationDraft?.voiceId) return;
+    const voice = voices.find(item => item.id === narrationDraft.voiceId);
+    if (!await confirm('Aprovar narração', `A narração e a voz ${voice?.name ?? narrationDraft.voiceId} serão aprovadas para geração Eleven v4. Nenhum áudio será gerado ainda.`, 'Aprovar texto')) return;
+    const result = await run('approve-narration', () => invoke<NarrationState>('projects.narration.approve', { id, approved: true }), 'Narração aprovada.');
+    if (result) { setNarration(result); setNarrationDraft(result); }
+  }
+  async function generateNarration() {
+    if (!narration?.approved || narrationDirty) return;
+    if (!await confirm('Gerar narração Eleven v4', `Isso enviará o texto aprovado ao ElevenLabs usando ${voices.find(item => item.id === narration.voiceId)?.name ?? 'a voz selecionada'} e poderá consumir créditos. O áudio será criado por cena e precisará da sua aprovação antes do render final.`, 'Gerar áudio')) return;
+    const job = await run('generate-narration', () => invoke<Job>('projects.narration.generate', { id, confirm: true }), 'Geração de áudio iniciada.');
+    if (job) { setNarrationJobId(job.id); openJob(job); }
+  }
 
   async function save() {
     await run('save-notes', async () => {
@@ -97,7 +174,15 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   }
   async function approve(asset: Asset) {
     const result = await run('approve', () => invoke<ProjectDetail>('projects.approve', { id, path: asset.path, approved: !asset.approved }));
-    if (result) setDetail(result);
+    if (result) {
+      setDetail(result);
+      if (result.kind === 'video') {
+        try {
+          const state = await invoke<NarrationState>('projects.narration', { id });
+          setNarration(state); setNarrationDraft(state);
+        } catch (error) { setNarrationError(errorMessage(error)); }
+      }
+    }
   }
   async function exportPackage() {
     await run('export', async () => {
@@ -125,8 +210,10 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
     }
   }
   async function startAgent() {
-    if (!await confirm(`Iniciar ${provider === 'codex' ? 'Codex' : 'Claude Code'}`, 'O agente lerá seu briefing, sua marca, as fotos/PDFs de referência e atualizará os arquivos deste projeto. Em projetos de imagem, os slides do carrossel serão renderizados automaticamente ao final.', 'Autorizar sessão')) return;
-    const job = await run('agent', () => invoke<Job>('agents.start', { id, provider, prompt, confirm: true }), 'Sessão de IA iniciada.');
+    const selectedModel = model === 'custom' ? customModel.trim() : model;
+    const modelLabel = selectedModel ? ` usando ${selectedModel}` : '';
+    if (!await confirm(`Iniciar ${provider === 'codex' ? 'Codex' : 'Claude Code'}${modelLabel}`, 'O agente lerá seu briefing, sua marca, as fotos/PDFs de referência e atualizará os arquivos deste projeto. Em projetos de imagem, os slides do carrossel serão renderizados automaticamente ao final.', 'Autorizar sessão')) return;
+    const job = await run('agent', () => invoke<Job>('agents.start', { id, provider, model: selectedModel || undefined, prompt, confirm: true }), 'Sessão de IA iniciada.');
     if (job) { setPrompt(''); setSelectedPath(null); openJob(job); }
   }
 
@@ -210,11 +297,83 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
             )}
           </section>
 
+          {project.kind === 'video' && (
+            <section className="narration-panel">
+              <div className="panel-heading">
+                <h2><Mic2 size={17} />Narração e voz</h2>
+                <span className="badge">Eleven v4</span>
+              </div>
+              {!snapshot.integrations.elevenLabs.configured && <p className="field-help">Configure a chave e escolha uma voz em Preferências antes de aprovar ou gerar áudio.</p>}
+              {voiceError && <ErrorNotice message={voiceError} />}
+              {narrationError && <ErrorNotice message={narrationError} />}
+              {!narrationDraft ? <p className="muted">Carregando narração…</p> : (
+                <>
+                  <label className="narration-voice">
+                    Voz ElevenLabs
+                    <select
+                      disabled={Boolean(running)}
+                      value={narrationDraft.voiceId ?? ''}
+                      onChange={event => setNarrationDraft(current => current ? { ...current, voiceId: event.target.value || undefined, approved: false, audioReady: false, audioApproved: false } : current)}
+                    >
+                      <option value="">Selecione uma voz</option>
+                      {voices.map(voice => <option value={voice.id} key={voice.id}>{voice.name}{voice.isClone ? ' · clonada' : ''}</option>)}
+                    </select>
+                  </label>
+                  {narrationDraft.scenes.map((scene, index) => (
+                    <article className="narration-scene" key={scene.id}>
+                      <h3>{index + 1}. {scene.title}</h3>
+                      <label>
+                        Narração editorial
+                        <textarea
+                          disabled={Boolean(running)}
+                          value={scene.narration}
+                          maxLength={10000}
+                          rows={3}
+                          onChange={event => setNarrationDraft(current => current ? { ...current, approved: false, audioReady: false, audioApproved: false, scenes: current.scenes.map(item => item.id === scene.id ? { ...item, narration: event.target.value } : item) } : current)}
+                        />
+                      </label>
+                      <label>
+                        Texto falado · tags Eleven v4 e fonética inline
+                        <textarea
+                          disabled={Boolean(running)}
+                          value={scene.spokenText || scene.narration}
+                          maxLength={10000}
+                          rows={3}
+                          onChange={event => setNarrationDraft(current => current ? { ...current, approved: false, audioReady: false, audioApproved: false, scenes: current.scenes.map(item => item.id === scene.id ? { ...item, spokenText: event.target.value } : item) } : current)}
+                        />
+                      </label>
+                    </article>
+                  ))}
+                  <p className="field-help">Use tags expressivas como [excited] e [whispers], sem SSML. Para nomes difíceis, use IPA entre barras, por exemplo /ʒuˈɐ̃w̃/. O texto falado deve manter as mesmas palavras da narração editorial; a validação ocorre antes da chamada paga.</p>
+                  <div className="narration-status">
+                    {narrationDirty ? 'Alterações não salvas — a aprovação anterior não vale para este texto/voz.' :
+                      !narration?.approved ? 'Narração aguardando sua aprovação explícita.' :
+                      !narration.audioReady ? 'Narração aprovada; gere os áudios por cena.' :
+                      narration.audioApproved ? 'Áudios gerados e aprovados para render.' : 'Áudio gerado; selecione cada clipe e aprove-o na prévia antes do render.'}
+                  </div>
+                  <div className="editor-footer">
+                    <button className="button small secondary" disabled={!narrationDirty || Boolean(running) || busy.has('save-narration')} onClick={() => { void saveNarration(); }}>
+                      <Save size={14} />Salvar narração
+                    </button>
+                    <div className="heading-actions">
+                      <button className="button small secondary" disabled={!narration || narrationDirty || !narrationDraft.voiceId || !snapshot.integrations.elevenLabs.configured || Boolean(running) || busy.has('approve-narration')} onClick={() => { void approveNarration(); }}>
+                        <Check size={14} />Aprovar texto
+                      </button>
+                      <button className="button small primary" disabled={!narration?.approved || narrationDirty || narration.audioReady || busy.has('generate-narration') || Boolean(running)} onClick={() => { void generateNarration(); }}>
+                        <AudioLines size={14} />Gerar áudio
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+
           <section className="assets-section">
             <div className="section-heading">
               <h2>Arquivos do projeto</h2>
               <div className="heading-actions">
-                <button className="button small primary" disabled={busy.has('render') || Boolean(running)} onClick={() => { void render(); }}>
+                <button className="button small primary" disabled={busy.has('render') || Boolean(running) || (project.kind === 'video' && hasNarration && (!narration || (Boolean(narration.voiceId) && (!narration.approved || !narration.audioReady || !narration.audioApproved || narrationDirty))))} onClick={() => { void render(); }}>
                   {project.kind === 'image' ? <WandSparkles size={15} /> : <Play size={15} />}
                   {project.kind === 'image' ? 'Renderizar Carrossel' : 'Renderizar Vídeo MP4'}
                 </button>
@@ -309,11 +468,37 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
             <p>Você dirige. O agente estrutura o roteiro/slides e renderiza o carrossel no contexto deste projeto.</p>
             <label>
               Provedor
-              <select value={provider} onChange={event => setProvider(event.target.value as Provider)} disabled={Boolean(running) || busy.has('agent')}>
+              <select value={provider} onChange={event => { setProvider(event.target.value as Provider); setModel(''); }} disabled={Boolean(running) || busy.has('agent')}>
                 <option value="codex">OpenAI Codex</option>
                 <option value="claude">Anthropic Claude Code</option>
               </select>
             </label>
+            <label htmlFor="agent-model">Modelo</label>
+            <select id="agent-model" value={model} onChange={event => setModel(event.target.value)} disabled={Boolean(running) || busy.has('agent')} aria-describedby="agent-model-help">
+              <option value="">Padrão da conta</option>
+              {MODEL_CATALOG[provider].map(option => <option key={option.id} value={option.id}>{option.name} · custo {option.costTier.toLowerCase()}</option>)}
+              <option value="custom">Outro ID…</option>
+            </select>
+            {model === 'custom' && <input
+              aria-label="ID personalizado do modelo"
+              value={customModel}
+              onChange={event => setCustomModel(event.target.value)}
+              maxLength={100}
+              placeholder="ID aceito pelo CLI"
+              disabled={Boolean(running) || busy.has('agent')}
+            />}
+            {selectedModelInfo && <p className="field-help"><strong>{selectedModelInfo.profile}</strong> Referência API: ${selectedModelInfo.inputUsdPerMillion} entrada / ${selectedModelInfo.outputUsdPerMillion} saída por 1 milhão de tokens.</p>}
+            <details className="model-cost-comparison">
+              <summary>Comparar modelos e custos</summary>
+              <ul>
+                {MODEL_CATALOG[provider].map(option => <li key={option.id}>
+                  <span><strong>{option.name}</strong><small>{option.profile}</small></span>
+                  <span className="model-cost">Entrada ${option.inputUsdPerMillion}/1M · saída ${option.outputUsdPerMillion}/1M USD</span>
+                </li>)}
+              </ul>
+              <p>Preços de referência da API em USD por 1 milhão de tokens; indicam custo relativo, não o valor desta tarefa. Codex/Claude autenticados por assinatura usam cotas e regras próprias. O Studio não recebe medição de tokens desses CLIs, então não consegue prever a fatura real.</p>
+            </details>
+            <p id="agent-model-help" className="field-help">Modelos conhecidos; o acesso depende do plano/conta e da versão instalada do CLI. Escolha outro ID se seu acesso tiver opções diferentes.</p>
             <label htmlFor="agent-prompt">O que vamos criar?</label>
             <textarea
               id="agent-prompt"
@@ -325,7 +510,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
               disabled={Boolean(running) || busy.has('agent')}
             />
             {dirty && <p className="field-help warning-text">Salve o briefing e as notas antes de iniciar para incluir suas alterações.</p>}
-            <button className="button primary full" disabled={!prompt.trim() || Boolean(running) || busy.has('agent') || dirty} onClick={() => { void startAgent(); }}>
+            <button className="button primary full" disabled={!prompt.trim() || (model === 'custom' && !customModel.trim()) || Boolean(running) || busy.has('agent') || dirty} onClick={() => { void startAgent(); }}>
               <Send size={16} />{running ? 'Sessão em andamento…' : 'Gerar com IA'}
             </button>
             <p className="composer-footnote"><TerminalSquare size={13} />Acompanhe o progresso ao vivo no console.</p>

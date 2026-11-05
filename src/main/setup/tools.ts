@@ -7,7 +7,7 @@ import type { CliId, CliOperationResult, CliUpdateStatus, Job, ToolStatus } from
 import type { Services } from '../context.js';
 
 const names: Record<string, string> = {
-  git: 'Git', node: 'Node.js', npm: 'npm', python: 'Python', ffmpeg: 'FFmpeg',
+  git: 'Git', node: 'Node.js', npm: 'npm', python: 'Python', ffmpeg: 'FFmpeg', ffprobe: 'FFprobe',
   gh: 'GitHub CLI', codex: 'Codex', claude: 'Claude Code', maestro: 'Orquestrador Maestro', hyperframes: 'HyperFrames',
 };
 const packages: Record<string, string> = {
@@ -172,7 +172,7 @@ export async function toolStatus(tool: string, services: Services): Promise<Tool
   }
   if (tool === 'codex' || tool === 'claude') result.source = managedPath(tool, path, services) ? 'managed' : 'external';
   try {
-    const version = await captureTool(tool, tool === 'ffmpeg' ? ['-version'] : ['--version'], services);
+    const version = await captureTool(tool, tool === 'ffmpeg' || tool === 'ffprobe' ? ['-version'] : ['--version'], services);
     result.installed = version.code === 0;
     // Only a version token crosses IPC; raw process output may contain account information.
     result.version = versionFrom(version.stdout + '\n' + version.stderr) ?? (version.stdout + '\n' + version.stderr).match(/\b\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.-]+)?\b/)?.[0];
@@ -317,7 +317,7 @@ export async function installTool(tool: string, services: Services): Promise<Job
   if (process.platform === 'win32') {
     const winget = await resolveTool('winget', services);
     if (!winget) throw new Error('Instale o App Installer da Microsoft Store para disponibilizar winget. Depois reinicie o aplicativo. Nenhum instalador foi executado.');
-    const ids: Record<string, string> = { git: 'Git.Git', node: 'OpenJS.NodeJS.LTS', npm: 'OpenJS.NodeJS.LTS', python: 'Python.Python.3.12', ffmpeg: 'Gyan.FFmpeg', gh: 'GitHub.cli' };
+    const ids: Record<string, string> = { git: 'Git.Git', node: 'OpenJS.NodeJS.LTS', npm: 'OpenJS.NodeJS.LTS', python: 'Python.Python.3.12', ffmpeg: 'Gyan.FFmpeg', ffprobe: 'Gyan.FFmpeg', gh: 'GitHub.cli' };
     const id = ids[tool];
     if (!id) throw new Error('Não existe receita Windows verificada para esta ferramenta.');
     return services.run({ title: `Instalar ${names[tool]} — WinGet, escopo usuário; aceite os termos no terminal`, executable: winget,
@@ -325,10 +325,10 @@ export async function installTool(tool: string, services: Services): Promise<Job
   }
   if (process.platform !== 'linux') throw new Error('Instalação automática disponível apenas para Linux e Windows. Use a distribuição oficial da ferramenta.');
   const recipes: Array<{ manager: string; args: string[]; tools: Record<string, string[]> }> = [
-    { manager: 'apt-get', args: ['install', '--no-upgrade'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python3', 'python3-venv', 'python3-pip'], ffmpeg: ['ffmpeg'], gh: ['gh'] } },
-    { manager: 'dnf', args: ['install'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python3', 'python3-pip'], ffmpeg: ['ffmpeg-free'], gh: ['gh'] } },
-    { manager: 'pacman', args: ['-S', '--needed'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python', 'python-pip'], ffmpeg: ['ffmpeg'], gh: ['github-cli'] } },
-    { manager: 'zypper', args: ['install'], tools: { git: ['git'], node: ['nodejs22', 'npm22'], npm: ['npm22'], python: ['python311', 'python311-pip'], ffmpeg: ['ffmpeg'], gh: ['gh'] } },
+    { manager: 'apt-get', args: ['install', '--no-upgrade'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python3', 'python3-venv', 'python3-pip'], ffmpeg: ['ffmpeg'], ffprobe: ['ffmpeg'], gh: ['gh'] } },
+    { manager: 'dnf', args: ['install'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python3', 'python3-pip'], ffmpeg: ['ffmpeg-free'], ffprobe: ['ffmpeg-free'], gh: ['gh'] } },
+    { manager: 'pacman', args: ['-S', '--needed'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python', 'python-pip'], ffmpeg: ['ffmpeg'], ffprobe: ['ffmpeg'], gh: ['github-cli'] } },
+    { manager: 'zypper', args: ['install'], tools: { git: ['git'], node: ['nodejs22', 'npm22'], npm: ['npm22'], python: ['python311', 'python311-pip'], ffmpeg: ['ffmpeg'], ffprobe: ['ffmpeg'], gh: ['gh'] } },
   ];
   const pkexec = await resolveTool('pkexec', services);
   if (!pkexec) throw new Error('A instalação de pré-requisitos Linux exige autorização administrativa humana. O serviço gráfico pkexec não está disponível. Peça ao administrador para instalar a ferramenta com o gerenciador oficial da distribuição; o aplicativo não executa sudo.');
