@@ -1257,6 +1257,46 @@ fieldset {
   font-size: 12px;
   margin: 0;
 }
+.model-cost-comparison {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-soft);
+  font-size: 12px;
+}
+.model-cost-comparison summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.model-cost-comparison ul {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  margin: 0;
+  list-style: none;
+}
+.model-cost-comparison li {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.model-cost-comparison li > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+.model-cost-comparison small, .model-cost-comparison p {
+  color: var(--muted);
+}
+.model-cost-comparison p {
+  margin: 0;
+  line-height: 1.5;
+}
+.model-cost {
+  flex: 0 0 auto;
+  text-align: right;
+  white-space: nowrap;
+}
 .warning-text {
   color: var(--warn);
 }

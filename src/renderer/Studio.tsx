@@ -4,6 +4,7 @@ import type { Asset, ElevenLabsVoice, Job, NarrationState, Project, ProjectDetai
 import { Empty, ErrorNotice, Loading } from './components';
 import { errorMessage, invoke, useJobs, type ScreenProps } from './state';
 import { ActivityCard } from './Console';
+import { MODEL_CATALOG } from './model-catalog';
 
 function Media({ projectId, asset }: { projectId: string; asset: Asset }) {
   const [content, setContent] = useState<string | null>(null);
@@ -61,6 +62,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const projectJobs = jobs.filter(job => job.projectId === id);
   const running = projectJobs.find(job => job.status === 'running');
   const narrationJobStatus = projectJobs.find(job => job.id === narrationJobId)?.status;
+  const selectedModelInfo = MODEL_CATALOG[provider].find(option => option.id === model);
 
   useEffect(() => {
     let active = true;
@@ -474,9 +476,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
             <label htmlFor="agent-model">Modelo</label>
             <select id="agent-model" value={model} onChange={event => setModel(event.target.value)} disabled={Boolean(running) || busy.has('agent')} aria-describedby="agent-model-help">
               <option value="">Padrão da conta</option>
-              {provider === 'codex'
-                ? <option value="gpt-6.1-sol">gpt-6.1-sol</option>
-                : <><option value="sonnet">Sonnet (mais rápido)</option><option value="opus">Opus (maior capacidade)</option><option value="haiku">Haiku (mais rápido)</option><option value="fable">Fable</option></>}
+              {MODEL_CATALOG[provider].map(option => <option key={option.id} value={option.id}>{option.name} · custo {option.costTier.toLowerCase()}</option>)}
               <option value="custom">Outro ID…</option>
             </select>
             {model === 'custom' && <input
@@ -487,7 +487,18 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
               placeholder="ID aceito pelo CLI"
               disabled={Boolean(running) || busy.has('agent')}
             />}
-            <p id="agent-model-help" className="field-help">Você pode escolher um modelo listado ou informar um ID aceito pelo CLI. O padrão usa a configuração da sua conta.</p>
+            {selectedModelInfo && <p className="field-help"><strong>{selectedModelInfo.profile}</strong> Referência API: ${selectedModelInfo.inputUsdPerMillion} entrada / ${selectedModelInfo.outputUsdPerMillion} saída por 1 milhão de tokens.</p>}
+            <details className="model-cost-comparison">
+              <summary>Comparar modelos e custos</summary>
+              <ul>
+                {MODEL_CATALOG[provider].map(option => <li key={option.id}>
+                  <span><strong>{option.name}</strong><small>{option.profile}</small></span>
+                  <span className="model-cost">Entrada ${option.inputUsdPerMillion}/1M · saída ${option.outputUsdPerMillion}/1M USD</span>
+                </li>)}
+              </ul>
+              <p>Preços de referência da API em USD por 1 milhão de tokens; indicam custo relativo, não o valor desta tarefa. Codex/Claude autenticados por assinatura usam cotas e regras próprias. O Studio não recebe medição de tokens desses CLIs, então não consegue prever a fatura real.</p>
+            </details>
+            <p id="agent-model-help" className="field-help">Modelos conhecidos; o acesso depende do plano/conta e da versão instalada do CLI. Escolha outro ID se seu acesso tiver opções diferentes.</p>
             <label htmlFor="agent-prompt">O que vamos criar?</label>
             <textarea
               id="agent-prompt"

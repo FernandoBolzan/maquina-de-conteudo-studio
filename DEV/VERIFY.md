@@ -92,7 +92,7 @@ During CDP inspection, the test harness navigated an AppImage window to the deve
 ## 2026-11-05 — ElevenLabs v4 no Studio
 
 - Studio: `npm run typecheck`, `npm run lint`, `npm test` (7/7) e `npm run build` passaram. Vite reportou bundle renderer 616.16 kB acima do aviso de 500 kB.
-- Runtime offline simulou `/v2/voices` e cofre cifrado: key ausente de `settings.json` e armazenada cifrada; sintetização bloqueada antes de aprovar; mudança no texto após aprovação invalidou o hash; zero chamadas TTS. Nenhuma API externa real foi chamada.
+- Runtime offline simulou `/v2/voices` e cofre cifrado: key ausente de `settings.json` e armazenada cifrada; síntese bloqueada antes de aprovar; mudança no texto após aprovação invalida o hash; asset de áudio apagado deixa de contar como pronto; zero chamadas TTS e nenhuma API externa real.
 - `npm run smoke` passou: 3 projetos, 1 marca, VideoGo ligado, PTY cancelado conforme cenário.
 - QA Chromium no preview compilado: projeto VideoGo de teste, edição/salvamento do texto, botões Aprovar/Gerar bloqueados sem cofre/voz, Preferências com instruções de API/clonagem; viewport 390×844 com `scrollWidth=390`, erros de console/renderer vazios.
 - VideoGo: `npm run typecheck`, `npm test` (49 core + 20 flicker), `npm run test:external-audio` e `npm run build` passaram. E2E confirmou render audível com fixture sintética e `--voice demo` sem duplicação.
