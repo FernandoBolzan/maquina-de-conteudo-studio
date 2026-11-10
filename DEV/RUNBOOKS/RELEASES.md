@@ -7,11 +7,11 @@
 - Os artefatos usam o template `artifactName: "${name}-${version}-${arch}.${ext}"`; o nome real do binário precisa corresponder ao `url` em `latest*.yml`, pois o updater baixa esse caminho da release.
 - Incrementar `PATCH` para correções compatíveis, `MINOR` para funcionalidades compatíveis e `MAJOR` para mudanças incompatíveis. Pré-releases usam sufixos SemVer (por exemplo `1.0.0-rc.1`) e não são publicadas como estáveis por este fluxo.
 
-## Preparação local v0.2.0 (não publicada)
+## Histórico de publicação
 
-- `package.json` e `package-lock.json` declaram `0.2.0`, incremento `MINOR` compatível após v0.1.1. As notas de usuário e limites desta preparação estão em `README.md`.
-- A release pública continua v0.1.1. Não existe tag, commit de release ou publicação v0.2.0 nesta preparação.
-- Antes de distribuir, repetir typecheck, lint, testes, smoke e build no conteúdo final; executar builds nativos Linux/Windows/macOS pelo workflow e validar instaladores nos hosts correspondentes.
+- v0.2.0 publicada: primeira release com atualização automática. Conhecido: abas do submenu "Motores & CLIs" e "ElevenLabs & Voz" cortadas em janelas estreitas; corrigido em 0.2.1.
+- v0.2.1 publicada: correção das abas do submenu, screenshots e notas com downloads, avisos de instalação, open source e link do curso.
+- Antes de distribuir uma versão, repetir typecheck, lint, testes, smoke e build no conteúdo final. O workflow `release.yml` compila Linux, Windows e macOS antes de publicar; a validação dos instaladores em hosts nativos ainda não foi feita.
 - Obter autorização explícita antes de criar/enviar commit/tag, iniciar o workflow de publicação ou disponibilizar qualquer artefato publicamente.
 
 ## Publicação

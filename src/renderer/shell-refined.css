@@ -346,6 +346,7 @@ html, body, #root {
 /* ==================== SETUP SUBNAV & TABS ==================== */
 .setup-subnav {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 4px;
@@ -354,7 +355,6 @@ html, body, #root {
   border-radius: 12px;
   margin-bottom: 20px;
   max-width: 100%;
-  overflow-x: auto;
 }
 
 .setup-tab-btn {

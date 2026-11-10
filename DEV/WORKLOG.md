@@ -113,3 +113,11 @@
 - Verified: `npm run typecheck`, `npm run lint`, `npm test` 230/230, `npm run build`, `npm run smoke` (`ok`), `npm run dist:linux` (AppImage `maquina-de-conteudo-0.2.0-x86_64.AppImage` e `latest-linux.yml` com o mesmo nome).
 - Limits: a descarga e instalação ponta a ponta não foram exercitadas (exige release superior publicada); Windows e macOS não foram compilados aqui; macOS sem assinatura não atualiza; `.deb` segue manual.
 - Next context: após a release, testar AppImage instalado com v0.2.0 contra v0.2.1 de teste; decidir assinatura macOS/Windows.
+
+## 2026-11-10 — Release 0.2.1: abas do submenu corrigidas
+- Spec: `DEV/SPECS/ACTIVE.md`
+- Changed: `src/renderer/shell-refined.css` — `.setup-subnav` com `flex-wrap: wrap` e sem `overflow-x: auto`; as abas "Motores & CLIs" e "ElevenLabs & Voz" quebram para outra linha em vez de cortar. `package.json` e `package-lock.json` em 0.2.1. README e `DEV/RUNBOOKS/RELEASES.md` atualizados ao estado publicado.
+- Reason: a captura do usuário mostrou as abas cortadas na v0.2.0. O runbook proíbe mover tag publicada, então a correção sai como 0.2.1.
+- Verified: `npm run typecheck`, `npm run lint`, `npm test` 230/230, `npm run smoke` (`ok: true`); preview visual em 4178 mostrou as duas abas inteiras, sem barra de rolagem.
+- Limits: Windows e macOS nativos não foram testados; macOS sem assinatura não atualiza; sem arquivo `LICENSE` (licença não definida). Alterações não commitadas de outra frente (ARIA em Setup/VideoGo, ajustes de marca em CSS, `App.tsx`, arquivamento do WORKLOG) ficaram fora deste release por não terem sido revisadas.
+- Next context: após publicar 0.2.1, testar a atualização de uma instalação 0.2.0 para 0.2.1; decidir licença e assinatura de macOS/Windows.

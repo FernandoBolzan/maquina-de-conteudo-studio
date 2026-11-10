@@ -1,14 +1,14 @@
 # Máquina de Conteúdo (Studio)
 
-**Última release pública: v0.1.1** · [Baixar para seu sistema](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/tag/v0.1.1) · [Ver todas as releases](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases)
+**Última release pública: v0.2.1** · [Baixar para seu sistema](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/tag/v0.2.1) · [Ver todas as releases](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases)
 
 Aplicativo desktop para organizar e produzir conteúdo de imagem e vídeo em um workspace local. Reúne projetos, marcas, assistentes por CLI, motores criativos locais, revisão humana, exportação e ponte entre fluxos de imagem e vídeo.
 
 O Studio é construído com Electron, React e TypeScript. Ele orquestra os motores **PostNow**, **VideoGo** e **Orquestrador Maestro**; Codex e Claude Code são executados por seus CLIs oficiais. O Studio não é um serviço SaaS nem armazena projetos em uma nuvem própria.
 
-> **Downloads x checkout:** os arquivos públicos v0.1.1 abaixo são da tag `v0.1.1`. Este checkout prepara a versão **0.2.0**, ainda sem tag ou publicação; ele inclui mudanças que não estão nesses instaladores. Um build local não é release oficial nem atualização automática.
+> **Open source e curso:** este repositório é público. O Studio faz parte do curso [Máquina de Conteúdo](https://www.fernandobolzan.com/maquina-de-conteudo). A licença ainda não foi definida e o repositório não tem arquivo `LICENSE`.
 
-## Notas para v0.2.0 — preparação local
+## Novidades desde a v0.1.1
 
 - Criação guiada mantém PostNow (imagem/carrossel) e VideoGo (vídeo) em trilhas distintas; o assunto sugere um nome editável e o template revisado segue para o composer sem iniciar o agente.
 - O Studio apresenta roteiros VideoGo em rascunho e permite revisá-los por cena antes da aprovação explícita. A narração é organizada por cena: use gravação no Modo Studio, arquivo próprio, Piper local ou ElevenLabs. O modo sem narração permite testar o vídeo sem apagar os áudios, para retomá-los depois.
@@ -18,21 +18,21 @@ O Studio é construído com Electron, React e TypeScript. Ele orquestra os motor
 - **Geração com progresso ao vivo:** atividade do agente e cronômetro aparecem na etapa de geração. A etapa Textos mostra headline, copy, fontes e quem aparece na arte, sem prompts. Referências da marca entram como imagens de entrada do ImageGen na geração e na correção. 1:1 fecha quando o ImageGen entrega quadrado; 4:3 e 9:16 só fecham quando a saída já está na proporção, ou quase; saídas mais distantes são recusadas e a rodada falha. O formato 4:5 foi removido do app; projetos antigos em 4:5 abrem pedindo a escolha de outro formato.
 - **Troca de formato:** ao mudar o formato na etapa de imagens, confirme a sessão de IA para adaptar os textos já existentes. O Studio preserva o conteúdo anterior, volta para Textos e exige nova revisão e aprovação antes de gerar imagens. Se a adaptação falhar ou for interrompida, use a opção de tentar novamente; uma nova adaptação para carrossel usa cinco páginas quando o formato anterior não tinha uma quantidade compatível.
 - **Quem aparece na arte:** Ninguém, Outra pessoa ou Cliente (retrato aprovado). Com retrato aprovado no perfil PostNow, capa, última página de carrossel e post ou Story de página única precisam mostrar a cliente; escolher Cliente sem retrato é recusado antes do motor. O Studio não cadastra o retrato: use `postnow client set-portrait <client_id> --image references/<arquivo>`.
-- Windows/macOS nativos, chamada paga e clonagem real ainda precisam de validação. Não há tag/release pública v0.2.0.
+- Windows/macOS nativos, chamada paga e clonagem real ainda precisam de validação. A atualização automática de 0.2.0 para 0.2.1 ainda não foi observada em instalador real.
 
-## Downloads — v0.1.1
+## Downloads — v0.2.1
 
-Os links abaixo apontam diretamente para arquivos anexados à [release pública v0.1.1](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/tag/v0.1.1). Confira sistema e arquitetura antes de baixar.
+Os links abaixo apontam para os arquivos anexados à [release v0.2.1](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/tag/v0.2.1). Confira sistema e arquitetura antes de baixar.
 
 | Sistema | Arquivo | Download |
 |---|---|---|
-| Linux x86_64 | AppImage | [maquina-de-conteudo-0.1.1-x86_64.AppImage](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.1.1/maquina-de-conteudo-0.1.1-x86_64.AppImage) |
-| Debian/Ubuntu x86_64 | Pacote `.deb` | [maquina-de-conteudo-0.1.1-amd64.deb](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.1.1/maquina-de-conteudo-0.1.1-amd64.deb) |
-| Windows x64 | Instalador NSIS `.exe` | [maquina-de-conteudo-0.1.1-x64.exe](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.1.1/maquina-de-conteudo-0.1.1-x64.exe) |
-| macOS Apple Silicon (arm64) | Imagem `.dmg` | [maquina-de-conteudo-0.1.1-arm64.dmg](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.1.1/maquina-de-conteudo-0.1.1-arm64.dmg) |
-| macOS Apple Silicon (arm64) | Arquivo `.zip` | [maquina-de-conteudo-0.1.1-arm64.zip](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.1.1/maquina-de-conteudo-0.1.1-arm64.zip) |
+| Linux x86_64 | AppImage | [maquina-de-conteudo-0.2.1-x86_64.AppImage](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-x86_64.AppImage) |
+| Debian/Ubuntu x86_64 | Pacote `.deb` | [maquina-de-conteudo-0.2.1-amd64.deb](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-amd64.deb) |
+| Windows x64 | Instalador NSIS `.exe` | [maquina-de-conteudo-0.2.1-x64.exe](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-x64.exe) |
+| macOS Apple Silicon (arm64) | Imagem `.dmg` | [maquina-de-conteudo-0.2.1-arm64.dmg](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-arm64.dmg) |
+| macOS Apple Silicon (arm64) | Arquivo `.zip` | [maquina-de-conteudo-0.2.1-arm64.zip](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-arm64.zip) |
 
-> A release contém Linux x86_64, Windows x64 e macOS arm64. Não há instalador Linux ARM64 nem macOS Intel/x64 nesta versão. Os builds Windows/macOS foram publicados pelo GitHub Actions, mas ainda não foram instalados nem exercitados em hosts nativos.
+> A release contém Linux x86_64, Windows x64 e macOS arm64. Não há instalador Linux ARM64 nem macOS Intel/x64. Os builds foram gerados pelo GitHub Actions e não foram instalados em hosts Windows ou macOS nativos. Avisos: o Windows mostra SmartScreen (**Mais informações > Executar assim mesmo**); o macOS pede **Ajustes do Sistema > Privacidade e Segurança > Abrir mesmo assim** porque o app não é assinado nem notarizado; o `.deb` precisa ser instalado manualmente a cada versão.
 
 ## O que o Studio faz
 
@@ -143,7 +143,7 @@ Em vez da voz da ElevenLabs, cada cena pode receber áudio próprio: envie um ar
 
 ## Versão, releases e atualizações
 
-A release pública continua em **v0.1.1**. Este checkout declara **0.2.0** em `package.json` e no lockfile para preparar a próxima versão SemVer; a tag e a publicação ainda não existem.
+A release pública mais recente é **v0.2.1**, publicada pela tag `v0.2.1`; `package.json` e o lockfile declaram a mesma versão.
 
 Em uma versão empacotada, o app baixa novas versões sozinho em segundo plano. Em **Preferências**, **Reiniciar e atualizar** aplica a versão pronta; se você não reiniciar, ela é aplicada ao fechar o app. O restart é recusado enquanto houver tarefas em execução. O AppImage Linux e o instalador Windows usam essa atualização automática; pacotes `.deb` são atualizados pelo gerenciador do sistema. A atualização automática no macOS exige build assinado, que ainda não existe; os feeds macOS e Windows precisam de validação nativa antes de afirmar compatibilidade completa.
 
@@ -151,11 +151,11 @@ Em uma versão empacotada, o app baixa novas versões sozinho em segundo plano. 
 
 | Sistema | Artefatos publicados | Evidência disponível |
 |---|---|---|
-| Linux x86_64 | AppImage e `.deb` v0.1.1 | O AppImage testado foi um build local da branch atual, não o arquivo publicado na tag. Abriu em workspace descartável; navegação, Preferências e projeto VideoGo foram exercitados. O updater informou que 0.1.1 é a versão atual. O `.deb` local teve metadados conferidos, mas não foi instalado com `apt`. |
-| Windows x64 | Instalador NSIS `.exe` v0.1.1 | Build e publicação pelo GitHub Actions; não instalado nem exercitado em Windows nativo. |
-| macOS arm64 | DMG e ZIP v0.1.1 | Build e publicação pelo GitHub Actions; não instalado nem exercitado em macOS nativo. Sem artefato Intel/x64. |
+| Linux x86_64 | AppImage e `.deb` v0.2.1 | Build e publicação pelo GitHub Actions. O AppImage testado localmente (build da branch, em workspace descartável) abriu e exercitou navegação, Preferências e projeto VideoGo. A atualização automática entre versões publicadas ainda não foi executada. O `.deb` não atualiza sozinho. |
+| Windows x64 | Instalador NSIS `.exe` v0.2.1 | Build e publicação pelo GitHub Actions; não instalado nem exercitado em Windows nativo. Sem assinatura: o SmartScreen avisa na primeira execução. |
+| macOS arm64 | DMG e ZIP v0.2.1 | Build e publicação pelo GitHub Actions; não instalado nem exercitado em macOS nativo. Sem assinatura Apple, então a atualização automática não é habilitada. Sem artefato Intel/x64. |
 
-Os binários v0.1.1 não têm assinatura/notarização. A publicação dos três alvos foi concluída, mas compatibilidade completa só pode ser afirmada após instalar e exercitar os fluxos em hosts Linux, Windows e macOS nativos. A consulta do updater foi validada no build local Linux; uma atualização entre duas versões diferentes não foi executada.
+Os binários v0.2.1 não têm assinatura/notarização. A publicação dos três alvos foi concluída, mas compatibilidade completa só pode ser afirmada após instalar e exercitar os fluxos em hosts Linux, Windows e macOS nativos. A atualização automática de 0.2.0 para 0.2.1 ainda não foi observada em instalador real.
 
 ## Desenvolvimento e testes
 
@@ -217,4 +217,4 @@ Para uma nova distribuição, primeiro atualize `package.json` e o lockfile para
 - [Contexto técnico do projeto](DEV/CONTEXT.md)
 - [Repositório do Studio](https://github.com/FernandoBolzan/maquina-de-conteudo-studio)
 - [Código atual na branch `main`](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/tree/main)
-- [Tag do release v0.1.1](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/tree/v0.1.1)
+- [Tag do release v0.2.1](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/tree/v0.2.1)
