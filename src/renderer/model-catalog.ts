@@ -1,4 +1,4 @@
-import type { Provider } from '../shared/contracts.js';
+import { VIDEO_AGENT_MODEL, type Provider } from '../shared/contracts.js';
 
 export interface ModelOption {
   id: string;
@@ -21,9 +21,9 @@ export const MODEL_CATALOG: Record<Provider, ModelOption[]> = {
   ],
   claude: [
     { id: 'fable', name: 'Claude Fable 5.1', profile: 'Mais capaz para tarefas longas, ambíguas e difíceis.', inputUsdPerMillion: 10, outputUsdPerMillion: 50, costTier: 'Alto' },
-    { id: 'opus', name: 'Claude Opus 5.5', profile: 'Raciocínio profundo e problemas difíceis.', inputUsdPerMillion: 4, outputUsdPerMillion: 20, costTier: 'Alto' },
-    { id: 'sonnet', name: 'Claude Sonnet 5.5', profile: 'Equilíbrio para trabalho diário de criação e código.', inputUsdPerMillion: 2, outputUsdPerMillion: 10, costTier: 'Médio' },
-    { id: 'haiku', name: 'Claude Haiku 5.5', profile: 'Rápido e econômico para tarefas simples e objetivas.', inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.5, costTier: 'Baixo' },
+    { id: VIDEO_AGENT_MODEL, name: 'Claude Opus 5.5', profile: 'Raciocínio profundo; versão fixa, usada sempre nos projetos de vídeo.', inputUsdPerMillion: 4, outputUsdPerMillion: 20, costTier: 'Alto' },
+    { id: 'sonnet', name: 'Claude Sonnet · alias', profile: 'Trabalho diário; o CLI escolhe a versão atual de Sonnet.', inputUsdPerMillion: 2, outputUsdPerMillion: 10, costTier: 'Médio' },
+    { id: 'haiku', name: 'Claude Haiku · alias', profile: 'Rápido e econômico; o CLI escolhe a versão atual de Haiku.', inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.5, costTier: 'Baixo' },
   ],
 };
 

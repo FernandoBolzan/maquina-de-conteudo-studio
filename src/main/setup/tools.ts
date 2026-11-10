@@ -2,6 +2,7 @@ import { access, mkdir, mkdtemp, rename, rm, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { CliId, CliOperationResult, CliUpdateStatus, Job, ToolStatus } from '../../shared/contracts.js';
 import type { Services } from '../context.js';
@@ -9,6 +10,7 @@ import type { Services } from '../context.js';
 const names: Record<string, string> = {
   git: 'Git', node: 'Node.js', npm: 'npm', python: 'Python', ffmpeg: 'FFmpeg', ffprobe: 'FFprobe',
   gh: 'GitHub CLI', codex: 'Codex', claude: 'Claude Code', maestro: 'Orquestrador Maestro', hyperframes: 'HyperFrames',
+  cloudflared: 'Cloudflare Tunnel',
 };
 const packages: Record<string, string> = {
   codex: '@openai/codex', claude: '@anthropic-ai/claude-code', maestro: '@iapro/orquestrador-maestro-cli', hyperframes: 'hyperframes',
@@ -16,6 +18,7 @@ const packages: Record<string, string> = {
 const binaries: Record<string, string[]> = {
   python: process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'],
   maestro: ['orquestrador-maestro'],
+  cloudflared: ['cloudflared'],
 };
 
 export function normalizeTool(tool: string): string {
@@ -101,7 +104,10 @@ async function executable(path: string): Promise<boolean> {
 }
 
 function searchDirectories(services: Services): string[] {
-  const local = Object.keys(packages).map(tool => join(toolPrefix(services, tool), 'node_modules', '.bin'));
+  const local = [
+    ...Object.keys(packages).map(tool => join(toolPrefix(services, tool), 'node_modules', '.bin')),
+    toolPrefix(services, 'cloudflared'),
+  ];
   const system = (process.env.PATH ?? process.env.Path ?? '')
     .split(delimiter)
     .map(path => path.replace(/^"|"$/g, ''))
@@ -140,14 +146,22 @@ export async function resolveTool(tool: string, services: Services): Promise<str
 }
 
 export async function toolEnvironment(services: Services): Promise<Record<string, string>> {
-  return {
+  const env: Record<string, string> = {
     PATH: searchDirectories(services).join(delimiter),
     POSTNOW_HOME: join(services.dataDir, 'engine-data', 'postnow'),
     ORQUESTRADOR_MAESTRO_TELEMETRY: '0',
     ORQUESTRADOR_MAESTRO_SKIP_CLI_UPDATE: '1',
     DISABLE_AUTOUPDATER: '1',
     DISABLE_UPDATES: '1',
+    // The Studio keeps its own Claude and Codex logins; terminal and desktop apps keep theirs in ~/.claude and ~/.codex.
+    CLAUDE_CONFIG_DIR: join(services.dataDir, 'claude-config'),
+    CODEX_HOME: join(services.dataDir, 'codex-home'),
   };
+  const videogoPython = join(homedir(), '.local', 'share', 'videogo-venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  if (await executable(videogoPython)) {
+    env.PYTHON = videogoPython;
+  }
+  return env;
 }
 
 export async function requireTool(tool: string, services: Services): Promise<string> {
@@ -182,20 +196,86 @@ export async function toolStatus(tool: string, services: Services): Promise<Tool
       const [major = 0, minor = 0] = (result.version ?? '').split('.').map(Number);
       if (major < 3 || (major === 3 && minor < 11)) result.detail = 'PostNow exige Python 3.11 ou mais recente.';
     }
+    if (tool === 'cloudflared') {
+      if (result.installed) {
+        result.detail = 'Instalado. Permite criar túneis seguros para acesso remoto pelo celular.';
+      } else {
+        result.detail = 'Não encontrado. Permite conectar o celular pelo túnel seguro Cloudflare para acesso remoto.';
+      }
+    }
     if (result.installed && ['gh', 'codex', 'claude'].includes(tool)) {
       const args = tool === 'gh' ? ['auth', 'status', '--hostname', 'github.com'] : tool === 'codex' ? ['login', 'status'] : ['auth', 'status', '--json'];
       try {
         const auth = await captureTool(tool, args, services);
         result.authenticated = auth.code === 0;
         if (tool === 'claude' && auth.code === 0) {
-          const data: unknown = JSON.parse(auth.stdout);
-          result.authenticated = typeof data === 'object' && data !== null && 'loggedIn' in data && data.loggedIn === true;
+          try {
+            const data: unknown = JSON.parse(auth.stdout);
+            result.authenticated = typeof data === 'object' && data !== null && 'loggedIn' in data && data.loggedIn === true;
+            if (result.authenticated && typeof data === 'object' && data !== null && 'email' in data && typeof data.email === 'string') {
+              // O plano explica limites de uso (ex.: Pro esgota a janela de 5 h rápido com Opus).
+              const plan = 'subscriptionType' in data && typeof data.subscriptionType === 'string' && /^[a-z0-9_-]{1,20}$/i.test(data.subscriptionType) ? ` · plano ${data.subscriptionType}` : '';
+              result.account = data.email + plan;
+            }
+          } catch { /* Formato não-JSON */ }
+        }
+        if (tool === 'gh' && (auth.code === 0 || auth.stdout.includes('Logged in to') || auth.stderr.includes('Logged in to'))) {
+          const combined = auth.stdout + '\n' + auth.stderr;
+          const login = combined.match(/Logged in to [^\s]+ account ([A-Za-z0-9_-]+)/i)?.[1];
+          // E-mail principal só com o escopo user:email (pedido no login); sem ele, vale o e-mail público do perfil.
+          const emails = await captureTool('gh', ['api', 'user/emails', '--jq', '.[] | select(.primary) | .email'], services).catch(() => undefined);
+          const profile = await captureTool('gh', ['api', 'user', '--jq', '.email // ""'], services).catch(() => undefined);
+          const email = [emails, profile].map(item => item?.code === 0 ? item.stdout.trim() : '').find(value => EMAIL.test(value));
+          if (login || email) result.account = email && login ? `${email} (@${login})` : email ?? `@${login}`;
+        }
+        if (tool === 'codex' && auth.code === 0) {
+          const combined = auth.stdout + '\n' + auth.stderr;
+          const method = combined.match(/Logged in using ([^\r\n]+)/i)?.[1]?.trim();
+          const account = await codexAccount(await requireTool('codex', services), await toolEnvironment(services)).catch(() => undefined);
+          result.account = account ? `${account.email}${account.plan ? ` · plano ${account.plan}` : ''}` : method;
         }
         if (!result.authenticated) result.detail = 'Sessão não confirmada pelo CLI. Faça login ou verifique a conexão. Nenhuma credencial é lida pelo aplicativo.';
       } catch { result.detail = 'Não foi possível consultar a sessão. Verifique o CLI e a conexão.'; }
     }
   } catch { result.detail = 'O diagnóstico não pôde executar este programa. Verifique permissões e dependências.'; }
   return result;
+}
+
+const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
+
+/**
+ * E-mail e plano da conta ChatGPT do Codex pela API oficial do CLI (`app-server` → `account/read`), sem ler arquivos de
+ * credencial. O servidor precisa do stdin aberto até responder, por isso não usa `services.capture`.
+ */
+function codexAccount(executable: string, env: Record<string, string>): Promise<{ email: string; plan?: string } | undefined> {
+  const { promise, resolve: resolvePromise } = Promise.withResolvers<{ email: string; plan?: string } | undefined>();
+  const child = spawn(executable, ['app-server'], { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: process.platform === 'win32' });
+  let buffer = '';
+  const finish = (value: { email: string; plan?: string } | undefined) => { clearTimeout(timer); child.kill(); resolvePromise(value); };
+  const timer = setTimeout(() => finish(undefined), 10_000);
+  child.on('error', () => finish(undefined));
+  child.on('close', () => finish(undefined));
+  child.stdout.on('data', chunk => {
+    buffer += chunk;
+    for (const line of buffer.split('\n').slice(0, -1)) {
+      try {
+        const message = JSON.parse(line) as { id?: number; result?: { account?: { email?: unknown; planType?: unknown } | null } };
+        if (message.id !== 2) continue;
+        const account = message.result?.account;
+        const email = typeof account?.email === 'string' && EMAIL.test(account.email) ? account.email : undefined;
+        const plan = typeof account?.planType === 'string' && /^[a-z0-9_-]{1,20}$/i.test(account.planType) ? account.planType : undefined;
+        return finish(email ? { email, plan } : undefined);
+      } catch { /* linha parcial ou não JSON */ }
+    }
+    buffer = buffer.slice(buffer.lastIndexOf('\n') + 1);
+  });
+  child.stdin.on('error', () => undefined);
+  child.stdin.write([
+    { method: 'initialize', id: 1, params: { clientInfo: { name: 'maquina-de-conteudo', title: 'Máquina de Conteúdo', version: '0.2.0' } } },
+    { method: 'initialized' },
+    { method: 'account/read', id: 2, params: { refreshToken: false } },
+  ].map(message => JSON.stringify(message)).join('\n') + '\n');
+  return promise;
 }
 export async function checkCliUpdates(services: Services): Promise<CliUpdateStatus[]> {
   return Promise.all(CLI_TOOLS.map(async (id): Promise<CliUpdateStatus> => {
@@ -314,14 +394,54 @@ export async function installTool(tool: string, services: Services): Promise<Job
       args: ['install', '--prefix', prefix, '--save-exact', '--package-lock=true', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org', packages[tool]!],
       cwd: prefix, env, interactive: false, timeoutMs: 15 * 60 * 1000 });
   }
+  if (tool === 'cloudflared') {
+    let nodeExecutable = await resolveTool('node', services);
+    const executionEnv = { ...env };
+    if (!nodeExecutable && process.versions.electron) {
+      nodeExecutable = process.execPath;
+      executionEnv.ELECTRON_RUN_AS_NODE = '1';
+    }
+    if (!nodeExecutable) {
+      nodeExecutable = await requireTool('node', services);
+    }
+    const prefix = toolPrefix(services, tool);
+    await mkdir(prefix, { recursive: true, mode: 0o755 });
+    const targetBin = join(prefix, process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
+    const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
+    const downloadUrl = process.platform === 'win32'
+      ? `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-${arch}.exe`
+      : `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${arch}`;
+    const code = [
+      'const fs = require("node:fs");',
+      'const fsp = require("node:fs/promises");',
+      'const stream = require("node:stream/promises");',
+      '(async () => {',
+      `  const res = await fetch(${JSON.stringify(downloadUrl)});`,
+      '  if (!res.ok) throw new Error("Falha no download do cloudflared: " + res.statusText);',
+      `  const out = fs.createWriteStream(${JSON.stringify(targetBin)});`,
+      '  await stream.pipeline(res.body, out);',
+      `  await fsp.chmod(${JSON.stringify(targetBin)}, 0o755);`,
+      '  console.log("cloudflared instalado com sucesso em ' + targetBin + '");',
+      '})().catch(err => { console.error(err); process.exit(1); });',
+    ].join(' ');
+    return services.run({
+      title: `Instalar ${names[tool]} — download oficial Cloudflare`,
+      executable: nodeExecutable,
+      args: ['-e', code],
+      cwd: prefix,
+      env: executionEnv,
+      interactive: false,
+      timeoutMs: 5 * 60 * 1000,
+    });
+  }
   if (process.platform === 'win32') {
     const winget = await resolveTool('winget', services);
     if (!winget) throw new Error('Instale o App Installer da Microsoft Store para disponibilizar winget. Depois reinicie o aplicativo. Nenhum instalador foi executado.');
-    const ids: Record<string, string> = { git: 'Git.Git', node: 'OpenJS.NodeJS.LTS', npm: 'OpenJS.NodeJS.LTS', python: 'Python.Python.3.12', ffmpeg: 'Gyan.FFmpeg', ffprobe: 'Gyan.FFmpeg', gh: 'GitHub.cli' };
+    const ids: Record<string, string> = { git: 'Git.Git', node: 'OpenJS.NodeJS.LTS', npm: 'OpenJS.NodeJS.LTS', python: 'Python.Python.3.12', ffmpeg: 'Gyan.FFmpeg', ffprobe: 'Gyan.FFmpeg', gh: 'GitHub.cli', cloudflared: 'Cloudflare.cloudflared' };
     const id = ids[tool];
     if (!id) throw new Error('Não existe receita Windows verificada para esta ferramenta.');
-    return services.run({ title: `Instalar ${names[tool]} — WinGet, escopo usuário; aceite os termos no terminal`, executable: winget,
-      args: ['install', '--id', id, '--exact', '--source', 'winget', '--scope', 'user', '--interactive', '--no-upgrade'], env, interactive: true });
+    return services.run({ title: `Instalar ${names[tool]} — WinGet, escopo usuário, instalação silenciosa`, executable: winget,
+      args: ['install', '--id', id, '--exact', '--source', 'winget', '--scope', 'user', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--no-upgrade'], env, interactive: false });
   }
   if (process.platform !== 'linux') throw new Error('Instalação automática disponível apenas para Linux e Windows. Use a distribuição oficial da ferramenta.');
   const recipes: Array<{ manager: string; args: string[]; tools: Record<string, string[]> }> = [
@@ -335,8 +455,8 @@ export async function installTool(tool: string, services: Services): Promise<Job
   for (const recipe of recipes) {
     const manager = await resolveTool(recipe.manager, services);
     const list = recipe.tools[tool];
-    if (manager && list) return services.run({ title: `Instalar ${names[tool]} — autorize no diálogo do sistema e confirme os pacotes no terminal`, executable: pkexec,
-      args: [manager, ...recipe.args, ...list], env, interactive: true });
+    if (manager && list) return services.run({ title: `Instalar ${names[tool]} — autorize no diálogo gráfico do sistema`, executable: pkexec,
+      args: [manager, ...recipe.args, ...list], env, interactive: false, timeoutMs: 15 * 60 * 1000 });
   }
   throw new Error('Distribuição não reconhecida. Instale a ferramenta pelos repositórios oficiais do sistema e reabra o aplicativo. Nenhum script remoto ou sudo foi executado.');
 }

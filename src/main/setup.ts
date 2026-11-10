@@ -1,12 +1,12 @@
 import type { CliId, SetupStatus } from '../shared/contracts.js';
-import { consent, text, type Services } from './context.js';
+import { consent, text, type CommandResult, type Services } from './context.js';
 import { engineId, engineStatuses, linkEngine, manageEngine, testEngine } from './setup/engines.js';
 import { checkCliUpdates, installTool, manageCliTool, requireTool, toolEnvironment, toolStatus } from './setup/tools.js';
 export { resolveTool, toolEnvironment } from './setup/tools.js';
 
 const queues = new Map<string, Promise<void>>();
 const logins = new Set<string>();
-const toolIds = ['git', 'node', 'npm', 'python', 'ffmpeg', 'ffprobe', 'gh', 'codex', 'claude', 'maestro', 'hyperframes'];
+const toolIds = ['git', 'node', 'npm', 'python', 'ffmpeg', 'ffprobe', 'gh', 'codex', 'claude', 'maestro', 'hyperframes', 'cloudflared'];
 
 async function serialize<T>(services: Services, operation: () => Promise<T>): Promise<T> {
   const previous = queues.get(services.dataDir) ?? Promise.resolve();
@@ -27,13 +27,13 @@ async function status(services: Services): Promise<SetupStatus> {
     engineStatuses(services),
   ]);
   const github = tools.find(tool => tool.id === 'gh');
-  return { tools, engines, github: { authenticated: github?.authenticated === true }, platform: process.platform };
+  return { tools, engines, github: { authenticated: github?.authenticated === true, login: github?.account }, platform: process.platform };
 }
 
 export async function handleSetup(action: string, payload: Record<string, unknown>, services: Services): Promise<unknown> {
   if (action === 'setup.status') return status(services);
   if (action === 'setup.cliUpdates') return checkCliUpdates(services);
-  if (!['setup.install', 'setup.login', 'setup.engine', 'setup.link', 'setup.cli', 'setup.engineTest'].includes(action)) throw new Error('Ação de configuração desconhecida.');
+  if (!['setup.install', 'setup.login', 'setup.logout', 'setup.engine', 'setup.link', 'setup.cli', 'setup.engineTest'].includes(action)) throw new Error('Ação de configuração desconhecida.');
   consent(payload);
   if (action === 'setup.login') {
     const provider = text(payload, 'provider', 20);
@@ -43,14 +43,39 @@ export async function handleSetup(action: string, payload: Record<string, unknow
     logins.add(key);
     try {
       const executable = await requireTool(provider === 'github' ? 'gh' : provider, services);
-      const args = provider === 'github' ? ['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web']
-        : provider === 'claude' ? ['auth', 'login'] : ['login'];
-      const job = await services.run({ title: `Login ${provider} — conclua a autorização no navegador/terminal`, executable, args,
-        env: await toolEnvironment(services), interactive: true });
+      // `user:email` permite mostrar o e-mail da conta conectada em Motores & Setup.
+      const args = provider === 'github' ? ['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web', '--scopes', 'user:email']
+        : provider === 'claude' ? ['auth', 'login'] : ['login', '--device-auth'];
+      const job = await services.run({ title: `Login ${provider} — conclua a autorização no navegador`, executable, args,
+        env: await toolEnvironment(services), interactive: true, timeoutMs: 20 * 60 * 1000 });
       // Interactive jobs are supervised without persisted credential-bearing terminal logs.
       void services.waitJob(job.id).then(() => services.emit({ type: 'refresh' })).catch(() => undefined).finally(() => logins.delete(key));
       return job;
     } catch (error) { logins.delete(key); throw error; }
+  }
+  if (action === 'setup.logout') {
+    const provider = text(payload, 'provider', 20);
+    if (!['github', 'codex', 'claude'].includes(provider)) throw new Error('Provedor de logout desconhecido.');
+    return serialize(services, async () => {
+      if (services.jobs().some(job => job.status === 'running' && job.projectId)) throw new Error('Aguarde ou cancele os jobs de projeto antes de alterar ferramentas.');
+      const toolId = provider === 'github' ? 'gh' : provider;
+      const executable = await requireTool(toolId, services);
+      const env = await toolEnvironment(services);
+      let result: CommandResult;
+      if (provider === 'github') {
+        result = await services.capture(executable, ['auth', 'logout', '--hostname', 'github.com'], { env, input: 'Y\n', timeoutMs: 15000 });
+      } else if (provider === 'claude') {
+        result = await services.capture(executable, ['auth', 'logout'], { env, input: 'Y\n', timeoutMs: 15000 });
+      } else {
+        result = await services.capture(executable, ['logout'], { env, timeoutMs: 15000 });
+      }
+      const combined = (result.stdout + '\n' + result.stderr).toLowerCase();
+      if (result.code !== 0 && !combined.includes('not logged in')) {
+        throw new Error(`Não foi possível desconectar de ${provider}: ${result.stderr.trim() || result.stdout.trim() || `código ${result.code}`}`);
+      }
+      services.emit({ type: 'refresh' });
+      return { success: true, message: `Desconectado com sucesso.` };
+    });
   }
   if (action === 'setup.cli') {
     const tool = text(payload, 'tool', 20);

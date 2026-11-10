@@ -1,6 +1,6 @@
 {
   "name": "maquina-de-conteudo",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Estúdio local de criação de conteúdo com Codex e Claude Code",
@@ -16,23 +16,26 @@
     "test": "tsx --test tests/*.test.ts",
     "smoke": "tsx scripts/smoke.ts",
     "preview": "tsx scripts/preview.ts",
+    "mobile": "tsx scripts/mobile.ts",
     "pack": "npm run build && electron-builder --linux dir --publish never",
     "dist:linux": "npm run build && electron-builder --linux AppImage deb --publish never",
     "dist:windows": "npm run build && electron-builder --win nsis --publish never",
     "dist:mac": "npm run build && electron-builder --mac dmg zip --publish never"
   },
   "dependencies": {
-    "@xterm/xterm": "^5.5.0",
     "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "electron-updater": "^6.6.2",
     "lucide-react": "^0.468.0",
     "node-pty": "^1.1.0",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
     "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
@@ -49,6 +52,7 @@
     "appId": "com.maquinadeconteudo.studio",
     "productName": "Máquina de Conteúdo (Studio)",
     "artifactName": "${name}-${version}-${arch}.${ext}",
+    "icon": "public/icon.png",
     "publish": [
       {
         "provider": "github",
@@ -84,7 +88,10 @@
         "dmg",
         "zip"
       ],
-      "category": "public.app-category.video"
+      "category": "public.app-category.video",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "A Máquina de Conteúdo usa o microfone para gravar a narração de cada cena no Modo Studio."
+      }
     },
     "nsis": {
       "oneClick": false,

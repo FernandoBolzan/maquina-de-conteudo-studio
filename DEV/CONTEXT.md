@@ -2,9 +2,10 @@
 
 ## State
 
-- App Electron/React integra PostNow, VideoGo, Orquestrador Maestro, marcas, aprovação por hash, exportação e derivação imagem↔vídeo; inclui integração ElevenLabs documentada no README e spec ativa. A configuração de voz fica em Motores & Setup, junto ao VideoGo; Preferências mantém workspace, agente e atualização. Release pública v0.1.1 tem AppImage/deb Linux x86_64, NSIS Windows x64 e DMG/ZIP macOS arm64. Localmente, AppImage v0.1.1 abriu em workspace descartável e UI de projeto/narração/Setup passou; `.deb` metadata verificado sem apt install. Windows/macOS ainda não foram instalados nem testados nativamente.
-- ElevenLabs: `safeStorage` encrypts the local key; Motores & Setup gerencia key, vozes e IVC; Studio saves editorial/spoken text per scene, hash-binds approval to text/voice/model, requires explicit confirmation before `eleven_v4` synthesis, and requires individual audio approval before render. The child-only key env and `VIDEOGO_NO_VOICE_CACHE=1` avoid settings/args/log/cache persistence.
-- Verification: Studio typecheck/lint/7 tests/smoke/build and Chromium 390 px visual pass; VideoGo typecheck/49 core + 20 flicker/externalaudio E2E/build pass. No live paid TTS or clone; no native Windows/macOS runtime.
+- Release pública `v0.1.1` (Linux x86_64, Windows x64, macOS arm64). O checkout atual declara `0.2.0` em `package.json`/lockfile como candidata local não publicada; README e runbook separam claramente a candidata da release pública. Nenhum commit, tag, push ou artefato de distribuição foi criado para 0.2.0.
+- ElevenLabs é estruturado como submenu dedicado de Motores & Setup (`engines` e `elevenlabs`) acessível na sidebar e em tabs in-page: `safeStorage` cifra a key; o Studio oferece catálogo pesquisável de vozes com preview de áudio sob demanda, instruções de clonagem em passos com consentimento formal, aprovação de texto vinculada por hash e confirmação/aprovação individual do áudio. A key segue apenas no processo filho e `VIDEOGO_NO_VOICE_CACHE=1` evita persistência no cache. Áudio próprio por cena (upload ou gravação no Modo Studio) funciona sem voz ElevenLabs (ADR-024).
+- Novos projetos/importações usam diretórios derivados do título; o UUID permanece como ID interno/arquivo de registro. VideoGo recebe slug em `storyboard.id` e título em `storyboard.title`; projetos existentes preservam os diretórios UUID.
+- Verificação recente (2026-11-09, Motores & Setup submenu + layout redesign): typecheck e lint sem erros; `npm test` 223/223; smoke `"ok": true`; build ok; Browser API Chromium headless validou alternância de abas/submenus, painel ElevenLabs dedicado com preview de áudio e 0 overflow em 390/768/1280/1440 px; `check-dev-gates --strict` registrado em `DEV/VERIFY.md`. Electron nativo aguarda reinício; sem chamada paga ElevenLabs. Histórico em `DEV/VERIFY.md`.
 
 ## Commands
 
@@ -28,7 +29,12 @@ orquestrador-maestro check-dev-gates --project-path . --strict
 - CLI logins são interativos e permanecem nos CLIs oficiais; geração paga de modelos/voz requer autorização do usuário.
 - Autoatualização usa a release estável mais recente de `FernandoBolzan/maquina-de-conteudo-studio`; `package.json` é fonte SemVer e tags anotadas `vX.Y.Z` acionam `.github/workflows/release.yml`. `workflow_dispatch` também publica a tag selecionada; usar só com autorização. Linux AppImage atualiza pelo app; `.deb` pelo gerenciador. Consulte `DEV/RUNBOOKS/RELEASES.md`.
 - Pacotes Linux são x86_64. O builder usa o ícone Electron padrão enquanto não houver ícones de distribuição configurados. A UI bloqueia guardar API key se o cofre do sistema não estiver disponível; neste host Linux não havia Secret Service/KWallet operacional.
+- O gate editorial PostNow é intencional: confirme copy, claims/fontes e prompts da versão atual no painel do projeto antes de autorizar Codex ImageGen. Alterações no conteúdo, marca/referências, formato ou briefing invalidam a aprovação; não aprove conteúdo jurídico automaticamente.
+- Resíduo root-owned em `~/.codex/tmp/arg0-linux` (ADR-026): não removido (exige root); origem não confirmada.
+- Storyboard fora do contrato VideoGo v1 é aviso no Studio, não bloqueio (ADR-032). `src/shared/storyboard-contract.ts` espelha `../VideoGo/src/services/production/storyboard.ts` sem sincronização automática; VideoGo em `5406fc0` (commit externo a esta rodada).
+- Chave ElevenLabs real não validada; `codex exec` não executado (E3 e AC13 ii pendentes); `tests/narration-stray.test.ts` depende de ffmpeg no host.
 
 ## Next Context
 
-- Artefatos públicos v0.1.1: AppImage/deb Linux x86_64; instalador NSIS Windows x64; DMG/ZIP macOS arm64. O feed AppImage foi consultado pelo app e informou “versão atual”; atualização entre versões distintas não foi testada. Pacotes locais: `release/maquina-de-conteudo-0.1.1-x86_64.AppImage` (122.062.829 bytes) e `release/maquina-de-conteudo-0.1.1-amd64.deb` (92.381.148 bytes). AppImage aberto em perfil/workspace temporários; `.deb` não instalado com apt. Evidências: `DEV/VERIFY.md`.
+- Artefatos públicos v0.1.1: Linux x86_64, Windows x64 e macOS arm64. A candidata local 0.2.0 não foi empacotada nem publicada. Validar Electron distribuído e hosts nativos Windows/macOS; somente publicar com autorização explícita.
+- Pendências 9–13 aguardam a usuária (`DEV/DECISIONS.md` L256–260; default "manter" aplicado); pendências 1–8 não tratadas. Validação pós-job do storyboard (AC13 iii) e releitura antes de `apply_patch` (AC13 ii) não implementadas.

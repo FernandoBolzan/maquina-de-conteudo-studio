@@ -1,94 +1,115 @@
 # Worklog — Máquina de Conteúdo
 
+## 2026-11-07 — Retrato da cliente, textos automáticos e pedido com páginas
 
-## 2026-11-05 — Fluxo Studio ElevenLabs v4 e narração aprovada
+- Spec: `DEV/SPECS/ACTIVE.md` (In Scope e "Rodada atual"); `DEV/DECISIONS.md` (ADR-019 a ADR-021; ADR-007 parcialmente superseded).
+- Changed: `src/shared/depicted-person.ts`, `src/shared/text-generation.ts`, `src/main/content/postnow.ts`, `src/main/agents.ts` (regra da sessão de texto, L70-75), `src/main/projects.ts` (`buildVisualReview`), `src/renderer/Studio.tsx` (disparo ao salvar pauta, L336-341), `src/renderer/VisualTextEditor.tsx`, `src/renderer/prompt-library.ts`, `src/renderer/Projects.tsx`; testes `tests/depicted-person.test.ts`, `tests/text-generation.test.ts`, `tests/prompt-library.test.ts`; `DEV/*` e `README.md`.
+- Reason: a usuária pediu a cliente nas páginas 1 e 6 do carrossel da Patricia. O Studio não oferecia "Cliente (retrato aprovado)", a regra da sessão de texto passou a depender do retrato aprovado (`agents.ts` L70-75), salvar pauta nova passou a iniciar a preparação de textos, e o pedido usa o número de páginas do projeto.
+- Verified: `npm test` 127/127, typecheck, lint, build (exit 0, aviso >500 kB pré-existente), smoke `"ok": true`; matriz do pedido 9/9; UI isolada sem overflow em 1024, 768, 390 e 320 px; E2E com script descartável, sem Electron e sem geração. Detalhes em `DEV/VERIFY.md`.
+- Limits: sem Codex real; nenhuma imagem nova; projeto da Patricia sem alteração (páginas 1 e 6 seguem `none`); Windows e macOS não verificados.
+- Next context: decidir itens 3, 8, 10 e 11 em `DEV/DECISIONS.md`; reinício do app aguarda resposta à pergunta 8.
+
+## 2026-11-07 — Incidente: `codex exec` real disparado por preview
+
+- Spec: nenhuma.
+- Changed: nenhuma.
+- Reason: um preview de verificação disparou `codex exec` real (PID 616267, ~40 s). `searchDirectories` (`src/main/setup/tools.ts` L103) põe `~/.local/bin` e `/usr/local/bin` antes do PATH do sistema.
+- Verified: causa identificada por leitura de código; o disparo não foi reproduzido.
+- Limits: custo não medido; não corrigido.
+- Next context: decidir item 9 em `DEV/DECISIONS.md` antes de qualquer preview que chame o CLI.
+
+## 2026-11-07 — Formatos: 4:5 removido, formato por rodada e status ilegível
+- Spec: `DEV/SPECS/ACTIVE.md` (In Scope e "Rodada atual"); `DEV/DECISIONS.md` (ADR-022).
+- Changed: `src/shared/formats.ts` remove o 4:5 (padrão `carousel-1x1`); projeto com formato removido abre com `unsupportedFormat` sem migração; seletor de formato na etapa de imagens grava a escolha na rodada (`BatchStatus.format`) e regerar refaz a rodada; `roundFormat`/`isRoundDelivered` (`src/main/content/postnow.ts`) tratam rodada crua, legada, ilegível e entregue (falha fechada); `render()` não grava `failed` em pré-checagem; `buildVisualReview` com formato removido mostra só a mensagem de remoção.
+- Reason: pedido da usuária de remover o 4:5 e regerar com o formato escolhido; `.status.json` sem `updatedAt` (fixture inválida de agente) era reprocessado e podia sobrescrever rodada entregue (fail-open).
+- Verified: `npm test` 157/157 (inclui `tests/postnow-round-format.test.ts`, `tests/postnow-round-delivery.test.ts` e `tests/postnow-render-round.test.ts`, 14/14 nos três); mutações descartáveis detectadas pelos testes (predicado de entrega: 3 falhas; guarda de status ilegível: 2 falhas); FormatoVerify, item 5: PASS nos dois casos, com `.status.json` byte a byte inalterado (`DEV/VERIFY.md`). Gates: typecheck, lint, smoke `"ok": true`, build ok.
+- Limits: nenhuma geração paga; projeto real da Patricia (`carousel-4x5`) não tocado, segue bloqueado até a escolha de formato (pendência 13); UI de troca de formato não exercitada em Electron.
+- Next context: decidir pendências 1 e 13 em `DEV/DECISIONS.md`; regerar rodada com o formato escolhido quando a usuária autorizar.
+
+## 2026-11-07 — Validação da chave ElevenLabs por status HTTP
+- Spec: `DEV/SPECS/ACTIVE.md`; `DEV/DECISIONS.md` (ADR-023).
+- Changed: `src/main/elevenlabs.ts` (`providerError`, `permissionError`, `networkError`, `validateElevenLabsKey`): 401 sem `missing_permissions` recusa e não salva; 401/403 com `missing_permissions` salva com `ElevenLabsStatus.warning`; 429 e rede com mensagens próprias; `src/main/runtime.ts` expõe o aviso em `elevenlabs.status`; `src/renderer/VideoGoVoiceSetup.tsx` mostra a ressalva.
+- Reason: a chave não validava nem salvava; 403 de chave restrita não invalida a chave, e testar TTS seria chamada paga.
+- Verified: `tests/elevenlabs-key.test.ts` (5 testes com `fetch` stubado); NarracaoVerify confirmou recusa antes de qualquer rede quando não há chave. Chave real não testada (sem autorização).
+- Limits: sem chamada à API real da ElevenLabs; comportamento com chave válida ou restrita real não exercitado.
+- Next context: validar com chave real quando a usuária autorizar; confirmar se a chave restrita salva com aviso atende (pergunta 2).
+
+## 2026-11-07 — Narração por cena, áudio próprio e Modo Studio
+- Spec: `DEV/SPECS/ACTIVE.md`; `DEV/DECISIONS.md` (ADR-024).
+- Changed: `src/shared/narration.ts` (extensões, MIME de gravação, `narrationGate`); `src/main/narration-audio-attach.ts` (ffprobe e conversão para `narration.m4a`); `src/main/projects.ts` (anexo/remoção por cena, gate de render, migração legada, ref órfã tolerada na leitura); `src/renderer/NarrationTeleprompter.tsx` (teleprompter com `MediaRecorder`); `src/main/permissions.ts` e `src/main/electron.ts` (permissão `media` só para áudio puro do app; câmera negada); `package.json` (`NSMicrophoneUsageDescription`); `src/renderer/Studio.tsx` ("Enviar áudio", "Remover áudio", "Modo Studio").
+- Reason: pedidos de gerar sem voz e adicionar depois, upload de áudio próprio e teleprompter com gravação; `import-narration` do VideoGo exige faster-whisper, ausente na máquina.
+- Verified: `tests/narration-gating.test.ts`, `tests/narration-attach.test.ts` e `tests/permissions.test.ts`; NarracaoVerify sem rede e sem pago (upload mp3; gravação webm opus → `narration.m4a` 3,007 s; `confirm` exigido na remoção; texto alterado remove só o áudio da cena; render recusa sem áudio).
+- Limits: microfone real, indicador e UI do Modo Studio não verificados em Electron; qualidade do áudio gravado não avaliada; gate não aponta voz sem chave; estado não expõe `stray`; narração por IA local pendente de decisão (pendência 12).
+- Next context: decidir pendência 12 (SAPI/Piper/manter ElevenLabs) e validar o Modo Studio em Electron quando houver autorização de reinício.
+
+## 2026-11-08 — Revisão geral: E1-E6, divergências 1-3 e pendências 9-13 (autopilot revisao-geral)
+- Spec: `.omx/plans/autopilot-spec-revisao-geral.md`; `DEV/DECISIONS.md` (ADR-025 a ADR-032).
+- Changed: aprovações editoriais PostNow fail-closed, com reconciliação e `claims.json` validado (`src/main/projects.ts`, `src/main/content/native.ts`, `src/main/agents.ts`; ADR-030); referência órfã removível e opção "gere" só com chave ElevenLabs (`src/shared/narration.ts`, `src/shared/contracts.ts`, `src/renderer/Studio.tsx`, `src/renderer/NarrationTeleprompter.tsx`; ADR-025); briefing de vídeo lista só pendências reais (`src/main/content/native.ts`; ADR-031); falha de comando mostra código e comando (`src/shared/agent-events.ts`; ADR-027); recorte 1448×1086 sem corte e textos corrigidos (ADR-028); contrato VideoGo v1 como aviso no Studio e recusa no render (`src/shared/storyboard-contract.ts`, novo; ADR-032); 429 da ElevenLabs não grava a chave (`tests/elevenlabs-key.test.ts`); inventário M01–M20 em `DEV/TESTING.md`; pendências 9–13 com default "manter" (ADR-029).
+- Reason: correções do plano de revisão e divergências 1–3 de `DEV/VERIFY.md` (2026-11-07). Aprovação pré-marcada e referência órfã invisível eram falhas de integridade e de decisão humana.
+- Verified: typecheck e lint exit 0; `npm test` 188/188; smoke `"ok": true`; build ok (renderer 722.07 kB; aviso >500 kB pré-existente); cruzamento com `../VideoGo` (26 casos, 24 concordam); validação single-agent. `check-dev-gates --strict` registrado em `DEV/VERIFY.md`.
+- Limits: Architect e Critic indisponíveis (`usage_limit_reached`); sem Electron; chave ElevenLabs real, TTS, ImageGen, `codex exec` e reinício não executados (pausas); E1 e E3 sem reprodução; AC13 ii não implementado; storyboard é aviso, não bloqueio (ADR-032); cinco artes da Patricia não inspecionadas. Sem commit.
+- Next context: decidir pendências 9–13 (default "manter" aplicado); validar Modo Studio e chave ElevenLabs real quando houver autorização; validação pós-job do storyboard (AC13 iii) se o comportamento for aprovado.
+
+## 2026-11-09 — Biblioteca editorial premium
+- Spec: `DEV/SPECS/ACTIVE.md`; jornada de criação e biblioteca existente.
+- Changed: `Projects.tsx` e `projects-cards.css` separam criação e biblioteca, apresentam quantidade filtrada e deixam explícita a ausência de capa.
+- Reason: mesa editorial de produção, sem imagens fictícias ou efeitos de marketing no aplicativo. Referências consultadas: Godly/Recent (apresentação visual de projetos) e Awwwards/OrbitAI (hierarquia de espaço de trabalho), sem copiar layouts.
+- Verified: build, typecheck e lint; prévia isolada em 320, 390, 768, 1024 e 1440 px; capa disponível, busca sem resultados, abertura de criação e Escape.
+- Limits: sem geração paga ou teste de Electron nativo nesta rodada.
+- Next context: reiniciar o aplicativo para carregar o build atualizado.
+
+## 2026-11-09 — Vídeo: Opus 5.5 fixo com acesso real ao VideoGo
 - Spec: `DEV/SPECS/ACTIVE.md`
-- Changed: `src/main/elevenlabs.ts`, `src/main/runtime.ts`, `src/main/projects.ts`, `src/renderer/Setup.tsx`, `src/renderer/Studio.tsx`, contratos, testes e instruções de uso.
-- Reason: Configurar key cifrada, escolher/clonar voz e gerar áudio por cena somente após aprovação hash-bound da narração; cada clipe também requer aprovação antes do render final.
-- Verified: typecheck, lint, 7/7 testes, smoke, build; teste offline de segredo e bloqueio pré-aprovação; Chromium preview em 390 px sem overflow e sem erros. VideoGo: typecheck, core 49/49, flicker 20/20, E2E de áudio externo e build.
-- Limits: nenhuma API paga ou clonagem real; no preview sem cofre, key e voz permanecem indisponíveis. Correção do mantenedor em `listVoices`/`cloneVoice` do VideoGo não foi tocada.
-## 2026-11-05 — QA final Linux e release v0.1.1
+- Changed: `src/main/agents.ts` (modelo `claude-opus-5-5` fixo via `VIDEO_AGENT_MODEL` em `src/shared/contracts.ts`, `--effort xhigh`, `--allowedTools` com leitura do motor e só `project validate|sound|render|sheet` + limpeza da prévia, perfil da marca no ambiente, contrato do storyboard reescrito: `title`, `assetPath` para foto, `compositionId` para 3D, narração paga intocada); `src/main/projects.ts` exporta `writeBrandProfile`; `src/shared/brand-profile.ts` grava 4 `accents` só com cores da marca; `src/shared/storyboard-contract.ts` exige `assetPath` em `kind: image`; `src/renderer/model-catalog.ts` e `Studio.tsx` mostram o ID fixo. VideoGo (repo irmão): `storyboard.ts` sem título derivado do id, `kind: image` sem asset vira erro, deixas de som sem soma dupla do início e com `anchor`.
+- Reason: o vídeo saía genérico ("SCENE 1 GANCHO", sem foto, glow verde-limão). O modelo já era `claude-opus-5-5` (transcript), mas o `-p` bloqueava leitura do VideoGo e todo comando: o agente escrevia o storyboard às cegas e nunca via a prévia. A GPU já estava em uso (`h264_nvenc` nos MP4).
+- Verified: typecheck, lint, `npm test` 222/222, build; VideoGo typecheck, build e `test:core` 60/60. Regeração real do projeto `video-meus-filhos-vao-ficar-com-o-pai` pelo `handleAgents`: sessão `claude-opus-5-5`, 116 turnos, leu skill e contrato, validou, gerou som, 4 prévias com folha de contato. Aprovação e render pelo `handleProjects`: gate da narração passou, 41 s, 1080×1920, `h264_nvenc`, 29,9 s de render; quadros com títulos, fotos da marca, balança e documentos 3D.
+- Limits: áudio do render final não ouvido; Claude Code usa Haiku internamente em subtarefas (ex.: WebFetch, negado); backup do storyboard anterior em `~/MaquinaDeConteudo/backup-video-meus-filhos-20261109-201619`.
+- Next context: reiniciar o app para carregar o build; o enfeite de "interface" do padrão clássico no gancho ainda aparece (VideoGo `hyperframes-renderer.ts`, `uiMockupHtml`).
 
+## 2026-11-09 — Vídeo autoral no VideoGo: Opus 5.5 medium escreve a animação
 - Spec: `DEV/SPECS/ACTIVE.md`
-- Changed: `package.json`, `package-lock.json`, workflow de release, smoke configurável e README com guia completo, links diretos v0.1.1, instalação, motores, segurança e status por plataforma; documentação operacional em `DEV/**`.
-- Published: release pública `v0.1.1`; Actions run `42045235690` concluiu build e publicação Linux, Windows e macOS. Feeds públicos e nomes dos assets foram conferidos.
-- Reason: alinhar `artifactName` aos manifests do updater e oferecer uma página inicial completa com downloads versionados, uso e limites sustentados por evidência.
-- Verified: typecheck, lint, 7/7 testes, smoke Linux default/overrides, build, `dist:linux` e `check-dev-gates --strict` (12 entradas; aviso de recorrência em `DEV/VERIFY.md`); AppImage abriu em workspace isolado, projeto VideoGo e bloqueios de narração sem key/voz verificados. Links do README conferidos com os assets e manifests públicos v0.1.1; instrução de desenvolvimento conferida com `MDC_DEV_URL`. Console/renderer errors vazios.
-- Limits: `.deb` não instalado com apt; Windows/macOS nativos, assinatura/notarização e macOS Intel não validados. Sem key, clone ou geração ElevenLabs paga. Update entre versões distintas não exercitado.
-- Next context: `v0.1.1` pública; manifests e nomes alinhados. Próxima lacuna: instalação/fluxos em hosts nativos; não republicar sem necessidade/autorização.
+- Changed: Studio — `VIDEO_AGENT_EFFORT = 'medium'`; entrega com capa só no Codex ImageGen e copy no Claude `claude-opus-5-5` (`agents.ts`, `Studio.tsx`, `tests/video-delivery.test.ts`); acesso do agente a `project composition` e `hyperframes lint|snapshot|docs`, composição em `.videogo/composition` (fora da galeria); `composition` aceito no contrato (`storyboard-contract.ts`) e no sanitizador (`content/native.ts`, antes apagava a chave). VideoGo — `storyboard.composition.path`; `project composition` (timeline real da voz, palavras com tempo via faster-whisper local, mídia do projeto, GSAP, Three.js, kit 3D, `VIDEOGO.md`, `index.html` base preservado); `project render` usa a composição autoral no lugar do template, mistura voz/efeitos/trilha e recusa duração diferente da timeline.
+- Reason: o render de template (`classic`) dava o mesmo visual genérico mesmo com storyboard bom; o modelo e a GPU não eram a causa.
+- Verified: Studio typecheck, lint, `npm test` 222/222, build, app reiniciado no build novo; VideoGo typecheck, build, `test:core` 62/62, `test:flicker` 20/20. Fluxo real pelos handlers do Studio: sessão Opus 5.5 medium (71 turnos, US$ 3,08) escreveu a composição; segunda sessão sincronizou às palavras e parou no limite de 5 h do Claude depois do lint e do snapshot; aprovação e render: 41 s, 1080×1920, `h264_nvenc`, −14,1 LUFS, 29,8 s.
+- Limits: áudio não ouvido; a segunda sessão não chegou à última prévia completa (o render final foi feito com o estado após lint e snapshot); sessões de vídeo consomem a cota de 5 h da conta Claude.
+- Next context: o agente ainda tenta `cd`/`sed`/`python3` fora da allowlist e recebe negação; o fluxo funciona sem eles.
 
-
-## 2026-11-05 — Diagnóstico e testes locais dos motores
+## 2026-11-09 — Entrega: capa preservada quando o Claude falha; login do Claude conferido
 - Spec: `DEV/SPECS/ACTIVE.md`
-- Changed: dependências tipadas/diagnóstico e receitas FFprobe, testes consentidos em diretório temporário, aviso/data de atualização, UI responsiva e README; fixtures ajustadas ao contrato de armazenamento seguro já presente no worktree.
-- Reason: Explicar o que cada motor precisa, permitir verificar o render sem tocar projetos do usuário e tornar o estado de atualização visível sem interromper a criação.
-- Verified: typecheck, test (6/6), smoke e build; lint focado nos arquivos deste recurso. Preview Chromium validado em 390/768/1280/1440 sem overflow, botões sem nome ou erros novos. VideoGo produziu MP4 local com `--voice demo`; Maestro montou contexto sem chamar IA; aviso de update disponível foi exercitado com resposta IPC simulada.
-- Limits: `npm run lint` ainda falha em três símbolos não usados de `src/main/projects.ts` (`NarrationState`, `listElevenLabsVoices`, `narrationState`), código de narração em evolução fora deste escopo. PostNow foi diagnosticado sem Pillow no ambiente selecionado, portanto o render smoke não foi executado; nenhum pacote/dep foi instalado. Update remoto não disponível no preview.
-- Next context: Instalar/vincular PostNow com Pillow para exercitar render; resolver lint da integração de narração antes de considerar a qualidade global concluída.
+- Changed: `agents.ts` publica `delivery/cover-<formato>.png` antes da copy; falha do Claude vira erro que cita a capa salva; nova ação `agents.generateVideoCopy` (só a copy, Claude Opus 5.5, sem refazer a capa) e botão "Gerar só a copy (Claude)" em `Studio.tsx`; `setup/tools.ts` mostra o plano do Claude junto do e-mail.
+- Reason: o job de entrega falhou com "You've hit your 5-hour limit" e descartava a capa paga do Codex.
+- Verified: typecheck, lint, `npm test` 223/223, build, app reiniciado; `setup.status` real: `robertobezerracontador@gmail.com · plano pro`, CLI gerenciado e o do terminal com o mesmo `~/.claude` (`.credentials.json` de 13:45, mesmo horário do único job "Login claude"). Capa da execução que falhou publicada em `delivery/cover-reels.png` (941×1672 → 1080×1920).
+- Limits: copy real do Claude não executada (conta no limite até 00:20); logout real não executado para não desconectar a conta.
+- Next context: validar copy do Claude apos expiracao do limite de 5h.
 
-## 2026-11-05 — Documentação final, smoke configurável e estado real de release
+## 2026-11-09 — Capa com título, pessoa fiel e logo oficial; contas visíveis
 - Spec: `DEV/SPECS/ACTIVE.md`
-- Changed: `README.md`, `scripts/smoke.ts`, `src/main/setup.ts`, `src/main/setup/engines.ts`, documentação de testes, verificação, handoff e release.
-- Reason: Documentar o uso/build Linux sem prometer compatibilidade não testada; tornar os paths do smoke configuráveis e registrar a evidência real dos builds nativos no GitHub Actions.
-- Verified: typecheck, lint, `npm test` (6/6), smoke com defaults Linux e com overrides, build, `dist:linux`; AppImage atual abriu e o `.deb` apresenta metadados corretos.
-- Release/platform status: Actions run `42040288628` construiu os três alvos para `v0.1.0`, mas nenhum upload foi salvo por nomes com `:`. A correção está na `main`; ainda não há release. O dispatch manual publica e não foi executado; Windows/macOS runtime permanece não testado.
-- Next context: Para distribuir o worktree atual, autorização para nova versão/tag/publicação é necessária; depois instalar e exercitar os pacotes em hosts nativos Windows/macOS.
+- Changed: `agents.ts` — `COVER_LAYOUT` por formato (medidas, área da logo, zonas de interface do Reels/YouTube e recorte 4:5 do grid); prompt do Codex exige o título exato, fidelidade à pessoa das fotos reais, foto contínua sem recorte, área da logo lisa e conferência com até 3 tentativas; o Studio aplica a logo oficial por cima (ffmpeg `overlay`); ação `coverOnly` e botão "Gerar só a capa (Codex)". `setup/tools.ts` — e-mail e plano do Codex via `codex app-server` → `account/read` (sem ler arquivo de credencial), e-mail do GitHub via `gh api` (login pede `user:email`), plano do Claude.
+- Reason: a capa saía sem título nem pessoa, depois com rosto genérico e faixa vazia; a conta logada de cada CLI não aparecia.
+- Verified: typecheck, lint, `npm test` 223/223, build, app reiniciado; `setup.status` real: GitHub `@FernandoBolzan` (e-mail privado até novo login), Codex `metabolzan@gmail.com · plano plus`, Claude `robertobezerracontador@gmail.com · plano pro`. Capas reais geradas pelo fluxo `agents.generateVideoDelivery` com `coverOnly`.
+- Limits: e-mail do GitHub só depois de reconectar (escopo novo); copy do Claude pendente do limite de 5 h.
+- Next context: testar e-mail do GitHub ao reconectar.
 
-## 2026-11-05 — Primeira publicação GitHub e recuperação do release workflow
-- Changed: `.gitignore`, `.github/workflows/release.yml`, `DEV/RUNBOOKS/RELEASES.md`
-- Published: commit `80cc1e5` em `main`; tag anotada `v0.1.0` enviada ao GitHub.
-- Verified: typecheck, lint, tests (5/5), smoke, build, pack e workflow YAML válidos; os três builds nativos do Actions passaram, mas upload-artifact falhou porque `release-dist:linux/mac/windows` continha `:`.
-- Next context: nomes corrigidos na `main`; a execução manual compila a tag e publica. Não há assets/release; não executar sem autorização. Para o worktree atual será necessária versão/tag superior.
+## 2026-11-09 — Motores & Setup: submenu ElevenLabs, overview executivo e redesign de layout
+- Spec: `DEV/SPECS/ACTIVE.md`
+- Changed: `src/renderer/App.tsx` (navegação com `setupSubmenu: 'engines' | 'elevenlabs'`, submenu aninhado na sidebar com pills de status, breadcrumb com navegação hierárquica e deep link de voz); `src/renderer/Setup.tsx` (segmented tabs para alternar entre Motores & CLIs e ElevenLabs & Voz, banner executivo de status com métricas operacionais, desacoplamento completo do bloco de voz, link direto no onboarding); `src/renderer/VideoGoVoiceSetup.tsx` (dashboard dedicado de voz com 4 pilares de governança e segurança, toggle de visualização da API key, catálogo de vozes pesquisável com filtro por categoria, player de áudio preview sob demanda interativo, guia de clonagem instantânea estruturado em passos, checkbox de consentimento legal e diagnóstico local de áudio FFprobe); `src/renderer/shell-refined.css` (estilos para submenu na sidebar, tabs in-page, cards de estatísticas, ribbon de segurança, catálogo de vozes e responsividade sem overflow em 390/768/1280/1440 px).
+- Reason: atender ao pedido do maestro para separar ElevenLabs como um submenu de Motores & Setup e aprimorar todo o layout visual do ecossistema de configuração conforme as skills do Orquestrador Maestro (`skill-frontend-excellence`, `skill-design-engineering-craft`, `skill-impeccable`).
+- Verified: `npm run typecheck`, `npm run lint` (exit 0); `npm test` (223/223); `npm run smoke` (`ok: true`); `npm run build` (exit 0); verificação interativa visual em Chromium via Browser API em 4 viewports (390, 768, 1280, 1440 px com 0 overflow), alternância de abas e submenus na sidebar e in-page, e navegação direta do Studio para o painel ElevenLabs.
+- Limits: sem envio de áudio pago real para a ElevenLabs (validação da API key e listagem de vozes exercitados no sandbox do browser); Electron desktop nativo não foi reiniciado nesta sessão.
+- Next context: reiniciar a aplicação desktop para carregar os novos componentes compilados no Electron nativo.
 
-## 2026-11-05 — Auditoria final do pacote Linux e alvos nativos
-- Spec: DEV/SPECS/ACTIVE.md
-- Changed: `README.md` e documentação de instalação, verificação, testes reproduzíveis e limites por plataforma em `DEV/**`; nenhum código de runtime alterado nesta tarefa.
-- Reason: Revalidar o worktree atual e separar comportamento comprovado no Linux de builds que exigem hosts Windows/macOS.
-- Verified: typecheck, lint, 5/5 testes, smoke, build AppImage/deb e gates strict; AppImage e fluxos onboarding/projeto/marca/Setup passaram; processo `npm start` foi restaurado após recuperação de Xwayland.
-- Limits: `dist:windows` e `dist:mac` tentados no Linux falharam no rebuild de `node-pty` via node-gyp. Não há hosts nativos/SSH nem VM Windows. O smoke também depende de paths Linux fixos; CLIs reais/login, release e atualização remota não foram exercitados.
+## 2026-11-09 — Fluxo simplificado: Avançar aprova a etapa; isolamento das contas Claude/Codex
+- Spec: `DEV/SPECS/ACTIVE.md`
+- Changed: `Studio.tsx` — removidos "Aprovar conteúdo para imagem" (com checkbox), "Aprovar texto" e "Aprovar áudio" por cena; o "Avançar" de textos, roteiro e voz aprova a etapa e só então abre a próxima; "Gerar áudio" aprova o texto/voz junto (já confirma o envio ao ElevenLabs) e o Avançar aprova os áudios gerados. `VideoSceneEditor.tsx` — sem botão "Revisar e aprovar roteiro"; reporta edição não salva via `onDirtyChange`. `setup/tools.ts` — `CLAUDE_CONFIG_DIR` e `CODEX_HOME` isolados em `<dataDir>` para os runs do Studio, sem ler `~/.claude` ou `~/.codex`. Capa: referências das fotos de marca no prompt e limite de copy do Claude com hora de liberação.
+- Reason: o usuário precisava clicar em vários "Aceitar" antes do "Avançar", que já aceitava tudo; a conta Claude do terminal estourou o limite de 5 h durante a entrega; contas do terminal/desktop interferiam no Studio.
+- Verified: typecheck, lint limpo, `npm test` 223/223; app reiniciado (Electron PID 1081881, janela pronta, sem erro de renderer no log). Não cliquei o fluxo na janela nativa.
+- Limits: sem teste manual do fluxo de clique no Electron; a copy do Reels segue pendente de login do Claude dentro do Studio.
+- Next context: testar Avançar nos três passos com projeto real de vídeo e de imagem; decidir se semeia `CLAUDE.md`/`AGENTS.md` nas pastas isoladas.
 
-
-## 2026-11-05 — Onboarding e Gestão Segura dos CLIs
-- Spec: DEV/SPECS/ACTIVE.md
-- Changed: `src/shared/contracts.ts`, runtime onboarding/migration, setup backend, gerenciamento de ferramentas, Setup UI, testes de runtime/CLI e notas `DEV/**`.
-- Reason: Guiar usuários na primeira execução e tornar Codex/Claude instaláveis/atualizáveis com versão estável, consentimento, diretório privado, validação antes de ativar e rollback sem mexer nas cópias globais.
-- Verified: typecheck, lint, `npm test` (5/5), smoke, build, QA Chromium em 390/768/1280 px e `check-dev-gates --strict` passaram; CLI install/update/rollback e preservação da versão ativa quando a staged falha foram exercitados com ferramentas simuladas.
-- Limits: Chunk do renderer >500 kB e aviso do gate sobre hotspots históricos em `package.json`/`src/main/electron.ts`. Nenhum CLI real foi instalado/atualizado nem login aberto.
-
-
-## 2026-11-05 — Fluxos de Usuário e Pacotes Linux
-- Spec: DEV/SPECS/ACTIVE.md
-- Changed: package.json, src/main/content/carousel.ts, src/main/electron.ts, src/main/update-policy.ts, src/main/setup/tools.ts, src/renderer/Setup.tsx, tests/update-policy.test.ts, .github/workflows/release.yml, DEV/**
-- Reason: Tornar explícita a dependência Pillow do carrossel, preparar releases Linux/macOS, documentar SemVer/auto-update e impedir oferta de update in-app em pacotes .deb.
-- Verified: typecheck, lint, test (2/2), smoke, build via `npm run dist:linux`; AppImage FUSE abriu sem flags de bypass e onboarding/criação de projeto passaram pela UI em workspace temporário. Também passaram render de cinco slides, aprovação, derivação imagem↔vídeo, render VideoGo, extração FFmpeg e guarda de update Debian.
-- Limites: Build NSIS cruzado falhou no `node-gyp` ao reconstruir `node-pty` para Windows; validação nativa Windows/macOS, assinatura/notarização, release/update remoto e geração paga não foram executados.
-- Artifacts: `release/Máquina de Conteúdo (Studio)-0.1.0.AppImage`; `release/maquina-de-conteudo_0.1.0_amd64.deb`.
-
-## 2026-11-05 — Releases GitHub e Autoatualização
-- Spec: DEV/SPECS/ACTIVE.md
-- Changed: package.json, src/main/electron.ts, .github/workflows/release.yml, DEV/RUNBOOKS/RELEASES.md, DEV/**
-- Reason: Fixar o repositório oficial, documentar SemVer/tags/releases e automatizar builds nativos/publicação; deixar distribuição local sem publicação implícita.
-- Verified: typecheck, lint, test (1/1), smoke, build e `npm run pack` passaram. Nenhuma tag/release foi publicada; workflow remoto, auto-update vivo e hosts Windows/macOS seguem sem validação nesta sessão.
-- Next context: Consultar `DEV/RUNBOOKS/RELEASES.md`; quando autorizado, testar tag em GitHub e validar instaladores/updates por host nativo.
-
-## 2026-11-05 — Marca Studio e Iconografia
-- Spec: DEV/SPECS/ACTIVE.md
-- Changed: package.json, index.html, src/main/electron.ts, src/renderer/App.tsx, src/renderer/styles.css, DEV/**
-- Reason: Padronizar o nome visível como Máquina de Conteúdo (Studio) e trocar a chama emoji por ícone Lucide alinhado ao sistema visual local.
-- Verified: typecheck, lint, test (1/1), smoke e build aprovados; QA manual Chromium em 390/768/1280/1440, 0 overflow, 0 botões sem nome e 0 erros de console. Harness automático indisponível sem Playwright.
-- Next context: Usar `npm start` ou `npm run preview`; geração de imagem “Image 2.5” não está integrada.
-
-## 2026-11-05 — Preferência da Marca Flame
-- Changed: src/renderer/App.tsx, src/renderer/styles.css, DEV/SPECS/ACTIVE.md, DEV/HANDOFF.md, DEV/VERIFY.md
-- Reason: Restaurar a chama emoji 🔥 solicitada pelo usuário, mantendo Lucide nos ícones funcionais.
-- Verified: `npm run typecheck`, `npm run lint` e `npm run build` passaram; Chromium mostrou 🔥 na marca, 0 overflow, 0 botões sem nome e 0 erros em 390/768/1280/1440. Vite mantém aviso de chunk acima de 500 kB.
-## 2026-11-04 — Implementação Ponta a Ponta do App Desktop Máquina de Conteúdo
-- Spec: DEV/SPECS/ACTIVE.md
-- Changed: package.json, tsconfig.json, tsconfig.main.json, vite.config.ts, eslint.config.js, index.html, src/shared/contracts.ts, src/main/**, src/renderer/**, scripts/smoke.ts, scripts/preview.ts, tests/runtime.test.ts, DEV/**
-- Verified: npm run typecheck && npm run lint && npm test && npm run smoke && npm run build && orquestrador-maestro check-dev-gates --project-path . --strict
-- Next context: Executar npm start no ambiente gráfico ou empacotar releases com dist:linux / dist:windows
-
-## 2026-11-05 — Setup de voz no lugar do motor
-- Changed: `src/renderer/VideoGoVoiceSetup.tsx`, `src/renderer/Setup.tsx`, README e `DEV/**`
-- Reason: Colocar chave, biblioteca/clonagem e instruções ElevenLabs em Motores & Setup, junto ao VideoGo; Preferências fica com preferências do Studio.
-- Verified: design discovery `@./components` resolved (0.90); baseline Chromium captured before editing. Studio typecheck/lint, 7/7 tests, smoke, build and Chromium location check passed; 390 px viewport had no horizontal overflow or page errors. Vite retains the 618.93 kB chunk warning.
+## 2026-11-10 — Atualização automática do app por release por tag (v0.2.0)
+- Spec: `DEV/SPECS/ACTIVE.md`
+- Changed: `src/main/app-updater.ts` (novo) — baixa a versão em segundo plano (`autoDownload`), instala ao fechar (`autoInstallOnAppQuit`), consulta 15 s após abrir e depois a cada 6 h; status publicado pelo evento `update` (`src/shared/contracts.ts`). `src/main/electron.ts` — `app.updateStatus`/`app.updateCheck`/`app.updateInstall`; reinício recusado com tarefas em execução. `src/renderer/Setup.tsx` — Preferências mostra o estado e **Reiniciar e atualizar** quando pronto. `tests/app-updater.test.ts` (7 testes com updater falso). Docs: `DEV/RUNBOOKS/RELEASES.md`, `README.md`.
+- Reason: o usuário pediu que instalações já feitas recebam novas versões sem baixar manualmente; a publicação é feita pela tag `v0.2.0` (workflow `release.yml` gera `.exe`, `.dmg`/`.zip`, AppImage e `.deb`).
+- Verified: `npm run typecheck`, `npm run lint`, `npm test` 230/230, `npm run build`, `npm run smoke` (`ok`), `npm run dist:linux` (AppImage `maquina-de-conteudo-0.2.0-x86_64.AppImage` e `latest-linux.yml` com o mesmo nome).
+- Limits: a descarga e instalação ponta a ponta não foram exercitadas (exige release superior publicada); Windows e macOS não foram compilados aqui; macOS sem assinatura não atualiza; `.deb` segue manual.
+- Next context: após a release, testar AppImage instalado com v0.2.0 contra v0.2.1 de teste; decidir assinatura macOS/Windows.

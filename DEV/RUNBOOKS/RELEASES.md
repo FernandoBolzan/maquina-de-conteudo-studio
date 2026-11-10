@@ -7,6 +7,13 @@
 - Os artefatos usam o template `artifactName: "${name}-${version}-${arch}.${ext}"`; o nome real do binário precisa corresponder ao `url` em `latest*.yml`, pois o updater baixa esse caminho da release.
 - Incrementar `PATCH` para correções compatíveis, `MINOR` para funcionalidades compatíveis e `MAJOR` para mudanças incompatíveis. Pré-releases usam sufixos SemVer (por exemplo `1.0.0-rc.1`) e não são publicadas como estáveis por este fluxo.
 
+## Preparação local v0.2.0 (não publicada)
+
+- `package.json` e `package-lock.json` declaram `0.2.0`, incremento `MINOR` compatível após v0.1.1. As notas de usuário e limites desta preparação estão em `README.md`.
+- A release pública continua v0.1.1. Não existe tag, commit de release ou publicação v0.2.0 nesta preparação.
+- Antes de distribuir, repetir typecheck, lint, testes, smoke e build no conteúdo final; executar builds nativos Linux/Windows/macOS pelo workflow e validar instaladores nos hosts correspondentes.
+- Obter autorização explícita antes de criar/enviar commit/tag, iniciar o workflow de publicação ou disponibilizar qualquer artefato publicamente.
+
 ## Publicação
 
 1. Atualize `version` em `package.json` e o lockfile com `npm version <patch|minor|major> --no-git-tag-version` (ou versão explícita), revise changelog/notas e valide `npm run typecheck`, `npm run lint`, `npm test`, `npm run smoke` e `npm run build`.
@@ -21,7 +28,7 @@ O workflow não assina/notariza binários. Assinatura e validação nativa de ca
 
 - `electron-updater` consulta a release estável mais recente da API do GitHub, usando o provider fixo configurado em `package.json` e `src/main/electron.ts`; não depende de `MDC_UPDATE_REPOSITORY` nem de servidor `release.json`.
 - Os metadados `latest*.yml` e arquivos da release dizem à biblioteca a versão e os artefatos. Não publicar uma release sem esses arquivos.
-- Em pacote instalado, a tela Configuração permite **Verificar atualização**; o usuário vê a versão disponível e escolhe **Baixar e instalar**. O download só ocorre após confirmação explícita e sem tarefas ativas; o app reinicia para aplicar. O updater não baixa nem instala automaticamente.
+- Em pacote instalado, o app consulta releases 15 s após abrir e depois a cada 6 h. A nova versão é baixada automaticamente, sem confirmação. Quando termina, Configuração mostra **Reiniciar e atualizar**; se o usuário não reiniciar, a atualização é aplicada ao fechar o app. O restart é recusado enquanto houver tarefas em execução. **Verificar atualização** força uma consulta imediata.
 - Em desenvolvimento (`app.isPackaged === false`), a verificação não é disponibilizada.
 - Linux: `electron-updater` suporta atualização automática pelo formato AppImage; pacotes `.deb` devem ser atualizados pelo mecanismo/distribuição do sistema. macOS/Windows precisam manter os artefatos e pré-requisitos de assinatura apropriados para instalação confiável.
 

@@ -1,5 +1,5 @@
 import { constants, createReadStream } from 'node:fs';
-import { copyFile, lstat, mkdir, open, readdir, realpath, rename, rm } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, open, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Services } from '../context.js';
@@ -52,6 +52,20 @@ export async function directory(root: string, path: string): Promise<string> {
   const target = await localPath(root, path);
   await mkdir(target, { recursive: true });
   return target;
+}
+/** Private app-data directory for durable authorization journals. Windows inherits the user-data ACL. */
+export async function privateDirectory(root: string, path: string): Promise<string> {
+  const target = await localPath(root, path);
+  await mkdir(target, { recursive: true, mode: 0o700 });
+  const info = await lstat(target);
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`A pasta privada do aplicativo não é um diretório regular: ${target}`);
+  if (process.platform !== 'win32') await chmod(target, 0o700);
+  return target;
+}
+/** Isolates private app-data records by canonical workspace, without putting authority in shared project files. */
+export async function privateWorkspaceDirectory(dataDir: string, workspaceRoot: string, path: string): Promise<string> {
+  const namespace = createHash('sha256').update(resolve(workspaceRoot)).digest('hex');
+  return privateDirectory(dataDir, join('.studio', 'workspaces', namespace, path));
 }
 export async function readJson(path: string): Promise<unknown> {
   await safePath(path);
@@ -128,6 +142,13 @@ export async function serialized<T>(key: string, operation: () => Promise<T>): P
   try { return await pending; }
   finally { if (locks.get(key) === current) locks.delete(key); }
 }
+const reservations = new Set<string>();
+/** Holds a project for a multi-step operation whose child processes finish and restart between steps. */
+export function reserveProject(id: string): () => void {
+  if (reservations.has(id)) throw new Error('Este projeto está concluindo outra operação. Aguarde terminar.');
+  reservations.add(id);
+  return () => { reservations.delete(id); };
+}
 export function requireIdle(services: Services, id: string): void {
-  if (services.jobs().some((job) => job.projectId === id && job.status === 'running')) throw new Error('Já existe um processo ativo neste projeto. Aguarde ou cancele-o.');
+  if (reservations.has(id) || services.jobs().some((job) => job.projectId === id && job.status === 'running')) throw new Error('Já existe um processo ativo neste projeto. Aguarde ou cancele-o.');
 }

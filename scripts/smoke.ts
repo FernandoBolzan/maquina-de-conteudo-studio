@@ -49,7 +49,7 @@ async function main(): Promise<void> {
     const slidePng = join(root, 'slide-1.png');
     const ff1 = await capture('ffmpeg', ['-hide_banner', '-y', '-f', 'lavfi', '-i', 'color=c=#173323:s=256x256:d=1', '-frames:v', '1', logoPng]);
     assert.equal(ff1.code, 0, `Falha ao gerar logo PNG: ${ff1.stderr}`);
-    const ff2 = await capture('ffmpeg', ['-hide_banner', '-y', '-f', 'lavfi', '-i', 'color=c=#26322d:s=1080x1350:d=1', '-frames:v', '1', slidePng]);
+    const ff2 = await capture('ffmpeg', ['-hide_banner', '-y', '-f', 'lavfi', '-i', 'color=c=#26322d:s=1080x1080:d=1', '-frames:v', '1', slidePng]);
     assert.equal(ff2.code, 0, `Falha ao gerar slide PNG: ${ff2.stderr}`);
     const brandbookPdf = join(root, 'brandbook-horizonte.pdf');
     await writeFile(brandbookPdf, '%PDF-1.4\n% Manual da Marca Clínica Horizonte\n');
@@ -68,31 +68,62 @@ async function main(): Promise<void> {
     const imageProject = await runtime.invoke('projects.create', {
       title: 'Campanha Bruxismo',
       kind: 'image',
+      format: 'post-1x1',
       brandId: brand.id,
-      brief: 'Explicar 3 sinais claros de bruxismo.',
+      brief: 'Post único com informação clara sobre bruxismo.',
     }) as Project;
     assert.equal(imageProject.kind, 'image');
 
     await runtime.invoke('projects.notes', {
       id: imageProject.id,
-      notes: 'Priorizar contraste alto na capa.',
-      brief: 'Explicar 3 sinais claros de bruxismo com CTA final.',
+      notes: 'Priorizar contraste alto e leitura rápida.',
+      brief: 'Explicar um sinal de bruxismo com orientação responsável.',
     });
-
-    let detail = await runtime.invoke('projects.importAsset', {
+    const projectJsonPath = join(imageProject.path, 'project.json');
+    const native = JSON.parse(await readFile(projectJsonPath, 'utf8')) as Record<string, unknown>;
+    const page = (native.pages as Record<string, unknown>[])[0]!;
+    const copy = 'Dor na mandíbula ao acordar merece atenção.';
+    const visualFunction = 'Mostrar uma pessoa percebendo desconforto na mandíbula ao despertar.';
+    native.audience = 'Pessoas adultas com desconforto ao acordar.';
+    native.page_count_approved = true;
+    native.pages = [{ ...page, headline: 'Acorda com dor?', copy, visual_function: visualFunction, depicted_person: 'other_person' }];
+    await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
+    await writeFile(join(imageProject.path, String(page.prompt_file)), `Copy: ${copy}\nFunção visual: ${visualFunction}\nComposição editorial refinada, contraste alto, texto legível e margens seguras.\n`);
+    await writeFile(join(imageProject.path, 'storyboard.md'), `# ${imageProject.title}\n\n${imageProject.brief}\n`);
+    await writeFile(join(imageProject.path, 'research', 'claims.json'), `${JSON.stringify({
+      reviewed: false,
+      claims: [{ id: 'smoke-claim', claim: 'Dor mandibular pode estar associada ao bruxismo.', source: 'Fonte clínica de teste', source_url: 'https://example.org/bruxismo', status: 'approved' }],
+    }, null, 2)}\n`);
+    let detail = await runtime.invoke('projects.detail', { id: imageProject.id }) as ProjectDetail;
+    assert.equal(detail.visualReview?.ready, true, detail.visualReview?.blocking.join(' '));
+    detail = await runtime.invoke('projects.visual.approve', {
       id: imageProject.id,
-      path: slidePng,
-    }) as ProjectDetail;
-    const importedImage = detail.assets.find(a => a.kind === 'image');
-    assert.ok(importedImage, 'Imagem importada deve estar presente');
-    const assetPath = importedImage.path;
-
-    detail = await runtime.invoke('projects.approve', {
-      id: imageProject.id,
-      path: assetPath,
       approved: true,
+      contentHash: detail.visualReview!.contentHash,
     }) as ProjectDetail;
-    assert.equal(detail.assets.find(a => a.path === assetPath)?.approved, true);
+    assert.equal(detail.visualReview?.approved, true);
+
+    detail = await runtime.invoke('projects.importAsset', { id: imageProject.id, path: slidePng }) as ProjectDetail;
+    const inputBatch = detail.batches?.[0];
+    assert.ok(inputBatch, 'A importação deve criar uma rodada PostNow');
+    assert.equal(inputBatch.sourceCount, 1, 'Imagem importada deve permanecer como entrada de uma rodada');
+
+    await runtime.invoke('setup.link', { engine: 'postnow', path: postnowPath, confirm: true });
+    const postnowJob = await runtime.invoke('projects.render', { id: imageProject.id, batchId: inputBatch.id, logoPolicy: 'cover-closing' }) as { id: string };
+    const postnowResult = await runtime.services.waitJob(postnowJob.id);
+    assert.equal(postnowResult.status, 'succeeded', postnowResult.log);
+    detail = await runtime.invoke('projects.detail', { id: imageProject.id }) as ProjectDetail;
+    const postnowBatch = detail.batches?.find(batch => batch.id === inputBatch.id);
+    assert.equal(postnowBatch?.status?.state, 'ready', postnowBatch?.status?.message);
+    assert.equal(postnowBatch?.sourceCount, 1);
+    assert.equal(postnowBatch?.assets.length, 1);
+    const postnowAsset = postnowBatch!.assets[0]!;
+    const imageInfo = await capture('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', postnowAsset.path]);
+    assert.equal(imageInfo.code, 0, imageInfo.stderr);
+    assert.equal(imageInfo.stdout.trim(), '1080,1080');
+    assert.notDeepEqual(await readFile(postnowAsset.path), await readFile(slidePng), 'PostNow deve conformar a imagem e aplicar a logo em vez de copiar a entrada.');
+    detail = await runtime.invoke('projects.approve', { id: imageProject.id, path: postnowAsset.name, approved: true }) as ProjectDetail;
+    assert.equal(detail.assets.find(asset => asset.name === postnowAsset.name)?.approved, true);
 
     const exportedPath = await runtime.invoke('projects.export', {
       id: imageProject.id,
@@ -101,31 +132,36 @@ async function main(): Promise<void> {
     const manifest = JSON.parse(await readFile(join(exportedPath, 'MANIFEST.json'), 'utf8')) as { artifacts: unknown[] };
     assert.equal(manifest.artifacts.length, 1);
 
-    // Bridge image -> video using real FFmpeg
+
     const derivedVideo = await runtime.invoke('projects.bridge', {
       id: imageProject.id,
       kind: 'video',
+      format: 'feed-square',
+      batchId: postnowBatch!.id,
     }) as Project;
     assert.equal(derivedVideo.kind, 'video');
     assert.equal(derivedVideo.sourceProjectId, imageProject.id);
-    const videoDetail = await runtime.invoke('projects.detail', { id: derivedVideo.id }) as ProjectDetail;
-    assert.ok(videoDetail.assets.some(a => a.kind === 'video' && a.name.endsWith('derived.mp4')), 'Vídeo derivado MP4 deve existir');
+    let videoDetail = await runtime.invoke('projects.detail', { id: derivedVideo.id }) as ProjectDetail;
+    assert.equal(videoDetail.assets.some(a => a.kind === 'video'), false, 'Derivação não deve iniciar render automaticamente');
+    await runtime.invoke('setup.link', { engine: 'videogo', path: videogoPath, confirm: true });
+    await runtime.invoke('setup.link', { engine: 'maestro', path: maestroPath, confirm: true });
+    await runtime.invoke('projects.narration.setMode', { id: derivedVideo.id, mode: 'silent' });
+    const renderJob = await runtime.invoke('projects.render', { id: derivedVideo.id }) as { id: string };
+    const renderResult = await runtime.services.waitJob(renderJob.id);
+    assert.equal(renderResult.status, 'succeeded', renderResult.log);
+    videoDetail = await runtime.invoke('projects.detail', { id: derivedVideo.id }) as ProjectDetail;
+    assert.ok(videoDetail.assets.some(a => a.kind === 'video' && a.name.endsWith('.mp4')), 'Render explícito VideoGo deve gerar MP4');
+    const renderedVideo = videoDetail.assets.find(a => a.kind === 'video' && a.name.endsWith('.mp4'))!;
+    await runtime.invoke('projects.approve', { id: derivedVideo.id, path: renderedVideo.path, approved: true });
 
-    // Bridge video -> image using real FFmpeg
+    // Video -> image uses FFmpeg to extract an input frame, never a final PostNow output.
     const derivedImage = await runtime.invoke('projects.bridge', {
       id: derivedVideo.id,
       kind: 'image',
     }) as Project;
     assert.equal(derivedImage.kind, 'image');
     const derivedImageDetail = await runtime.invoke('projects.detail', { id: derivedImage.id }) as ProjectDetail;
-    assert.ok(derivedImageDetail.assets.some(a => a.kind === 'image' && a.name.endsWith('.png')), 'Quadro PNG extraído deve existir');
-
-    // Unprepared PostNow checkout without .venv/Pillow must be rejected by health check
-    await assert.rejects(() => runtime!.invoke('setup.link', { engine: 'postnow', path: postnowPath, confirm: true }), /PostNow falhou no diagnóstico/);
-
-    // Link built VideoGo and Orquestrador Maestro installations and verify health checks pass
-    await runtime.invoke('setup.link', { engine: 'videogo', path: videogoPath, confirm: true });
-    await runtime.invoke('setup.link', { engine: 'maestro', path: maestroPath, confirm: true });
+    assert.equal(derivedImageDetail.batches?.[0]?.sourceCount, 1, 'Quadro PNG extraído deve entrar como fonte de uma rodada PostNow');
 
     // Exercise interactive PTY job, resize, input, and cancellation
     const interactiveJob = await runtime.services.run({

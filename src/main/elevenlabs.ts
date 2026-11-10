@@ -9,19 +9,58 @@ const API = 'https://api.elevenlabs.io';
 const AUDIO_EXTENSIONS: Record<string, true> = { '.flac': true, '.m4a': true, '.mp3': true, '.ogg': true, '.wav': true };
 const MAX_SAMPLE_BYTES = 100 * 1024 * 1024;
 
-function providerError(status: number): Error {
-  if (status === 401) return new Error('A API key ElevenLabs é inválida ou foi revogada.');
-  if (status === 403) return new Error('A chave não tem permissão para esta operação ou o recurso não está habilitado na conta.');
-  if (status === 429) return new Error('Limite da ElevenLabs atingido. Aguarde antes de tentar novamente.');
-  return new Error(`A ElevenLabs recusou a operação (HTTP ${status}).`);
+class ElevenLabsPermissionError extends Error {}
+
+interface ProviderDetail { code?: string; status?: string; message?: string; }
+
+async function providerDetail(response: Response): Promise<ProviderDetail> {
+  try {
+    const body: unknown = await response.json();
+    if (typeof body !== 'object' || body === null || !('detail' in body)) return {};
+    const { detail } = body;
+    if (typeof detail !== 'object' || detail === null) return {};
+    return {
+      code: 'code' in detail && typeof detail.code === 'string' ? detail.code : undefined,
+      status: 'status' in detail && typeof detail.status === 'string' ? detail.status : undefined,
+      message: 'message' in detail && typeof detail.message === 'string' ? detail.message : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function providerError(response: Response): Promise<Error> {
+  if (response.status === 401) {
+    const detail = await providerDetail(response);
+    if (detail.code !== 'missing_permissions' && detail.status !== 'missing_permissions') return new Error('A API key ElevenLabs é inválida ou foi revogada.');
+    return permissionError(response.status, detail);
+  }
+  if (response.status === 403) return permissionError(response.status, await providerDetail(response));
+  if (response.status === 429) return new Error('Limite da ElevenLabs atingido. Aguarde antes de tentar novamente.');
+  return new Error(`A ElevenLabs recusou a operação (HTTP ${response.status}).`);
+}
+
+function permissionError(status: number, detail: ProviderDetail): ElevenLabsPermissionError {
+  const hint = detail.message ? `Detalhe da ElevenLabs: ${detail.message}` : 'Verifique as permissões da chave (voices_read para listar vozes; text_to_speech para narrar).';
+  return new ElevenLabsPermissionError(`A chave foi reconhecida pela ElevenLabs, mas a operação foi recusada (HTTP ${status}). ${hint}`);
+}
+
+function networkError(error: unknown): Error {
+  const timedOut = typeof error === 'object' && error !== null && 'name' in error && error.name === 'TimeoutError';
+  return new Error(timedOut ? 'A ElevenLabs não respondeu a tempo. Tente novamente.' : 'Não foi possível contatar a ElevenLabs. Verifique a conexão e tente novamente.');
 }
 
 async function getVoicesPage(key: string, pageToken?: string): Promise<{ voices: ElevenLabsVoice[]; nextPageToken?: string }> {
   const url = new URL('/v2/voices', API);
   url.searchParams.set('page_size', '100');
   if (pageToken) url.searchParams.set('next_page_token', pageToken);
-  const response = await fetch(url, { headers: { 'xi-api-key': key }, signal: AbortSignal.timeout(15_000) });
-  if (!response.ok) throw providerError(response.status);
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: { 'xi-api-key': key }, signal: AbortSignal.timeout(15_000) });
+  } catch (error) {
+    throw networkError(error);
+  }
+  if (!response.ok) throw await providerError(response);
   const data = await response.json() as {
     voices?: Array<{ voice_id?: string; name?: string; category?: string; labels?: Record<string, string>; preview_url?: string }>;
     has_more?: boolean;
@@ -52,9 +91,15 @@ export async function listElevenLabsVoices(key: string): Promise<ElevenLabsVoice
   return voices;
 }
 
-export async function validateElevenLabsKey(key: string): Promise<void> {
+export async function validateElevenLabsKey(key: string): Promise<{ warning?: string }> {
   if (key.length < 16 || key.length > 512 || /\s/.test(key)) throw new Error('Confira a API key ElevenLabs.');
-  await getVoicesPage(key);
+  try {
+    await getVoicesPage(key);
+    return {};
+  } catch (error) {
+    if (error instanceof ElevenLabsPermissionError) return { warning: `${error.message} Para narrar, a chave também precisa de text_to_speech.` };
+    throw error;
+  }
 }
 
 export async function cloneElevenLabsVoice(key: string, name: string, samplePath: string, services: Services): Promise<ElevenLabsVoice> {
@@ -85,7 +130,7 @@ export async function cloneElevenLabsVoice(key: string, name: string, samplePath
     body,
     signal: AbortSignal.timeout(60_000),
   });
-  if (!response.ok) throw providerError(response.status);
+  if (!response.ok) throw await providerError(response);
   const data = await response.json() as { voice_id?: string };
   if (!data.voice_id || !/^[a-zA-Z0-9_-]{1,128}$/.test(data.voice_id)) throw new Error('A ElevenLabs não retornou um identificador válido para a voz clonada.');
   return { id: data.voice_id, name, category: 'cloned', isClone: true };
@@ -100,5 +145,5 @@ export async function deleteElevenLabsClone(key: string, voiceId: string): Promi
     headers: { 'xi-api-key': key },
     signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok) throw providerError(response.status);
+  if (!response.ok) throw await providerError(response);
 }

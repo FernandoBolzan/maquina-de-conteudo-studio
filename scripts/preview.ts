@@ -55,6 +55,8 @@ async function main(): Promise<void> {
   const dataDir = join(root, 'data');
   const workspace = join(root, 'workspace');
   const distDir = resolve(process.cwd(), 'dist/renderer');
+  const packageInfo = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8')) as { version?: string };
+  const runtimeVersion = typeof packageInfo.version === 'string' ? packageInfo.version : '0.1.0';
   const clients = new Set<(event: AppEvent) => void>();
 
   const runtime = new Runtime(dataDir, {
@@ -68,14 +70,14 @@ async function main(): Promise<void> {
     update: async () => ({ available: false, message: 'Canal de releases não configurado neste ambiente.' }),
   }, event => {
     for (const send of clients) send(event);
-  });
+  }, runtimeVersion);
 
   await runtime.init();
   await runtime.invoke('app.settings', { workspace, provider: 'codex' });
 
   // Seed one real brand and one real project with a generated PNG slide so the studio preview is immediately exercisable
   const samplePng = join(root, 'capa-coolify.png');
-  await capture('ffmpeg', ['-hide_banner', '-y', '-f', 'lavfi', '-i', 'color=c=#18181b:s=1080x1350:d=1', '-frames:v', '1', samplePng]);
+  await capture('ffmpeg', ['-hide_banner', '-y', '-f', 'lavfi', '-i', 'color=c=#18181b:s=1080x1080:d=1', '-frames:v', '1', samplePng]);
   const brand = await runtime.invoke('brands.save', {
     name: 'Fernando Bolzan',
     tone: 'Direto, prático e autoral.',
@@ -118,7 +120,9 @@ async function main(): Promise<void> {
         const token = url.pathname.slice('/__maquina/media/'.length);
         const mediaFile = await runtime.mediaPath(token);
         res.writeHead(200, { 'Content-Type': MIME[extname(mediaFile).toLowerCase()] || 'application/octet-stream' });
-        createReadStream(mediaFile).pipe(res);
+        const stream = createReadStream(mediaFile);
+        stream.on('error', () => { if (!res.headersSent) res.writeHead(404); res.end(); });
+        stream.pipe(res);
         return;
       }
       if (url.pathname === '/' || url.pathname === '/index.html') {
@@ -136,7 +140,7 @@ async function main(): Promise<void> {
       res.writeHead(200, { 'Content-Type': MIME[extname(target).toLowerCase()] || 'application/octet-stream' });
       createReadStream(target).pipe(res);
     } catch {
-      res.writeHead(404);
+      if (!res.headersSent) res.writeHead(404);
       res.end('Not found');
     }
   });
