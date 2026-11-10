@@ -3,17 +3,17 @@
 <p align="center"><strong>Transforme um assunto em carrossel, post, Reels e vídeo, revisando cada etapa antes de publicar.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/tag/v0.2.1"><img alt="Versão" src="https://img.shields.io/badge/vers%C3%A3o-0.2.1-7c3aed"></a>
+  <a href="https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/tag/v0.2.2"><img alt="Versão" src="https://img.shields.io/badge/vers%C3%A3o-0.2.2-7c3aed"></a>
   <img alt="Windows, macOS e Linux" src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-desktop-111827">
   <img alt="Electron, React e TypeScript" src="https://img.shields.io/badge/Electron%20%C2%B7%20React%20%C2%B7%20TypeScript-stack-2563eb">
   <a href="https://www.fernandobolzan.com/maquina-de-conteudo"><img alt="Curso" src="https://img.shields.io/badge/curso-Máquina%20de%20Conteúdo-f59e0b"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-x64.exe"><strong>Windows</strong></a> ·
-  <a href="https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-arm64.dmg"><strong>macOS</strong></a> ·
-  <a href="https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-x86_64.AppImage"><strong>Linux</strong></a> ·
-  <a href="https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/tag/v0.2.1"><strong>Todas as versões</strong></a>
+  <a href="https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.2/maquina-de-conteudo-0.2.2-x64.exe"><strong>Windows</strong></a> ·
+  <a href="https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.2/maquina-de-conteudo-0.2.2-arm64.dmg"><strong>macOS</strong></a> ·
+  <a href="https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.2/maquina-de-conteudo-0.2.2-x86_64.AppImage"><strong>Linux</strong></a> ·
+  <a href="https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/tag/v0.2.2"><strong>Todas as versões</strong></a>
 </p>
 
 <br>
@@ -56,14 +56,14 @@ flowchart LR
   F --> G[Entrega no projeto]
 ```
 
-## Downloads (v0.2.1)
+## Downloads (v0.2.2)
 
 | Sistema | Arquivo | Como instalar |
 |---|---|---|
-| Windows x64 | [`.exe`](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-x64.exe) | Execute o instalador. O SmartScreen pode avisar: **Mais informações → Executar assim mesmo**. |
-| macOS Apple Silicon | [`.dmg`](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-arm64.dmg) · [`.zip`](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-arm64.zip) | Abra e, se o macOS bloquear, vá em **Ajustes do Sistema → Privacidade e Segurança → Abrir mesmo assim**. |
-| Linux x86_64 | [AppImage](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-x86_64.AppImage) | `chmod +x` no arquivo e execute. |
-| Debian/Ubuntu x86_64 | [`.deb`](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.1/maquina-de-conteudo-0.2.1-amd64.deb) | `sudo apt install ./maquina-de-conteudo-0.2.1-amd64.deb` |
+| Windows x64 | [`.exe`](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.2/maquina-de-conteudo-0.2.2-x64.exe) | Execute o instalador. O SmartScreen pode avisar: **Mais informações → Executar assim mesmo**. |
+| macOS Apple Silicon | [`.dmg`](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.2/maquina-de-conteudo-0.2.2-arm64.dmg) · [`.zip`](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.2/maquina-de-conteudo-0.2.2-arm64.zip) | Abra e, se o macOS bloquear, vá em **Ajustes do Sistema → Privacidade e Segurança → Abrir mesmo assim**. |
+| Linux x86_64 | [AppImage](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.2/maquina-de-conteudo-0.2.2-x86_64.AppImage) | `chmod +x` no arquivo e execute. |
+| Debian/Ubuntu x86_64 | [`.deb`](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/releases/download/v0.2.2/maquina-de-conteudo-0.2.2-amd64.deb) | `sudo apt install ./maquina-de-conteudo-0.2.2-amd64.deb` |
 
 **Atualização automática:** o app baixa novas versões sozinho no Windows e no AppImage, e aplica ao reiniciar (**Preferências → Reiniciar e atualizar**). O `.deb` e os builds de macOS (sem assinatura Apple) são atualizados manualmente.
 
