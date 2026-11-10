@@ -272,10 +272,58 @@ Estrutura local no computador do usuário (`~/MaquinaDeConteudo/`):
 ## 10. Stack Técnica e Empacotamento
 
 - **Desktop Host**: Electron + TypeScript + Vite.
-- **Frontend UI**: React 19 + Tailwind CSS + Lucide Icons + Radix UI.
-- **Terminal Engine**: `xterm.js` + `@xterm/addon-fit` + `@xterm/addon-webgl` conectado a PTY local com backpressure e renderização diferencial.
-- **Engine Runner**:
-  - `EngineDriver` híbrido (Docker Compose ou Subprocess Runner local).
+- **Frontend UI**: React 19 + TypeScript + Lucide Icons + Design System nativo em CSS semântico com tokens de design (`--surface`, `--border`, `--accent`, etc.), sem dependência de Tailwind ou Radix UI.
+- **Terminal Engine**: `xterm.js` + `@xterm/addon-fit` conectado a PTY local com backpressure, redação de senhas e renderização diferencial.
+- **Supervisor de Processos**: Process Runner local com cancelamento seguro via árvore de processos (`killTree`).
 - **Formatos de Empacotamento**:
-  - Windows: Instalador NSIS (`.exe`) com modo portátil sem necessidade de privilégios de administrador.
-  - Linux: AppImage autocontido e pacote `.deb`.
+  - Linux: AppImage autocontido com auto-updater e pacote `.deb`.
+  - Windows: Instalador NSIS (`.exe`) multiplataforma configurado via electron-builder.
+  - macOS: Pacotes `.dmg` e `.zip` para arquitetura Apple Silicon (arm64) e Intel configurados.
+
+---
+
+## 11. Subsistema de Voz e Narração (ElevenLabs & Modo Studio)
+
+A arquitetura de áudio e narração opera em duas camadas complementares:
+
+1. **Criptografia & Chaveiro Seguro**:
+   - A API key da ElevenLabs é armazenada criptografada via `safeStorage` (Secret Service / KWallet no Linux, DPAPI no Windows, Keychain no macOS).
+   - A chave nunca é trafegada para o renderer em texto puro nem gravada em logs de auditoria.
+   - Variável `VIDEOGO_NO_VOICE_CACHE=1` impede persistência involuntária de tokens em caches temporários.
+
+2. **Aprovação Editorial e Hash-Bound Synthesis**:
+   - Toda síntese pelo modelo Eleven v4 exige aprovação humana explícita do roteiro.
+   - O áudio gerado é atrelado ao SHA-256 do texto da cena correspondente; qualquer edição no texto invalida o áudio previamente sintetizado.
+
+3. **Modo Studio e Áudio Próprio (Zero Custo)**:
+   - Gravação nativa por microfone no teleprompter integrado (`NarrationTeleprompter.tsx`).
+   - Upload de arquivos de áudio por cena nos formatos WAV, MP3, M4A, FLAC e OGG, validados localmente com FFprobe.
+
+4. **Clonagem Instantânea com Consentimento Formal**:
+   - Amostras de voz de 2 a 5 minutos checadas localmente via FFprobe e enviadas diretamente à ElevenLabs mediante declaração explícita de titularidade/consentimento.
+
+---
+
+## 12. Subsistema de Acesso Mobile Remoto
+
+Permite monitorar renderizações e acessar arquivos do workspace pelo smartphone sem expor portas de rede locais:
+
+1. **Cloudflare Tunnel (`cloudflared`)**:
+   - Cria um túnel criptografado outbound descartável, gerando uma URL segura temporária no domínio Cloudflare.
+2. **Autenticação por PIN de 6 Dígitos**:
+   - `MobileAuthManager` gera tokens alfanuméricos com expiração e bloqueio por rate limit após 5 tentativas incorretas.
+3. **Interface e Streaming de Mídia**:
+   - Servidor HTTP leve integrado servindo SPA mobile responsiva e streaming de vídeo/áudio com suporte completo a headers `Range`.
+
+---
+
+## 13. Módulo de Motores & Setup
+
+Organizado hierarquicamente para clareza e separação de responsabilidades:
+
+1. **Submenu Dedicado na Sidebar e Tabs In-Page**:
+   - Alternância fluida entre **Motores & CLIs** (`engines`) e **ElevenLabs & Voz** (`elevenlabs`).
+2. **Executive Overview Banner**:
+   - Diagnóstico em tempo real dos 4 pilares: Assistentes de IA (Codex/Claude), Motores de Produção (PostNow/VideoGo/Maestro), Ferramentas Técnicas do Sistema e Narração ElevenLabs.
+3. **Catálogo de Vozes com Player Integrado**:
+   - Busca instantânea e filtros por categoria (`Todas`, `Clones`, `Catálogo`) com player sob demanda para testes de áudio.

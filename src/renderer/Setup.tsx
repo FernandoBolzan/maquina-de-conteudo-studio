@@ -306,12 +306,15 @@ export function Setup({
       />
 
       {/* Submenu Segmented Navigation Bar */}
-      <nav className="setup-subnav" aria-label="Submenu de Motores e Setup">
+      <div className="setup-subnav" role="tablist" aria-label="Seções de Motores e Setup">
         <button
           type="button"
+          role="tab"
+          id="tab-engines"
+          aria-selected={currentSubmenu === 'engines'}
+          aria-controls="panel-engines"
           className={`setup-tab-btn ${currentSubmenu === 'engines' ? 'active' : ''}`}
           onClick={() => setSubmenu('engines')}
-          aria-pressed={currentSubmenu === 'engines'}
         >
           <Wrench size={15} />
           <span>Motores &amp; CLIs</span>
@@ -321,9 +324,12 @@ export function Setup({
         </button>
         <button
           type="button"
+          role="tab"
+          id="tab-elevenlabs"
+          aria-selected={currentSubmenu === 'elevenlabs'}
+          aria-controls="panel-elevenlabs"
           className={`setup-tab-btn ${currentSubmenu === 'elevenlabs' ? 'active' : ''}`}
           onClick={() => setSubmenu('elevenlabs')}
-          aria-pressed={currentSubmenu === 'elevenlabs'}
         >
           <AudioLines size={15} />
           <span>ElevenLabs &amp; Voz</span>
@@ -331,7 +337,7 @@ export function Setup({
             {snapshot.integrations.elevenLabs.configured ? 'Conectado' : 'Configurar'}
           </span>
         </button>
-      </nav>
+      </div>
 
       {loadError && <ErrorNotice message={loadError} />}
 
@@ -349,7 +355,7 @@ export function Setup({
           onGoEngines={() => setSubmenu('engines')}
         />
       ) : (
-        <div className="setup-stack">
+        <div className="setup-stack" role="tabpanel" id="panel-engines" aria-labelledby="tab-engines">
           {/* Executive Overview Banner */}
           <div className="setup-overview-banner" role="region" aria-label="Resumo do ambiente operacional">
             <div className="setup-stat-card">
@@ -396,7 +402,13 @@ export function Setup({
               onClick={() => setSubmenu('elevenlabs')}
               role="button"
               tabIndex={0}
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setSubmenu('elevenlabs'); }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSubmenu('elevenlabs');
+                }
+              }}
+              aria-label="Abrir submenu ElevenLabs & Voz"
               title="Abrir submenu ElevenLabs & Voz"
             >
               <div className="setup-stat-icon"><AudioLines size={18} /></div>

@@ -169,7 +169,7 @@ export function VideoGoVoiceSetup({ snapshot, run, refresh, busy, confirm }: Scr
   const totalPremade = useMemo(() => voices.filter(v => !v.isClone).length, [voices]);
 
   return (
-    <div className="setup-stack elevenlabs-dashboard" aria-label="Painel ElevenLabs e Voz">
+    <div className="setup-stack elevenlabs-dashboard" role="tabpanel" id="panel-elevenlabs" aria-labelledby="tab-elevenlabs">
       {/* Trust & Security Ribbon */}
       <div className="elevenlabs-trust-ribbon" role="region" aria-label="Garantias de segurança e governança de voz">
         <div className="trust-pillar">
@@ -257,7 +257,6 @@ export function VideoGoVoiceSetup({ snapshot, run, refresh, busy, confirm }: Scr
                 className="icon-button password-toggle-btn"
                 aria-label={showKey ? 'Ocultar chave' : 'Exibir chave'}
                 onClick={() => setShowKey(val => !val)}
-                tabIndex={-1}
               >
                 {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
@@ -356,6 +355,8 @@ export function VideoGoVoiceSetup({ snapshot, run, refresh, busy, confirm }: Scr
               <div className="voice-filter-pills" role="radiogroup" aria-label="Filtrar vozes">
                 <button
                   type="button"
+                  role="radio"
+                  aria-checked={categoryFilter === 'all'}
                   className={`voice-filter-pill ${categoryFilter === 'all' ? 'active' : ''}`}
                   onClick={() => setCategoryFilter('all')}
                 >
@@ -363,6 +364,8 @@ export function VideoGoVoiceSetup({ snapshot, run, refresh, busy, confirm }: Scr
                 </button>
                 <button
                   type="button"
+                  role="radio"
+                  aria-checked={categoryFilter === 'cloned'}
                   className={`voice-filter-pill ${categoryFilter === 'cloned' ? 'active' : ''}`}
                   onClick={() => setCategoryFilter('cloned')}
                 >
@@ -370,6 +373,8 @@ export function VideoGoVoiceSetup({ snapshot, run, refresh, busy, confirm }: Scr
                 </button>
                 <button
                   type="button"
+                  role="radio"
+                  aria-checked={categoryFilter === 'premade'}
                   className={`voice-filter-pill ${categoryFilter === 'premade' ? 'active' : ''}`}
                   onClick={() => setCategoryFilter('premade')}
                 >

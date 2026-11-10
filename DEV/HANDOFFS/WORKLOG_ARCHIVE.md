@@ -195,3 +195,29 @@ Read `DEV/HANDOFF.md` and the retained `DEV/WORKLOG.md` entries before opening t
 - Verified: `npm run typecheck` e `npm run lint` sem erro; `npm test` 112/112; `npm run build` (renderer `index-BlFQd9j3.js`, 709.88 kB; aviso >500 kB pré-existente); `npm run smoke` com `"ok": true`. Offline com os 6 PNGs reais da rodada: 1092×1440 → 1080×1350, cortes de 37 px no topo (2,57%) e 38 px na base (2,64%). Smoke temporário com entrada 1092×1440: `"ok": true`, saída 1080×1350, script removido. Aceite de `planCenterCrop` sobre 230 PNGs em `~/.codex/generated_images`: 4:5 110 (47,8%), 1:1 16, 9:16 7, 4:3 2. App reiniciado com `npm start` (pid 551942, `ELECTRON_WINDOW_READY`, dist de 20:03).
 - Limits: nenhuma geração Codex. Limite de 3% não aprovado pela usuária. A paisagem 1672×941 (7 das 50 saídas mais recentes) exige ~27% por lado e segue recusada. Inspeção visual dos PNGs, sem medição por pixel. Windows/macOS não verificados. Geração real pendente de clique da usuária.
 - Next context: se a usuária autorizar, clicar em "Gerar 6 imagens com Codex" (paga) e observar `.status.json`. Decisões pendentes: limite (3% atual; 10% daria 119/230, com cortes de até 8,3%) e 4:3/9:16 (`DEV/DECISIONS.md`, pendência 1).
+
+## 2026-11-07 — Retrato da cliente, textos automáticos e pedido com páginas
+
+- Spec: `DEV/SPECS/ACTIVE.md` (In Scope e "Rodada atual"); `DEV/DECISIONS.md` (ADR-019 a ADR-021; ADR-007 parcialmente superseded).
+- Changed: `src/shared/depicted-person.ts`, `src/shared/text-generation.ts`, `src/main/content/postnow.ts`, `src/main/agents.ts` (regra da sessão de texto, L70-75), `src/main/projects.ts` (`buildVisualReview`), `src/renderer/Studio.tsx` (disparo ao salvar pauta, L336-341), `src/renderer/VisualTextEditor.tsx`, `src/renderer/prompt-library.ts`, `src/renderer/Projects.tsx`; testes `tests/depicted-person.test.ts`, `tests/text-generation.test.ts`, `tests/prompt-library.test.ts`; `DEV/*` e `README.md`.
+- Reason: a usuária pediu a cliente nas páginas 1 e 6 do carrossel da Patricia. O Studio não oferecia "Cliente (retrato aprovado)", a regra da sessão de texto passou a depender do retrato aprovado (`agents.ts` L70-75), salvar pauta nova passou a iniciar a preparação de textos, e o pedido usa o número de páginas do projeto.
+- Verified: `npm test` 127/127, typecheck, lint, build (exit 0, aviso >500 kB pré-existente), smoke `"ok": true`; matriz do pedido 9/9; UI isolada sem overflow em 1024, 768, 390 e 320 px; E2E com script descartável, sem Electron e sem geração. Detalhes em `DEV/VERIFY.md`.
+- Limits: sem Codex real; nenhuma imagem nova; projeto da Patricia sem alteração (páginas 1 e 6 seguem `none`); Windows e macOS não verificados.
+- Next context: decidir itens 3, 8, 10 e 11 em `DEV/DECISIONS.md`; reinício do app aguarda resposta à pergunta 8.
+
+## 2026-11-07 — Incidente: `codex exec` real disparado por preview
+
+- Spec: nenhuma.
+- Changed: nenhuma.
+- Reason: um preview de verificação disparou `codex exec` real (PID 616267, ~40 s). `searchDirectories` (`src/main/setup/tools.ts` L103) põe `~/.local/bin` e `/usr/local/bin` antes do PATH do sistema.
+- Verified: causa identificada por leitura de código; o disparo não foi reproduzido.
+- Limits: custo não medido; não corrigido.
+- Next context: decidir item 9 em `DEV/DECISIONS.md` antes de qualquer preview que chame o CLI.
+
+## 2026-11-07 — Formatos: 4:5 removido, formato por rodada e status ilegível
+- Spec: `DEV/SPECS/ACTIVE.md` (In Scope e "Rodada atual"); `DEV/DECISIONS.md` (ADR-022).
+- Changed: `src/shared/formats.ts` remove o 4:5 (padrão `carousel-1x1`); projeto com formato removido abre com `unsupportedFormat` sem migração; seletor de formato na etapa de imagens grava a escolha na rodada (`BatchStatus.format`) e regerar refaz a rodada; `roundFormat`/`isRoundDelivered` (`src/main/content/postnow.ts`) tratam rodada crua, legada, ilegível e entregue (falha fechada); `render()` não grava `failed` em pré-checagem; `buildVisualReview` com formato removido mostra só a mensagem de remoção.
+- Reason: pedido da usuária de remover o 4:5 e regerar com o formato escolhido; `.status.json` sem `updatedAt` (fixture inválida de agente) era reprocessado e podia sobrescrever rodada entregue (fail-open).
+- Verified: `npm test` 157/157 (inclui `tests/postnow-round-format.test.ts`, `tests/postnow-round-delivery.test.ts` e `tests/postnow-render-round.test.ts`, 14/14 nos três); mutações descartáveis detectadas pelos testes (predicado de entrega: 3 falhas; guarda de status ilegível: 2 falhas); FormatoVerify, item 5: PASS nos dois casos, com `.status.json` byte a byte inalterado (`DEV/VERIFY.md`). Gates: typecheck, lint, smoke `"ok": true`, build ok.
+- Limits: nenhuma geração paga; projeto real da Patricia (`carousel-4x5`) não tocado, segue bloqueado até a escolha de formato (pendência 13); UI de troca de formato não exercitada em Electron.
+- Next context: decidir pendências 1 e 13 em `DEV/DECISIONS.md`; regerar rodada com o formato escolhido quando a usuária autorizar.

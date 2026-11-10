@@ -9,6 +9,7 @@
 | `SPECS/ACTIVE.md` | Active objective, scope, acceptance, and status |
 | `WORKLOG.md` | Compact chronological hook of substantive work |
 | `VERIFY.md` | Latest verification evidence and outcomes |
+| `ROADMAP.md` | Living roadmap separating backlog/pending items (top) from completed deliveries (bottom) |
 | `ARCHITECTURE.md` | Living project architecture |
 | `DECISIONS.md` | Consolidated technical decisions |
 | `ADR/` | Formal decision records |
@@ -24,6 +25,7 @@
 | `SQL/` | SQL scripts and database work |
 | `ARCH/` | Existing architecture sub-hierarchy |
 | `WORKFLOWS/` | Existing workflow artifacts |
+| `WORKFLOWS/PROMPT-ADAPTACAO-ELEVENLABS-VIDEOGO.md` | Guia de adaptação de prompts para ElevenLabs no VideoGo |
 | `TESTS/` | Existing testing sub-hierarchy |
 | `DOCUMENTATION/` | Existing project documentation sub-hierarchy |
 | `BACKLOG/` | Existing backlog and completed work archive |

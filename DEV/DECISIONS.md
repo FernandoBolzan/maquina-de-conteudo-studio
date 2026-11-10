@@ -241,6 +241,18 @@
 - **Consequências**: o contrato não confere se os arquivos citados existem: `asset-inexistente` é aceito pelo app e recusado pelo VideoGo (por design). Avisos do VideoGo não estão portados (`../VideoGo/src/services/production/storyboard.ts` L227, L257, L268, L287–289, L308, L312–340); `spokentext-digitos-diferentes` não é comparado (dígitos fora de tags).
 - **Verificação**: `tests/storyboard-contract.test.ts` (18 testes). Cruzamento com `validateStoryboardFile` do VideoGo (`../VideoGo/src/services/production/storyboard.ts` L206) em 26 casos: 24 concordam; as 2 divergências são app-aceita e VideoGo-recusa (`asset-inexistente`, `spokentext-digitos-diferentes`); nenhum caso recusado pelo app foi aceito pelo VideoGo.
 
+## ADR-033: Submenu desacoplado para ElevenLabs & Redesign da Área de Motores & Setup
+- **Contexto**: A configuração e catálogo da ElevenLabs estavam embutidos no meio da grade de motores de conteúdo em `Setup.tsx`, causando poluição visual, rolagem excessiva e dificultando o acesso direto a testes de voz, catálogo e clonagem.
+- **Decisão**:
+  1. Desacoplar a interface em dois submenus formais: `Motores & CLIs` (`engines`) e `ElevenLabs & Voz` (`elevenlabs`), navegáveis via submenu aninhado na barra lateral e através de segmented tabs acessíveis (`role="tablist"` / `role="tabpanel"`) no topo da tela de Setup.
+  2. Manter a visão `engines` focada no provisionamento dos 3 motores (PostNow, VideoGo, Maestro) e assistentes (Codex, Claude, GitHub), adicionando um Executive Overview Banner com métricas operacionais em tempo real.
+  3. Transformar a visão `elevenlabs` em um Studio de Voz completo, contendo ribbon com 4 garantias de segurança (`safeStorage`, zero vazamento, aprovação hash-bound, áudio offline), campo de chave com toggle show/hide, catálogo pesquisável com player de áudio sob demanda e fluxo guiado de Instant Voice Cloning com consentimento legal e validação via FFprobe.
+  4. Deep links automáticos a partir do onboarding e do Studio ("Configurar voz do VideoGo") roteiam diretamente para a aba `elevenlabs`.
+- **Motivo**: Atender à solicitação do maestro, melhorando a organização, ergonomia, acessibilidade (W3C WAI-ARIA) e governança de segredos da aplicação desktop.
+- **Alternativas**: Manter tela única com scroll longo (rejeitada: confusa e sem hierarquia); criar tela de topo separada (rejeitada: ElevenLabs é uma integração opcional do motor VideoGo dentro de Motores & Setup).
+- **Consequências**: Elimina duplicidade de visualização; o usuário pode gerenciar vozes e testar previews de forma dedicada sem interferir no status dos demais motores.
+- **Verificação**: `npm run typecheck`, `npm run lint` (exit 0), `npm test` (230/230 testes passando), `npm run smoke` (`ok: true`), build de produção concluído e testes interativos em Chromium em 4 viewports (390, 768, 1280, 1440 px) com zero overflow horizontal.
+
 ## Decisões pendentes
 
 Itens sem decisão tomada. Até a resposta, vale o comportamento descrito nas seções acima.

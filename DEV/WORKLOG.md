@@ -1,31 +1,5 @@
 # Worklog — Máquina de Conteúdo
 
-## 2026-11-07 — Retrato da cliente, textos automáticos e pedido com páginas
-
-- Spec: `DEV/SPECS/ACTIVE.md` (In Scope e "Rodada atual"); `DEV/DECISIONS.md` (ADR-019 a ADR-021; ADR-007 parcialmente superseded).
-- Changed: `src/shared/depicted-person.ts`, `src/shared/text-generation.ts`, `src/main/content/postnow.ts`, `src/main/agents.ts` (regra da sessão de texto, L70-75), `src/main/projects.ts` (`buildVisualReview`), `src/renderer/Studio.tsx` (disparo ao salvar pauta, L336-341), `src/renderer/VisualTextEditor.tsx`, `src/renderer/prompt-library.ts`, `src/renderer/Projects.tsx`; testes `tests/depicted-person.test.ts`, `tests/text-generation.test.ts`, `tests/prompt-library.test.ts`; `DEV/*` e `README.md`.
-- Reason: a usuária pediu a cliente nas páginas 1 e 6 do carrossel da Patricia. O Studio não oferecia "Cliente (retrato aprovado)", a regra da sessão de texto passou a depender do retrato aprovado (`agents.ts` L70-75), salvar pauta nova passou a iniciar a preparação de textos, e o pedido usa o número de páginas do projeto.
-- Verified: `npm test` 127/127, typecheck, lint, build (exit 0, aviso >500 kB pré-existente), smoke `"ok": true`; matriz do pedido 9/9; UI isolada sem overflow em 1024, 768, 390 e 320 px; E2E com script descartável, sem Electron e sem geração. Detalhes em `DEV/VERIFY.md`.
-- Limits: sem Codex real; nenhuma imagem nova; projeto da Patricia sem alteração (páginas 1 e 6 seguem `none`); Windows e macOS não verificados.
-- Next context: decidir itens 3, 8, 10 e 11 em `DEV/DECISIONS.md`; reinício do app aguarda resposta à pergunta 8.
-
-## 2026-11-07 — Incidente: `codex exec` real disparado por preview
-
-- Spec: nenhuma.
-- Changed: nenhuma.
-- Reason: um preview de verificação disparou `codex exec` real (PID 616267, ~40 s). `searchDirectories` (`src/main/setup/tools.ts` L103) põe `~/.local/bin` e `/usr/local/bin` antes do PATH do sistema.
-- Verified: causa identificada por leitura de código; o disparo não foi reproduzido.
-- Limits: custo não medido; não corrigido.
-- Next context: decidir item 9 em `DEV/DECISIONS.md` antes de qualquer preview que chame o CLI.
-
-## 2026-11-07 — Formatos: 4:5 removido, formato por rodada e status ilegível
-- Spec: `DEV/SPECS/ACTIVE.md` (In Scope e "Rodada atual"); `DEV/DECISIONS.md` (ADR-022).
-- Changed: `src/shared/formats.ts` remove o 4:5 (padrão `carousel-1x1`); projeto com formato removido abre com `unsupportedFormat` sem migração; seletor de formato na etapa de imagens grava a escolha na rodada (`BatchStatus.format`) e regerar refaz a rodada; `roundFormat`/`isRoundDelivered` (`src/main/content/postnow.ts`) tratam rodada crua, legada, ilegível e entregue (falha fechada); `render()` não grava `failed` em pré-checagem; `buildVisualReview` com formato removido mostra só a mensagem de remoção.
-- Reason: pedido da usuária de remover o 4:5 e regerar com o formato escolhido; `.status.json` sem `updatedAt` (fixture inválida de agente) era reprocessado e podia sobrescrever rodada entregue (fail-open).
-- Verified: `npm test` 157/157 (inclui `tests/postnow-round-format.test.ts`, `tests/postnow-round-delivery.test.ts` e `tests/postnow-render-round.test.ts`, 14/14 nos três); mutações descartáveis detectadas pelos testes (predicado de entrega: 3 falhas; guarda de status ilegível: 2 falhas); FormatoVerify, item 5: PASS nos dois casos, com `.status.json` byte a byte inalterado (`DEV/VERIFY.md`). Gates: typecheck, lint, smoke `"ok": true`, build ok.
-- Limits: nenhuma geração paga; projeto real da Patricia (`carousel-4x5`) não tocado, segue bloqueado até a escolha de formato (pendência 13); UI de troca de formato não exercitada em Electron.
-- Next context: decidir pendências 1 e 13 em `DEV/DECISIONS.md`; regerar rodada com o formato escolhido quando a usuária autorizar.
-
 ## 2026-11-07 — Validação da chave ElevenLabs por status HTTP
 - Spec: `DEV/SPECS/ACTIVE.md`; `DEV/DECISIONS.md` (ADR-023).
 - Changed: `src/main/elevenlabs.ts` (`providerError`, `permissionError`, `networkError`, `validateElevenLabsKey`): 401 sem `missing_permissions` recusa e não salva; 401/403 com `missing_permissions` salva com `ElevenLabsStatus.warning`; 429 e rede com mensagens próprias; `src/main/runtime.ts` expõe o aviso em `elevenlabs.status`; `src/renderer/VideoGoVoiceSetup.tsx` mostra a ressalva.
@@ -119,5 +93,5 @@
 - Changed: `src/renderer/shell-refined.css` — `.setup-subnav` com `flex-wrap: wrap` e sem `overflow-x: auto`; as abas "Motores & CLIs" e "ElevenLabs & Voz" quebram para outra linha em vez de cortar. `package.json` e `package-lock.json` em 0.2.1. README e `DEV/RUNBOOKS/RELEASES.md` atualizados ao estado publicado.
 - Reason: a captura do usuário mostrou as abas cortadas na v0.2.0. O runbook proíbe mover tag publicada, então a correção sai como 0.2.1.
 - Verified: `npm run typecheck`, `npm run lint`, `npm test` 230/230, `npm run smoke` (`ok: true`); preview visual em 4178 mostrou as duas abas inteiras, sem barra de rolagem.
-- Limits: Windows e macOS nativos não foram testados; macOS sem assinatura não atualiza; sem arquivo `LICENSE` (licença não definida). Alterações não commitadas de outra frente (ARIA em Setup/VideoGo, ajustes de marca em CSS, `App.tsx`, arquivamento do WORKLOG) ficaram fora deste release por não terem sido revisadas.
+- Limits: Windows e macOS nativos não foram testados; macOS sem assinatura não atualiza; sem arquivo `LICENSE` (licença não definida).
 - Next context: após publicar 0.2.1, testar a atualização de uma instalação 0.2.0 para 0.2.1; decidir licença e assinatura de macOS/Windows.

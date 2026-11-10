@@ -28,7 +28,7 @@ html, body, #root {
 
 .app-shell .brand-lockup {
   min-height: 52px;
-  gap: 12px;
+  gap: 10px;
   padding: 4px;
   border: 1px solid transparent;
   background: transparent;
@@ -60,28 +60,29 @@ html, body, #root {
 .app-shell .brand-lockup .brand-title-line {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
   white-space: nowrap;
 }
 
 .app-shell .brand-lockup .brand-title-text {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--fg);
   line-height: 1.2;
+  letter-spacing: -0.01em;
 }
 
 .app-shell .brand-lockup .brand-beta-tag {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 1.5px 6px;
+  padding: 1px 5px;
   border-radius: 999px;
   background: var(--accent);
   color: var(--accent-ink);
   font-family: var(--font-sans);
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 800;
   line-height: 1.2;
   text-transform: uppercase;

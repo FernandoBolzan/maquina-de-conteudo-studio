@@ -214,6 +214,7 @@ export function App() {
               type="button"
               className={page === 'setup' ? 'active' : ''}
               aria-current={page === 'setup' ? 'page' : undefined}
+              aria-expanded={page === 'setup'}
               onClick={() => void goSetup('engines')}
             >
               <SlidersHorizontal size={17} />

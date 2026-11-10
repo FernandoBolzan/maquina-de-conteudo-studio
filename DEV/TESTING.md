@@ -27,7 +27,7 @@ The official public `v0.1.1` assets are separate builds from tag `v0.1.1`: its u
 
 The public release provides a Windows x64 NSIS installer and macOS arm64 DMG/ZIP. Windows/macOS native installation and user flows remain unverified. Public updater manifests match published asset names; signatures/notarization were not validated. AppImage supports user-confirmed in-app updates; `.deb` updates through the system package manager.
 
-- The current checkout's `npm test` runs 69 Node tests (gate de 2026-11-06), including ElevenLabs key protection and blocking TTS until explicit approval; this integration is in current `main`, not in the public v0.1.1 tagged source. Tests use no real API key or paid request.
+- O checkout atual executa 230 testes determinísticos ('npm test'), cobrindo contratos de storyboard VideoGo v1, sanitização, permissões de sessão, validação de chaves ElevenLabs por status HTTP, aprovações editoriais vinculadas a hash SHA-256, conformação centralizada de imagem, derivadas bidirecionais e journals de exclusão recuperável. Os testes não realizam chamadas de rede pagas nem consomem créditos reais.
 
 - Testes de runtime usam `ffmpeg` para criar fixture PNG e criam symlink. Instale FFmpeg no host; Windows também precisa permitir symlink (Developer Mode ou privilégios adequados).
 - `npm run smoke` cria e remove uma raiz de dados/workspace temporária. Exercita criação de marca e projetos, derivação de imagem/vídeo com FFmpeg, manifesto de exportação, preflight de motores, entrada/redimensionamento/cancelamento de PTY e eventos.

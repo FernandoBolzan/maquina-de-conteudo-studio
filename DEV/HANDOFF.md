@@ -4,7 +4,7 @@ This file should stay small. Refresh it after substantive work or run `orquestra
 
 ## Snapshot
 
-- Updated: 2026-11-10T02:20:54.522Z
+- Updated: 2026-11-10T02:53:43.808Z
 - Read order: `INDEX.md` -> `HANDOFF.md` -> `CONTEXT.md` -> `SPECS/ACTIVE.md`
 - Active spec: `SPECS/ACTIVE.md`
 - Verification source: `VERIFY.md`
@@ -12,15 +12,15 @@ This file should stay small. Refresh it after substantive work or run `orquestra
 
 ## Latest Work
 
-- Entry: 2026-11-09 — Motores & Setup: submenu ElevenLabs, overview executivo e redesign de layout
+- Entry: 2026-11-10 — Release 0.2.1: abas do submenu corrigidas
 - Spec: `DEV/SPECS/ACTIVE.md`
-- Changed: `src/renderer/App.tsx` (navegação com `setupSubmenu: 'engines' | 'elevenlabs'`, submenu aninhado na sidebar com pills de status, breadcrumb com navegação hierárquica e deep link de voz); `src/renderer/Setup.tsx` (segmented tabs para alternar entre Motores & CLIs e ElevenLabs & Voz, banner executivo de status com métricas operacionais, desacoplamento completo do bloco de voz, link direto no onboarding); `src/renderer/VideoGoVoiceSetup.tsx` (dashboard dedicado de voz com 4 pilares de governança e segurança, toggle de visualização da API key, catálogo de vozes pesquisável com filtro por categoria, player de áudio preview sob demanda interativo, guia de clonagem instantânea estruturado em passos, checkbox de consentimento legal e diagnóstico local de áudio FFprobe); `src/renderer/shell-refined.css` (estilos para submenu na sidebar, tabs in-page, cards de estatísticas, ribbon de segurança, catálogo de vozes e responsividade sem overflow em 390/768/1280/1440 px).
-- Verified: `npm run typecheck`, `npm run lint` (exit 0); `npm test` (223/223); `npm run smoke` (`ok: true`); `npm run build` (exit 0); verificação interativa visual em Chromium via Browser API em 4 viewports (390, 768, 1280, 1440 px com 0 overflow), alternância de abas e submenus na sidebar e in-page, e navegação direta do Studio para o painel ElevenLabs.
+- Changed: `src/renderer/shell-refined.css` — `.setup-subnav` com `flex-wrap: wrap` e sem `overflow-x: auto`; as abas "Motores & CLIs" e "ElevenLabs & Voz" quebram para outra linha em vez de cortar. `package.json` e `package-lock.json` em 0.2.1. README e `DEV/RUNBOOKS/RELEASES.md` atualizados ao estado publicado.
+- Verified: `npm run typecheck`, `npm run lint`, `npm test` 230/230, `npm run smoke` (`ok: true`); preview visual em 4178 mostrou as duas abas inteiras, sem barra de rolagem.
 - Risks: [list only active risks]
-- Next context: reiniciar a aplicação desktop para carregar os novos componentes compilados no Electron nativo.
+- Next context: após publicar 0.2.1, testar a atualização de uma instalação 0.2.0 para 0.2.1; decidir licença e assinatura de macOS/Windows.
 
 ## Recent Entries
 
-- 2026-11-09 — Motores & Setup: submenu ElevenLabs, overview executivo e redesign de layout
-- 2026-11-09 — Capa com título, pessoa fiel e logo oficial; contas visíveis
-- 2026-11-09 — Entrega: capa preservada quando o Claude falha; login do Claude conferido
+- 2026-11-10 — Release 0.2.1: abas do submenu corrigidas
+- 2026-11-10 — Atualização automática do app por release por tag (v0.2.0)
+- 2026-11-09 — Fluxo simplificado: Avançar aprova a etapa; isolamento das contas Claude/Codex
