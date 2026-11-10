@@ -4,6 +4,10 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 
 ## 2026-11-10
 
+### 0.2.2 — README e screenshots no repositório
+- README compactado, com os três screenshots versionados em `docs/screenshots/`.
+- Sem mudança de código do app em relação à 0.2.1; a release só traz a documentação atualizada.
+
 ### 0.2.1 — correção do submenu de Motores & Setup
 - As abas "Motores & CLIs" e "ElevenLabs & Voz" não são mais cortadas em janelas estreitas; quebram para outra linha.
 - Publicada pela tag `v0.2.1` (o runbook proíbe mover tag publicada).
