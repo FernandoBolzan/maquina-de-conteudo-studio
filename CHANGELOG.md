@@ -7,6 +7,10 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 ### Não lançado — login do Codex em Motores & Setup
 - "Entrar na conta" do Codex não fazia nada: o diretório `codex-home` do app não era criado, e o Codex CLI saía com erro antes de pedir o código. O diretório agora é criado antes de qualquer execução do CLI.
 
+### Não lançado — onboarding de Motores & Setup
+- Os cards "Carrossel ou post" e "Vídeo de curiosidades" têm layout próprio: título e subtítulo em linhas separadas, ícone sem sobreposição.
+- O rótulo "Agente" do passo B fica na mesma linha do select.
+
 ### 0.2.2 — README e screenshots no repositório
 - README compactado, com os três screenshots versionados em `docs/screenshots/`.
 - Sem mudança de código do app em relação à 0.2.1; a release só traz a documentação atualizada.
