@@ -146,6 +146,9 @@ export async function resolveTool(tool: string, services: Services): Promise<str
 }
 
 export async function toolEnvironment(services: Services): Promise<Record<string, string>> {
+  const codexHome = join(services.dataDir, 'codex-home');
+  // Codex CLI exits with code 1 when CODEX_HOME is missing; create it before any login or run.
+  await mkdir(codexHome, { recursive: true, mode: 0o700 });
   const env: Record<string, string> = {
     PATH: searchDirectories(services).join(delimiter),
     POSTNOW_HOME: join(services.dataDir, 'engine-data', 'postnow'),
@@ -155,7 +158,7 @@ export async function toolEnvironment(services: Services): Promise<Record<string
     DISABLE_UPDATES: '1',
     // The Studio keeps its own Claude and Codex logins; terminal and desktop apps keep theirs in ~/.claude and ~/.codex.
     CLAUDE_CONFIG_DIR: join(services.dataDir, 'claude-config'),
-    CODEX_HOME: join(services.dataDir, 'codex-home'),
+    CODEX_HOME: codexHome,
   };
   const videogoPython = join(homedir(), '.local', 'share', 'videogo-venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
   if (await executable(videogoPython)) {

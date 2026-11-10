@@ -4,6 +4,9 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 
 ## 2026-11-10
 
+### Não lançado — login do Codex em Motores & Setup
+- "Entrar na conta" do Codex não fazia nada: o diretório `codex-home` do app não era criado, e o Codex CLI saía com erro antes de pedir o código. O diretório agora é criado antes de qualquer execução do CLI.
+
 ### 0.2.2 — README e screenshots no repositório
 - README compactado, com os três screenshots versionados em `docs/screenshots/`.
 - Sem mudança de código do app em relação à 0.2.1; a release só traz a documentação atualizada.

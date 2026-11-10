@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { Job, Settings } from '../src/shared/contracts.js';
 import type { Services } from '../src/main/context.js';
-import { checkCliUpdates, classifyCliUpdate, compareVersions, manageCliTool } from '../src/main/setup/tools.js';
+import { checkCliUpdates, classifyCliUpdate, compareVersions, manageCliTool, toolEnvironment } from '../src/main/setup/tools.js';
 
 function makeServices(root: string, latest: { codex: string; claude: string }): Services {
   const jobs = new Map<string, Job>();
@@ -127,6 +127,17 @@ test('managed CLI install, update, and rollback preserve validated versions', as
   } finally {
     if (originalPath === undefined) delete process.env.PATH; else process.env.PATH = originalPath;
     if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('toolEnvironment creates CODEX_HOME before the Codex CLI runs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'codex-home-'));
+  try {
+    const env = await toolEnvironment(makeServices(root, { codex: '0.9.0', claude: '1.0.0' }));
+    assert.equal(env.CODEX_HOME, join(root, 'data', 'codex-home'));
+    assert.ok((await stat(env.CODEX_HOME!)).isDirectory());
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
