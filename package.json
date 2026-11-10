@@ -1,6 +1,6 @@
 {
   "name": "maquina-de-conteudo",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "Estúdio local de criação de conteúdo com Codex e Claude Code",
