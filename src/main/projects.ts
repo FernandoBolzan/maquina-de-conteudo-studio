@@ -1,33 +1,40 @@
 import { writeZipFile, type ZipSource } from './zip.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, unlink } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join, relative } from 'node:path';
-import { postNowFormatAcceptsPageCount, type Asset, type Brand, type BrandReference, type FormatAdaptation, type GenerationBatch, type NarrationMode, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type VisualGenerationReview } from '../shared/contracts.js';
+import { postNowFormatAcceptsPageCount, type Asset, type Brand, type BrandReference, type FormatAdaptation, type GenerationBatch, type LocalVoiceEngine, type LocalVoiceSelection, type NarrationMode, type NarrationProvider, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type VisualGenerationReview, type VisualStyle } from '../shared/contracts.js';
 import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, formatCanvas, isPostNowFormat, pagesRangeFor, type PostNowKind } from '../shared/formats.js';
-import { isDepictedPerson, portraitDiversityIssues, portraitPlanIssues } from '../shared/depicted-person.js';
-import { applyArtText, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, type VisualTextEditPage, type VisualTextEditScene } from '../shared/visual-text.js';
+import { brandImageOptOutIssues, depictedPersonPolicyIssues, isDepictedPerson, isDepictedPersonPolicy, portraitDiversityIssues, portraitPlanIssues } from '../shared/depicted-person.js';
+import { applyArtText, captionMirror, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, type VisualTextEditPage, type VisualTextEditScene } from '../shared/visual-text.js';
+import { composeVideoStyle, visualStyleFor } from '../shared/prompt-library.js';
+import { isImageBackgroundMode, resolveImageBackgroundMode } from '../shared/image-background.js';
+import { isLogoPolicy, type LogoPolicy } from '../shared/logo-policy.js';
 import { storyboardContractIssues } from '../shared/storyboard-contract.js';
+import { DASH_ERROR, hasDash, storyboardDashIssues } from '../shared/writing-style.js';
 import { videoGoBrandProfile } from '../shared/brand-profile.js';
 import { singleLine, text, type Services } from './context.js';
 import { resolveTool, toolEnvironment } from './setup.js';
 import { atomicJson, atomicText, copyLocal, directory, fingerprint, inside, localPath, missing, object, privateWorkspaceDirectory, readJson, requireIdle, reserveProject, safeId, safePath, serialized, UUID, walk, workspace } from './content/storage.js';
 import { initializeNative, secureStoryboard, storyboard, type StoryboardSourceScene } from './content/native.js';
 import { buildInventory, executeDeletion, findNativeCopies, hasPendingDeletions, previewDeletion, recoverDeletions, requireNoPendingDeletion, type DeletionInventory, type RecoveredDeletion } from './content/lifecycle.js';
-import { approvedPortraitAt, finalizePostNowBatch, nextImageBatchId, postnowHome, readBatchStatus, requireLogoPolicy, writeBatchStatus } from './content/postnow.js';
+import { approvedPortraitAt, finalizePostNowBatch, nextImageBatchId, postnowHome, readBatchStatus, writeBatchStatus } from './content/postnow.js';
 import { listElevenLabsVoices } from './elevenlabs.js';
 import type { NarrationAudioSource } from '../shared/contracts.js';
 import { isNarrationAudioSource, narrationGate, parseNarrationAttachSource } from '../shared/narration.js';
 import { stageNarrationAudio } from './narration-audio-attach.js';
-import { generateLocalNarration } from './local-narration.js';
+import { generateInstalledLocalVoice, getLocalVoiceCatalog } from './local-voice-catalog.js';
 import { projectCoverUrl } from './content/project-cover.js';
+import { videoRenderIssue } from '../shared/video-render-validation.js';
 interface NarrationApproval { hash: string; approvedAt: string; }
-interface NarrationAudioEntry { assetPath: string; source: NarrationAudioSource; textHash: string; }
-interface NarrationAudio { scenes: Record<string, NarrationAudioEntry>; }
+interface NarrationAudioProvenance { schema: 1; provider: NarrationProvider; engine?: LocalVoiceEngine; modelId: string; voiceId: string; }
+interface NarrationAudioEntry { assetPath: string; source: NarrationAudioSource; textHash: string; provenance?: NarrationAudioProvenance; }
+interface NarrationAudioHistoryEntry extends NarrationAudioEntry { sceneId: string; archivedAt: string; }
+interface NarrationAudio { scenes: Record<string, NarrationAudioEntry>; history?: NarrationAudioHistoryEntry[]; }
 interface LegacyNarrationAudio { hash: string; assetPaths: string[]; }
 interface VisualApproval { hash: string; approvedAt: string; }
 interface StoredFormatAdaptation extends FormatAdaptation { snapshotId: string; }
-interface StoredProject { project: Project; folderName: string; notes: string; approvals: Record<string, string>; redo?: Record<string, { stamp: string; note: string }>; visualApproval?: VisualApproval; formatAdaptation?: StoredFormatAdaptation; narrationMode?: NarrationMode; narrationApproval?: NarrationApproval; narrationAudio?: NarrationAudio; legacyNarrationAudio?: LegacyNarrationAudio; }
+interface StoredProject { project: Project; folderName: string; notes: string; approvals: Record<string, string>; imagePageCount?: number; redo?: Record<string, { stamp: string; note: string }>; visualApproval?: VisualApproval; formatAdaptation?: StoredFormatAdaptation; narrationSchemaVersion?: 1; narrationProvider?: NarrationProvider; localVoice?: LocalVoiceSelection; narrationMode?: NarrationMode; narrationApproval?: NarrationApproval; narrationAudio?: NarrationAudio; legacyNarrationAudio?: LegacyNarrationAudio; }
 interface MappedImagePage { page: number; input: string; output: string; native?: string; }
 interface AssetDeletionTarget { scope: 'project' | 'postnow'; path: string; }
 interface AssetDeletionJournal {
@@ -137,6 +144,30 @@ async function ids(root: string, folder: string): Promise<string[]> {
   const path = await directory(root, join('.studio', folder));
   return (await readdir(path)).filter((name) => UUID.test(name.replace(/\.json$/, '')) && name.endsWith('.json')).sort().map((name) => name.slice(0, -5));
 }
+function parseLocalVoiceSelection(value: unknown): LocalVoiceSelection | undefined {
+  if (value === undefined || value === null) return undefined;
+  const raw = object(value, 'Voz local selecionada');
+  if ((raw.engine !== 'piper' && raw.engine !== 'kokoro') || typeof raw.modelId !== 'string' || !raw.modelId.trim() || raw.modelId.length > 200 || typeof raw.voiceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(raw.voiceId)) throw new Error('Seleção de voz local inválida; original preservado.');
+  return { engine: raw.engine, modelId: raw.modelId, voiceId: raw.voiceId };
+}
+function parseNarrationProvenance(value: unknown): NarrationAudioProvenance | undefined {
+  if (value === undefined) return undefined;
+  const raw = object(value, 'Proveniência do áudio');
+  if (raw.schema !== 1 || (raw.provider !== 'local' && raw.provider !== 'elevenlabs') || typeof raw.modelId !== 'string' || !raw.modelId.trim() || raw.modelId.length > 200 || typeof raw.voiceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(raw.voiceId)) throw new Error('Proveniência do áudio inválida; original preservado.');
+  if (raw.provider === 'local' && raw.engine !== 'piper' && raw.engine !== 'kokoro') throw new Error('Motor local da proveniência inválido; original preservado.');
+  if (raw.provider === 'elevenlabs' && raw.engine !== undefined) throw new Error('Proveniência ElevenLabs não pode declarar motor local.');
+  return { schema: 1, provider: raw.provider, ...(raw.engine === 'piper' || raw.engine === 'kokoro' ? { engine: raw.engine } : {}), modelId: raw.modelId, voiceId: raw.voiceId };
+}
+function parseNarrationAudioEntry(value: unknown, projectPath: string): Promise<NarrationAudioEntry> {
+  const entry = object(value, 'Áudio da cena');
+  if (typeof entry.assetPath !== 'string' || typeof entry.textHash !== 'string' || !/^[a-f0-9]{64}$/.test(entry.textHash) || (entry.source !== undefined && !isNarrationAudioSource(entry.source))) throw new Error('Registro de áudio narrativo inválido; original preservado.');
+  return localPath(projectPath, entry.assetPath).then(assetPath => ({
+    assetPath: relative(projectPath, assetPath).split('\\').join('/'),
+    source: isNarrationAudioSource(entry.source) ? entry.source : 'elevenlabs',
+    textHash: entry.textHash as string,
+    provenance: parseNarrationProvenance(entry.provenance),
+  }));
+}
 async function load(root: string, id: string): Promise<StoredProject> {
   const data = object(await readJson(recordPath(root, id)), 'Registro do projeto');
   const item = object(data.project, 'Projeto');
@@ -144,11 +175,32 @@ async function load(root: string, id: string): Promise<StoredProject> {
   const folderName = projectFolderName(data.folderName, id);
   const kind = projectKind(item.kind);
   const project: Project = { id, title: item.title, createdAt: item.createdAt, brief: item.brief, kind, ...storedProjectFormat(item.format, kind), path: await localPath(root, join('projects', folderName)) };
+  if (item.imageBackgroundMode !== undefined) {
+    if (kind !== 'image' || !isImageBackgroundMode(item.imageBackgroundMode)) throw new Error('Direção de fundo do projeto inválida.');
+    project.imageBackgroundMode = item.imageBackgroundMode;
+  }
+  if (item.useBrandImages !== undefined) {
+    if (typeof item.useBrandImages !== 'boolean') throw new Error('Preferência de fotos da marca inválida.');
+    project.useBrandImages = item.useBrandImages;
+  }
+  if (item.logoPolicy !== undefined) {
+    if (kind !== 'image' || !isLogoPolicy(item.logoPolicy)) throw new Error('Preferência de logo inválida.');
+    project.logoPolicy = item.logoPolicy;
+  }
+  if (item.depictedPersonPolicy !== undefined) {
+    if (kind !== 'image' || !isDepictedPersonPolicy(item.depictedPersonPolicy)) throw new Error('Preferência de quem aparece na arte inválida.');
+    project.depictedPersonPolicy = item.depictedPersonPolicy;
+  }
   if (item.brandId !== undefined) project.brandId = safeId(item.brandId);
   if (item.sourceProjectId !== undefined) project.sourceProjectId = safeId(item.sourceProjectId);
   if (item.voiceId !== undefined) {
     if (typeof item.voiceId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(item.voiceId)) throw new Error('Voz do projeto inválida.');
     project.voiceId = item.voiceId;
+  }
+  if (item.visualStyle !== undefined) {
+    const raw = object(item.visualStyle, 'Estilo visual');
+    if (typeof raw.id !== 'string' || raw.id.length > 100 || typeof raw.title !== 'string' || raw.title.length > 200 || typeof raw.direction !== 'string' || !raw.direction.trim() || raw.direction.length > 2000) throw new Error('Estilo visual do projeto inválido; original preservado.');
+    project.visualStyle = { id: raw.id, title: raw.title, direction: raw.direction };
   }
   const rawApprovals = object(data.approvals, 'Aprovações');
   const approvals: Record<string, string> = Object.create(null) as Record<string, string>;
@@ -181,6 +233,10 @@ async function load(root: string, id: string): Promise<StoredProject> {
   }
   if (data.narrationMode !== undefined && data.narrationMode !== 'silent' && data.narrationMode !== 'narrated') throw new Error('Modo de narração inválido; original preservado.');
   const narrationMode: NarrationMode = data.narrationMode ?? 'narrated';
+  if (data.narrationSchemaVersion !== undefined && data.narrationSchemaVersion !== 1) throw new Error('Versão de narração incompatível; original preservado.');
+  if (data.narrationProvider !== undefined && data.narrationProvider !== 'local' && data.narrationProvider !== 'elevenlabs') throw new Error('Provedor de narração inválido; original preservado.');
+  const narrationProvider: NarrationProvider = data.narrationProvider === 'local' ? 'local' : 'elevenlabs';
+  const localVoice = parseLocalVoiceSelection(data.localVoice);
   let narrationApproval: NarrationApproval | undefined;
   if (data.narrationApproval !== undefined) {
     const raw = object(data.narrationApproval, 'Aprovação da narração');
@@ -194,12 +250,20 @@ async function load(root: string, id: string): Promise<StoredProject> {
     if (raw.scenes !== undefined) {
       const scenes: Record<string, NarrationAudioEntry> = {};
       for (const [sceneId, value] of Object.entries(object(raw.scenes, 'Áudios por cena'))) {
-        const entry = object(value, 'Áudio da cena');
-        if (typeof entry.assetPath !== 'string' || typeof entry.textHash !== 'string' || !/^[a-f0-9]{64}$/.test(entry.textHash) || (entry.source !== undefined && !isNarrationAudioSource(entry.source))) throw new Error('Registro de áudio narrativo inválido; original preservado.');
-        await localPath(project.path, entry.assetPath);
-        scenes[sceneId] = { assetPath: entry.assetPath, source: isNarrationAudioSource(entry.source) ? entry.source : 'elevenlabs', textHash: entry.textHash };
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(sceneId)) throw new Error('ID de cena do áudio inválido.');
+        scenes[sceneId] = await parseNarrationAudioEntry(value, project.path);
       }
-      narrationAudio = { scenes };
+      let history: NarrationAudioHistoryEntry[] | undefined;
+      if (raw.history !== undefined) {
+        if (!Array.isArray(raw.history)) throw new Error('Histórico de áudio inválido; original preservado.');
+        history = [];
+        for (const value of raw.history) {
+          const item = object(value, 'Áudio no histórico');
+          if (typeof item.sceneId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(item.sceneId) || typeof item.archivedAt !== 'string') throw new Error('Metadados de histórico de áudio inválidos.');
+          history.push({ ...await parseNarrationAudioEntry(item, project.path), sceneId: item.sceneId, archivedAt: item.archivedAt });
+        }
+      }
+      narrationAudio = { scenes, ...(history ? { history } : {}) };
     } else {
       if (typeof raw.hash !== 'string' || !/^[a-f0-9]{64}$/.test(raw.hash) || !Array.isArray(raw.assetPaths) || !raw.assetPaths.every((path) => typeof path === 'string')) throw new Error('Registro de áudio narrativo inválido; original preservado.');
       const assetPaths: string[] = raw.assetPaths;
@@ -208,15 +272,29 @@ async function load(root: string, id: string): Promise<StoredProject> {
     }
   }
   if (!(await lstat(project.path)).isDirectory()) throw new Error('Pasta do projeto não encontrada.');
-  return { project, folderName, notes: data.notes, approvals, redo, visualApproval, formatAdaptation, narrationMode, narrationApproval, narrationAudio, legacyNarrationAudio };
+  let imagePageCount: number | undefined;
+  if (kind === 'image' && project.unsupportedFormat === undefined && isPostNowFormat(project.format)) {
+    if (data.imagePageCount !== undefined) {
+      if (typeof data.imagePageCount !== 'number' || !postNowFormatAcceptsPageCount(project.format, data.imagePageCount)) throw new Error('Quantidade de páginas do projeto inválida; original preservado.');
+      imagePageCount = data.imagePageCount;
+    } else if (formatAdaptation) {
+      imagePageCount = formatAdaptation.pageCount;
+    } else {
+      const native = object(await readJson(await localPath(project.path, 'project.json')), 'Projeto PostNow');
+      const nativeCount = typeof native.page_count === 'number' ? native.page_count : Array.isArray(native.pages) ? native.pages.length : undefined;
+      imagePageCount = nativeCount !== undefined && postNowFormatAcceptsPageCount(project.format, nativeCount)
+        ? nativeCount
+        : POSTNOW_FORMATS[project.format].kind === 'carousel' ? 5 : 1;
+    }
+  }
+  return { project, folderName, notes: data.notes, approvals, redo, visualApproval, formatAdaptation, imagePageCount, narrationSchemaVersion: 1, narrationProvider, localVoice, narrationMode, narrationApproval, narrationAudio, legacyNarrationAudio };
 }
 async function save(root: string, stored: StoredProject): Promise<void> {
   const { legacyNarrationAudio, ...record } = stored;
   await atomicJson(recordPath(root, stored.project.id), legacyNarrationAudio ? { ...record, narrationAudio: legacyNarrationAudio } : record);
 }
 interface NarrationDocument { data: Record<string, unknown>; scenes: { raw: Record<string, unknown>; audio: Record<string, unknown>; id: string; title: string; narration: string; spokenText: string }[]; }
-async function narrationDocument(stored: StoredProject): Promise<NarrationDocument> {
-  const path = join(stored.project.path, 'storyboard.json');
+async function narrationDocument(stored: StoredProject, path = join(stored.project.path, 'storyboard.json')): Promise<NarrationDocument> {
   const data = await secureStoryboard(path, stored.project.path, undefined, { allowMissingNarration: true, allowMissingAssets: true });
   if (!Array.isArray(data.scenes)) throw new Error('Storyboard sem cenas válidas.');
   const scenes = data.scenes.map((entry) => {
@@ -236,12 +314,12 @@ async function narrationDocument(stored: StoredProject): Promise<NarrationDocume
 }
 
 /** Availability is editorial; render readiness remains the native explicit `ready` status. */
-async function storyboardStatus(projectPath: string): Promise<{ available: boolean; ready: boolean; issues: string[] }> {
+async function storyboardStatus(projectPath: string): Promise<{ available: boolean; ready: boolean; compositionReady: boolean; issues: string[] }> {
   let data: unknown;
   try {
     data = await readJson(await localPath(projectPath, 'storyboard.json'));
   } catch {
-    return { available: false, ready: false, issues: ['storyboard.json ausente ou ilegível.'] };
+    return { available: false, ready: false, compositionReady: false, issues: ['storyboard.json ausente ou ilegível.'] };
   }
   const record: Record<string, unknown> = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
   const scenes = Array.isArray(record.scenes) ? record.scenes : [];
@@ -251,18 +329,38 @@ async function storyboardStatus(projectPath: string): Promise<{ available: boole
     const item = scene as Record<string, unknown>;
     return (typeof item.narration === 'string' && !!item.narration.trim()) || (Array.isArray(item.onScreen) && item.onScreen.some(line => typeof line === 'string' && !!line.trim()));
   }));
-  return { available, ready, issues: storyboardContractIssues(data) };
+  const composition = typeof record.composition === 'object' && record.composition !== null && !Array.isArray(record.composition)
+    ? record.composition as Record<string, unknown>
+    : undefined;
+  let compositionReady = false;
+  if (typeof composition?.path === 'string' && composition.path.trim()) {
+    try {
+      const htmlPath = await localPath(projectPath, join(composition.path, 'index.html'));
+      const html = await lstat(htmlPath);
+      compositionReady = html.isFile() && !html.isSymbolicLink() && html.size > 0;
+    } catch { /* composition is absent or outside the project */ }
+  }
+  return { available, ready, compositionReady, issues: [...storyboardContractIssues(data), ...storyboardDashIssues(data)] };
 }
 
-function narrationHash(scenes: NarrationDocument['scenes'], voiceId?: string): string {
+function narrationHash(scenes: NarrationDocument['scenes'], provider: NarrationProvider, voiceId: string | undefined, localVoice: LocalVoiceSelection | undefined): string {
   const payload = {
-    modelId: 'eleven_v4',
-    voiceId: voiceId ?? null,
+    provider,
+    modelId: provider === 'elevenlabs' ? 'eleven_v4' : localVoice?.modelId ?? null,
+    voiceId: provider === 'elevenlabs' ? voiceId ?? null : localVoice?.voiceId ?? null,
+    engine: provider === 'local' ? localVoice?.engine ?? null : null,
     scenes: scenes.map((scene) => ({ id: scene.id, narration: scene.narration, spokenText: scene.spokenText })),
   };
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
-interface NarrationView { id: string; title: string; narrates: boolean; attached: boolean; approved: boolean; stray: boolean; audioPath?: string; source?: NarrationAudioSource; }
+function legacyElevenLabsNarrationHash(scenes: NarrationDocument['scenes'], voiceId?: string): string {
+  return createHash('sha256').update(JSON.stringify({
+    modelId: 'eleven_v4',
+    voiceId: voiceId ?? null,
+    scenes: scenes.map(scene => ({ id: scene.id, narration: scene.narration, spokenText: scene.spokenText })),
+  })).digest('hex');
+}
+interface NarrationView { id: string; title: string; narrates: boolean; attached: boolean; approved: boolean; stray: boolean; audioPath?: string; source?: NarrationAudioSource; provenance?: NarrationAudioProvenance; }
 function sceneTextHash(scene: { narration: string; spokenText: string }): string {
   return createHash('sha256').update(JSON.stringify({ narration: scene.narration, spokenText: scene.spokenText })).digest('hex');
 }
@@ -273,12 +371,15 @@ function storyboardAssetPath(scene: NarrationDocument['scenes'][number]): string
 function narrationEntries(stored: StoredProject, document: NarrationDocument): Record<string, NarrationAudioEntry> {
   if (stored.narrationAudio) return stored.narrationAudio.scenes;
   const legacy = stored.legacyNarrationAudio;
-  if (!legacy || legacy.hash !== narrationHash(document.scenes, stored.project.voiceId)) return {};
+  if (!legacy || !stored.project.voiceId || legacy.hash !== legacyElevenLabsNarrationHash(document.scenes, stored.project.voiceId)) return {};
   const entries: Record<string, NarrationAudioEntry> = {};
   for (const path of legacy.assetPaths) {
     const id = basename(path, extname(path));
     const scene = document.scenes.find(item => item.id === id);
-    if (scene) entries[id] = { assetPath: path, source: 'elevenlabs', textHash: sceneTextHash(scene) };
+    if (scene) entries[id] = {
+      assetPath: path, source: 'elevenlabs', textHash: sceneTextHash(scene),
+      provenance: { schema: 1, provider: 'elevenlabs', modelId: 'eleven_v4', voiceId: stored.project.voiceId },
+    };
   }
   return entries;
 }
@@ -294,26 +395,39 @@ async function narrationAudioFile(root: string, path: string): Promise<string | 
 }
 async function narrationViews(stored: StoredProject, document: NarrationDocument, entries: Record<string, NarrationAudioEntry>): Promise<NarrationView[]> {
   const views: NarrationView[] = [];
+  const provider = stored.narrationProvider ?? 'elevenlabs';
   for (const scene of document.scenes) {
     const entry = entries[scene.id];
     const ref = storyboardAssetPath(scene);
-    const file = entry && entry.textHash === sceneTextHash(scene) && ref === entry.assetPath ? await narrationAudioFile(stored.project.path, entry.assetPath) : undefined;
-    const approved = !!entry && !!file && stored.approvals[entry.assetPath] === (await fingerprint(file)).stamp;
-    views.push({ id: scene.id, title: scene.title, narrates: scene.narration.trim().length > 0, attached: file !== undefined, approved, stray: ref !== undefined && file === undefined, audioPath: file ? entry?.assetPath : undefined, source: entry?.source });
+    const file = entry && ref === entry.assetPath ? await narrationAudioFile(stored.project.path, entry.assetPath) : undefined;
+    const textCurrent = !!entry && entry.textHash === sceneTextHash(scene);
+    const manual = entry?.source === 'upload' || entry?.source === 'recording';
+    const expected = provider === 'elevenlabs'
+      ? entry?.provenance?.provider === 'elevenlabs' && entry.provenance.modelId === 'eleven_v4' && entry.provenance.voiceId === stored.project.voiceId
+      : entry?.provenance?.provider === 'local' && entry.provenance.engine === stored.localVoice?.engine && entry.provenance.modelId === stored.localVoice?.modelId && entry.provenance.voiceId === stored.localVoice?.voiceId;
+    const current = Boolean(file && textCurrent && (manual || expected));
+    const approved = current && stored.approvals[entry!.assetPath] === (await fingerprint(file!)).stamp;
+    views.push({
+      id: scene.id, title: scene.title, narrates: scene.narration.trim().length > 0, attached: current, approved,
+      stray: ref !== undefined && !current, audioPath: file ? entry?.assetPath : undefined, source: entry?.source, provenance: entry?.provenance,
+    });
   }
   return views;
 }
 async function narrationEvaluation(stored: StoredProject, services: Services) {
   const document = await narrationDocument(stored);
   const entries = narrationEntries(stored, document);
-  const hash = narrationHash(document.scenes, stored.project.voiceId);
+  const provider = stored.narrationProvider ?? 'elevenlabs';
+  const hash = narrationHash(document.scenes, provider, stored.project.voiceId, stored.localVoice);
   const views = await narrationViews(stored, document, entries);
   const approved = stored.narrationApproval?.hash === hash;
   const gate = narrationGate({
     mode: stored.narrationMode ?? 'narrated',
+    provider,
     voiceId: stored.project.voiceId,
+    localVoice: stored.localVoice,
     scenes: views,
-    elevenLabsAttached: views.some(view => view.attached && view.source === 'elevenlabs'),
+    elevenLabsAttached: provider === 'elevenlabs' && views.some(view => view.attached && view.source === 'elevenlabs'),
     voiceApproved: approved,
     elevenLabsReady: Boolean(services.getElevenLabsKey()),
   });
@@ -322,15 +436,22 @@ async function narrationEvaluation(stored: StoredProject, services: Services) {
 async function narrationState(stored: StoredProject, services: Services): Promise<NarrationState> {
   const { document, views, approved, gate } = await narrationEvaluation(stored, services);
   const narrated = views.filter(view => view.narrates);
+  const provider = stored.narrationProvider ?? 'elevenlabs';
   return {
     mode: stored.narrationMode ?? 'narrated',
+    provider,
     active: gate.active,
     ready: gate.issues.length === 0,
     voiceId: stored.project.voiceId,
-    modelId: 'eleven_v4',
+    localVoice: stored.localVoice,
+    modelId: provider === 'elevenlabs' ? 'eleven_v4' : stored.localVoice?.modelId ?? '',
     scenes: document.scenes.map(({ id, title, narration, spokenText }, index) => {
       const view = views[index]!;
-      return { id, title, narration, spokenText, audioAttached: view.attached, audioPath: view.audioPath, audioSource: view.attached ? view.source : undefined, stray: view.stray };
+      return {
+        id, title, narration, spokenText, audioAttached: view.attached, audioPath: view.audioPath,
+        audioSource: view.source, audioCurrent: view.attached, audioModelId: view.provenance?.modelId,
+        audioVoiceId: view.provenance?.voiceId, stray: view.stray,
+      };
     }),
     approved,
     audioReady: narrated.length > 0 && narrated.every(view => view.attached),
@@ -347,11 +468,23 @@ async function saveNarration(root: string, stored: StoredProject, services: Serv
     if (drafts.has(draft.id)) throw new Error('A narração contém cenas duplicadas.');
     drafts.set(draft.id, { narration: draft.narration, spokenText: draft.spokenText || draft.narration });
   }
-  const oldHash = narrationHash(document.scenes, stored.project.voiceId);
-  const voiceId = payload.voiceId === undefined || payload.voiceId === '' ? undefined : text(payload, 'voiceId', 128);
-  if (voiceId && !/^[a-zA-Z0-9_-]{1,128}$/.test(voiceId)) throw new Error('ID de voz inválido.');
+  const oldHash = narrationHash(document.scenes, stored.narrationProvider ?? 'elevenlabs', stored.project.voiceId, stored.localVoice);
+  if (payload.provider !== undefined && payload.provider !== 'local' && payload.provider !== 'elevenlabs') throw new Error('Provedor de narração inválido.');
+  const provider: NarrationProvider = payload.provider === 'local' || payload.provider === 'elevenlabs' ? payload.provider : stored.narrationProvider ?? 'elevenlabs';
+  let voiceId = stored.project.voiceId;
+  if (provider === 'elevenlabs' && Object.hasOwn(payload, 'voiceId') && payload.voiceId !== undefined) {
+    if (payload.voiceId === '' || payload.voiceId === null) voiceId = undefined;
+    else {
+      voiceId = text(payload, 'voiceId', 128);
+      if (!/^[a-zA-Z0-9_-]{1,128}$/.test(voiceId)) throw new Error('ID de voz ElevenLabs inválido.');
+    }
+  }
+  let localVoice = stored.localVoice;
+  if (provider === 'local' && Object.hasOwn(payload, 'localVoice')) {
+    if (payload.localVoice === null) localVoice = undefined;
+    else if (payload.localVoice !== undefined) localVoice = parseLocalVoiceSelection(payload.localVoice);
+  }
   const entries = narrationEntries(stored, document);
-  const oldTextHashes = new Map(document.scenes.map(scene => [scene.id, sceneTextHash(scene)]));
   for (const scene of document.scenes) {
     const draft = drafts.get(scene.id);
     if (!draft) throw new Error('A lista de cenas mudou; recarregue o projeto antes de salvar.');
@@ -361,29 +494,16 @@ async function saveNarration(root: string, stored: StoredProject, services: Serv
     scene.narration = draft.narration;
     scene.spokenText = draft.spokenText;
   }
-  const newHash = narrationHash(document.scenes, voiceId);
-  const voiceChanged = stored.project.voiceId !== voiceId;
-  const nextEntries: Record<string, NarrationAudioEntry> = {};
-  const detached: string[] = [];
-  for (const scene of document.scenes) {
-    const entry = entries[scene.id];
-    if (!entry) continue;
-    const textChanged = oldTextHashes.get(scene.id) !== sceneTextHash(scene);
-    if (textChanged || (voiceChanged && entry.source === 'elevenlabs')) {
-      detached.push(entry.assetPath);
-      delete scene.audio.narration;
-      continue;
-    }
-    nextEntries[scene.id] = entry;
-  }
+  const newHash = narrationHash(document.scenes, provider, voiceId, localVoice);
   if (oldHash !== newHash) stored.narrationApproval = undefined;
-  for (const path of detached) delete stored.approvals[path];
+  stored.narrationProvider = provider;
+  stored.narrationSchemaVersion = 1;
+  stored.localVoice = localVoice;
   stored.project.voiceId = voiceId;
-  stored.narrationAudio = { scenes: nextEntries };
+  stored.narrationAudio = { scenes: entries, history: stored.narrationAudio?.history ?? [] };
   stored.legacyNarrationAudio = undefined;
   await atomicJson(join(stored.project.path, 'storyboard.json'), document.data);
   await save(root, stored);
-  for (const path of detached) await rm(join(stored.project.path, path), { force: true });
   return await narrationState(stored, services);
 }
 function narrationSceneId(payload: Record<string, unknown>): string {
@@ -395,55 +515,127 @@ async function attachNarrationAudio(root: string, payload: Record<string, unknow
   const stored = await editableProject(root, services, payload, 'video');
   const sceneId = narrationSceneId(payload);
   const source = parseNarrationAttachSource(payload.source);
+  if (local && (stored.narrationProvider !== 'local' || !stored.localVoice)) throw new Error('Selecione e salve uma voz local antes de gerar.');
   const document = await narrationDocument(stored);
   const scene = document.scenes.find(item => item.id === sceneId);
   if (!scene) throw new Error('Cena não encontrada no storyboard.');
   const staged = await stageNarrationAudio(source, services);
   const assetPath = `assets/audio/narration/${randomUUID()}/${sceneId}${staged.extension}`;
   const target = await localPath(stored.project.path, assetPath);
+  const storyboardPath = join(stored.project.path, 'storyboard.json');
+  const oldStoryboard = await readFile(storyboardPath, 'utf8');
+  const previousState = structuredClone(stored);
   try {
     await copyLocal(staged.path, target);
+  } catch (error) {
+    await rm(target, { force: true });
+    throw error;
   } finally {
     await staged.release();
   }
-  let storyboardCommitted = false;
   try {
     const entries = narrationEntries(stored, document);
     const previous = entries[sceneId];
     scene.audio.narration = { assetPath, startOffsetSeconds: 0, gain: 1 };
     scene.raw.audio = scene.audio;
-    // atomicJson can throw after rename (e.g. directory fsync); retain the audio in that case.
-    storyboardCommitted = true;
     await atomicJson(join(stored.project.path, 'storyboard.json'), document.data);
-    const replacedPath = previous && previous.assetPath !== assetPath ? previous.assetPath : undefined;
-    stored.narrationAudio = { scenes: { ...entries, [sceneId]: { assetPath, source: local ? 'local' : source.kind === 'file' ? 'upload' : 'recording', textHash: sceneTextHash(scene) } } };
+    const sourceKind: NarrationAudioSource = local ? 'local' : source.kind === 'file' ? 'upload' : 'recording';
+    const provenance: NarrationAudioProvenance | undefined = local && stored.localVoice
+      ? { schema: 1, provider: 'local', engine: stored.localVoice.engine, modelId: stored.localVoice.modelId, voiceId: stored.localVoice.voiceId }
+      : undefined;
+    const history = stored.narrationAudio?.history ?? [];
+    if (previous && previous.assetPath !== assetPath && !history.some(item => item.assetPath === previous.assetPath)) {
+      history.push({ ...previous, sceneId, archivedAt: new Date().toISOString() });
+    }
+    stored.narrationAudio = {
+      scenes: { ...entries, [sceneId]: { assetPath, source: sourceKind, textHash: sceneTextHash(scene), ...(provenance ? { provenance } : {}) } },
+      history,
+    };
+    stored.narrationSchemaVersion = 1;
     stored.legacyNarrationAudio = undefined;
-    if (replacedPath) delete stored.approvals[replacedPath];
+    const state = await narrationState(stored, services);
     await save(root, stored);
-    if (replacedPath) await rm(join(stored.project.path, replacedPath), { force: true });
-    return await narrationState(stored, services);
+    return state;
   } catch (error) {
-    if (!storyboardCommitted) await rm(target, { force: true });
+    Object.assign(stored, previousState);
+    await atomicText(storyboardPath, oldStoryboard).catch(() => undefined);
+    await rm(target, { force: true });
     throw error;
   }
 }
 async function generateLocalScene(root: string, stored: StoredProject, payload: Record<string, unknown>, services: Services): Promise<NarrationState> {
   if (stored.project.kind !== 'video') throw new Error('A narração só existe em projetos de vídeo.');
   if ((stored.narrationMode ?? 'narrated') !== 'narrated') throw new Error('Selecione o modo narrado antes de gerar áudio.');
-  const sceneId = narrationSceneId(payload);
-  const modelPath = text(payload, 'modelPath', 4096);
+  if (stored.narrationProvider !== 'local' || !stored.localVoice) throw new Error('Selecione e salve uma voz local antes de gerar.');
+  const catalogId = text(payload, 'voiceId', 128);
+  const catalog = await getLocalVoiceCatalog(services);
+  const voice = catalog.voices.find(item => item.id === catalogId);
+  if (!voice || voice.engine !== stored.localVoice.engine || voice.modelId !== stored.localVoice.modelId || voice.voiceId !== stored.localVoice.voiceId) {
+    throw new Error('A voz solicitada não corresponde à seleção local salva neste projeto.');
+  }
+  if (!voice.supported || !catalog.platformSupported) throw new Error(voice.unsupportedReason ?? catalog.unsupportedReason ?? 'Esta voz não é compatível com a plataforma atual.');
+  if (!catalog.installedIds.includes(voice.id)) throw new Error('Instale e verifique esta voz local antes de gerar narração.');
   const document = await narrationDocument(stored);
-  const scene = document.scenes.find(item => item.id === sceneId);
-  if (!scene) throw new Error('Cena não encontrada no storyboard.');
-  if (!scene.narration.trim()) throw new Error('Escreva a narração da cena antes de gerar áudio.');
+  const requestedSceneId = payload.sceneId === undefined ? undefined : narrationSceneId(payload);
+  const scenes = requestedSceneId
+    ? document.scenes.filter(scene => scene.id === requestedSceneId)
+    : document.scenes.filter(scene => scene.narration.trim());
+  if (requestedSceneId && scenes.length === 0) throw new Error('Cena não encontrada no storyboard.');
+  if (scenes.length === 0) throw new Error('Escreva a narração antes de gerar áudio.');
+  if (scenes.some(scene => !scene.narration.trim())) throw new Error('Escreva a narração da cena antes de gerar áudio.');
   const temp = await mkdtemp(join(tmpdir(), 'maquina-narracao-'));
+  const targets: string[] = [];
+  const storyboardPath = join(stored.project.path, 'storyboard.json');
+  const oldStoryboard = await readFile(storyboardPath, 'utf8');
+  const previousState = structuredClone(stored);
   try {
-    const outputPath = join(temp, 'scene.wav');
-    await generateLocalNarration({ text: scene.narration, modelPath, outputPath });
+    const generated: Array<{ sceneId: string; outputPath: string; assetPath: string }> = [];
+    for (const scene of scenes) {
+      const outputPath = join(temp, `${scene.id}.wav`);
+      await generateInstalledLocalVoice(voice.id, scene.spokenText || scene.narration, outputPath, services, { signal: new AbortController().signal, onProgress: () => undefined });
+      generated.push({ sceneId: scene.id, outputPath, assetPath: `assets/audio/narration/${randomUUID()}/${scene.id}.wav` });
+    }
     const latest = await narrationDocument(stored);
-    const latestScene = latest.scenes.find(item => item.id === sceneId);
-    if (!latestScene || sceneTextHash(latestScene) !== sceneTextHash(scene)) throw new Error('A narração mudou durante a geração; o áudio não foi anexado.');
-    return await attachNarrationAudio(root, { projectId: stored.project.id, sceneId, source: { kind: 'file', path: outputPath } }, services, true);
+    if (narrationHash(latest.scenes, stored.narrationProvider, stored.project.voiceId, stored.localVoice)
+      !== narrationHash(document.scenes, stored.narrationProvider, stored.project.voiceId, stored.localVoice)) {
+      throw new Error('A narração mudou durante a geração; nenhum áudio foi anexado.');
+    }
+    const entries = narrationEntries(stored, document);
+    const history = [...(stored.narrationAudio?.history ?? [])];
+    for (const item of generated) {
+      const scene = document.scenes.find(entry => entry.id === item.sceneId)!;
+      await directory(stored.project.path, dirname(item.assetPath));
+      const target = await localPath(stored.project.path, item.assetPath);
+      targets.push(target);
+      await copyFile(item.outputPath, target);
+      scene.audio.narration = { assetPath: item.assetPath, startOffsetSeconds: 0, gain: 1 };
+      scene.raw.audio = scene.audio;
+      const previous = entries[item.sceneId];
+      if (previous && !history.some(entry => entry.assetPath === previous.assetPath)) {
+        history.push({ ...previous, sceneId: item.sceneId, archivedAt: new Date().toISOString() });
+      }
+      entries[item.sceneId] = {
+        assetPath: item.assetPath,
+        source: 'local',
+        textHash: sceneTextHash(scene),
+        provenance: { schema: 1, provider: 'local', engine: voice.engine, modelId: voice.modelId, voiceId: voice.voiceId },
+      };
+    }
+    await atomicJson(storyboardPath, document.data);
+    stored.narrationAudio = { scenes: entries, history };
+    stored.narrationSchemaVersion = 1;
+    stored.narrationProvider = 'local';
+    stored.localVoice = { engine: voice.engine, modelId: voice.modelId, voiceId: voice.voiceId };
+    stored.narrationApproval = undefined;
+    stored.legacyNarrationAudio = undefined;
+    const result = await narrationState(stored, services);
+    await save(root, stored);
+    return result;
+  } catch (error) {
+    Object.assign(stored, previousState);
+    await atomicText(storyboardPath, oldStoryboard).catch(() => undefined);
+    await Promise.all(targets.map(target => rm(target, { force: true })));
+    throw error;
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -481,6 +673,38 @@ async function editableProject(root: string, services: Services, payload: Record
   await requireNoPendingAssetDeletion(root, services.dataDir, stored.project.id);
   return stored;
 }
+
+async function saveVisualPreferences(root: string, stored: StoredProject, payload: Record<string, unknown>, services: Services): Promise<ProjectDetail> {
+  if (stored.project.kind !== 'image' && (payload.imageBackgroundMode !== undefined || payload.logoPolicy !== undefined)) {
+    throw new Error('Fundo e logo só podem ser configurados em projetos PostNow.');
+  }
+  if (payload.imageBackgroundMode === undefined && payload.useBrandImages === undefined && payload.logoPolicy === undefined && payload.depictedPersonPolicy === undefined) {
+    throw new Error('Selecione ao menos uma preferência visual para salvar.');
+  }
+  if (payload.imageBackgroundMode !== undefined) {
+    const brand = stored.project.brandId ? (await listBrands(services)).find(item => item.id === stored.project.brandId) : undefined;
+    stored.project.imageBackgroundMode = resolveImageBackgroundMode(payload.imageBackgroundMode, brand?.colors ?? []);
+  }
+  if (payload.useBrandImages !== undefined) {
+    if (typeof payload.useBrandImages !== 'boolean') throw new Error('Escolha se as fotos da marca podem ser usadas.');
+    stored.project.useBrandImages = payload.useBrandImages;
+  }
+  if (payload.logoPolicy !== undefined) {
+    if (!isLogoPolicy(payload.logoPolicy)) throw new Error('Escolha onde aplicar a logo oficial.');
+    stored.project.logoPolicy = payload.logoPolicy;
+  }
+  if (payload.depictedPersonPolicy !== undefined) {
+    if (stored.project.kind !== 'image') throw new Error('Quem aparece na arte só pode ser definido em projetos PostNow.');
+    if (!isDepictedPersonPolicy(payload.depictedPersonPolicy)) throw new Error('Escolha quem aparece na arte.');
+    const brand = stored.project.brandId ? (await listBrands(services)).find(item => item.id === stored.project.brandId) : undefined;
+    const portraitApproved = stored.project.useBrandImages !== false && brand ? (await approvedPortraitAt(await postnowHome(services), brand)) !== undefined : false;
+    const issues = depictedPersonPolicyIssues(payload.depictedPersonPolicy, portraitApproved);
+    if (issues.length) throw new Error(issues.join(' '));
+    stored.project.depictedPersonPolicy = payload.depictedPersonPolicy;
+  }
+  await save(root, stored);
+  return detail(root, stored, services);
+}
 async function saveVisualText(root: string, payload: Record<string, unknown>, services: Services): Promise<ProjectDetail> {
   const stored = await editableProject(root, services, payload, 'image');
   const projectFile = await localPath(stored.project.path, 'project.json');
@@ -500,11 +724,11 @@ async function saveVisualText(root: string, payload: Record<string, unknown>, se
     if (typeof page.prompt_file !== 'string') throw new Error(`Página ${index + 1}: arquivo de arte ausente.`);
     const artPath = await localPath(stored.project.path, page.prompt_file);
     const currentArt = await readFile(artPath, 'utf8').catch(error => { if (missing(error)) throw new Error(`Página ${index + 1}: arquivo de arte não encontrado.`); throw error; });
-    const fields = { headline: draft.headline.trim(), copy: draft.copy.trim(), depicted_person: draft.depictedPerson };
-    const previous = { headline: typeof page.headline === 'string' ? page.headline : '', copy: typeof page.copy === 'string' ? page.copy : '' };
-    const art = applyArtText(currentArt, previous, { headline: fields.headline, copy: fields.copy });
+    const fields = { headline: draft.headline.trim(), body: draft.body.trim(), copy: draft.copy.trim(), depicted_person: draft.depictedPerson };
+    const previous = { headline: typeof page.headline === 'string' ? page.headline : '', body: typeof page.body === 'string' ? page.body : '', copy: typeof page.copy === 'string' ? page.copy : '' };
+    const art = applyArtText(currentArt, previous, { headline: fields.headline, body: fields.body, copy: fields.copy });
     if (art.missing.length) {
-      const labels = art.missing.map(field => field === 'headline' ? 'a headline atual' : 'a copy atual').join(' e ');
+      const labels = art.missing.map(field => field === 'headline' ? 'o título atual' : field === 'body' ? 'o subtítulo atual' : 'a copy atual').join(', ');
       throw new Error(`Página ${index + 1}: não encontrei ${labels} no arquivo de arte, então a arte não acompanharia a mudança. Use Preparar textos para o agente refazer esta página.`);
     }
     if (Object.entries(fields).some(([key, value]) => page[key] !== value) || art.text !== currentArt) textChanged = true;
@@ -545,6 +769,7 @@ async function storyboardScenes(stored: StoredProject): Promise<{ scenes: { id: 
 }
 async function approveNarration(root: string, stored: StoredProject, services: Services, payload: Record<string, unknown>): Promise<NarrationState> {
   if (payload.approved !== true) throw new Error('A aprovação da narração precisa ser explícita.');
+  if ((stored.narrationProvider ?? 'elevenlabs') !== 'elevenlabs') throw new Error('Mude para o provedor ElevenLabs antes de aprovar essa voz.');
   if (!stored.project.voiceId) throw new Error('Selecione uma voz ElevenLabs antes de aprovar a narração.');
   const key = services.getElevenLabsKey();
   if (!key) throw new Error('Configure a API key ElevenLabs antes de aprovar a voz.');
@@ -552,17 +777,18 @@ async function approveNarration(root: string, stored: StoredProject, services: S
   if (!voices.some((voice) => voice.id === stored.project.voiceId)) throw new Error('A voz escolhida não está mais disponível na conta ElevenLabs.');
   const { scenes } = await narrationDocument(stored);
   if (!scenes.some((scene) => scene.narration.trim())) throw new Error('Escreva a narração antes de aprová-la.');
-  stored.narrationApproval = { hash: narrationHash(scenes, stored.project.voiceId), approvedAt: new Date().toISOString() };
+  stored.narrationApproval = { hash: narrationHash(scenes, 'elevenlabs', stored.project.voiceId, stored.localVoice), approvedAt: new Date().toISOString() };
   await save(root, stored);
   return await narrationState(stored, services) as NarrationState;
 }
 async function generateNarration(root: string, stored: StoredProject, services: Services, payload: Record<string, unknown>): Promise<unknown> {
+  if ((stored.narrationProvider ?? 'elevenlabs') !== 'elevenlabs') throw new Error('Mude para o provedor ElevenLabs antes de gerar áudio pago.');
   if (payload.confirm !== true) throw new Error('Confirme a geração ElevenLabs, que pode consumir créditos.');
   const key = services.getElevenLabsKey();
   if (!key) throw new Error('Configure a API key ElevenLabs antes de gerar áudio.');
   if (!stored.project.voiceId) throw new Error('Selecione uma voz ElevenLabs antes de gerar áudio.');
   const document = await narrationDocument(stored);
-  const hash = narrationHash(document.scenes, stored.project.voiceId);
+  const hash = narrationHash(document.scenes, 'elevenlabs', stored.project.voiceId, stored.localVoice);
   if (stored.narrationApproval?.hash !== hash) throw new Error('A narração ou a voz mudou após a aprovação. Revise e aprove novamente antes de gerar áudio.');
   if (!document.scenes.some((scene) => scene.narration.trim())) throw new Error('Escreva a narração antes de gerar áudio.');
   // Check the installed engine before sending credentials or starting a paid operation.
@@ -589,42 +815,88 @@ async function generateNarration(root: string, stored: StoredProject, services: 
     VIDEOGO_NO_VOICE_CACHE: '1',
     ...(profile ? { VIDEOGO_PROFILES_DIR: profile.profilesDirectory } : {}),
   };
-  const job = await services.run({
-    title: `VideoGo: gerar narração Eleven v4 — ${stored.project.title}`,
-    executable: node,
-    args: [cli, 'project', 'narration', storyboardPath, '--generate-audio', '--voice', stored.project.voiceId, '--allow-paid'],
-    cwd: engine,
-    env,
-    projectId: stored.project.id,
-    timeoutMs: 15 * 60 * 1000,
-    onSuccess: async () => serialized(root, async () => {
-      const latest = await load(root, stored.project.id);
-      const latestDocument = await narrationDocument(latest);
-      if (narrationHash(latestDocument.scenes, latest.project.voiceId) !== hash) throw new Error('A narração mudou durante a geração; os áudios não foram aprovados.');
-      const entries: Record<string, NarrationAudioEntry> = {};
-      for (const scene of latestDocument.scenes) {
-        if (!scene.narration.trim()) continue;
-        const attached = scene.audio.narration;
-        if (!attached || typeof attached !== 'object' || !('assetPath' in attached) || typeof attached.assetPath !== 'string') throw new Error('O VideoGo terminou sem associar áudio às cenas narradas.');
-        const path = await localPath(latest.project.path, attached.assetPath);
-        if (!(await lstat(path)).isFile() || kinds[extname(path).toLowerCase()] !== 'audio') throw new Error('O VideoGo associou um asset de narração inválido.');
-        entries[scene.id] = { assetPath: relative(latest.project.path, path).split('\\').join('/'), source: 'elevenlabs', textHash: sceneTextHash(scene) };
-      }
-      if (!Object.keys(entries).length) throw new Error('O VideoGo não gerou áudios para o roteiro aprovado.');
-      const previous = narrationEntries(latest, latestDocument);
-      const previousPaths = Object.entries(previous).filter(([id]) => entries[id] !== undefined).map(([, entry]) => entry.assetPath);
-      const kept = new Set(Object.values(entries).map(entry => entry.assetPath));
-      latest.narrationAudio = { scenes: { ...Object.fromEntries(Object.entries(previous).filter(([id]) => entries[id] === undefined)), ...entries } };
-      latest.legacyNarrationAudio = undefined;
-      for (const path of previousPaths) delete latest.approvals[path];
-      await save(root, latest);
-      // Caminho reutilizado pelo VideoGo já contém o áudio novo: apagá-lo destruiria o áudio pago.
-      for (const path of previousPaths) if (!kept.has(path)) await rm(join(latest.project.path, path), { force: true });
-      return previousPaths.length
-        ? 'Áudios gerados e associados às cenas. Os uploads das cenas narradas foram substituídos. Revise e aprove cada áudio antes do render.'
-        : 'Áudios gerados e associados às cenas. Revise e aprove cada áudio antes do render.';
-    }),
-  });
+  const workingStoryboardPath = join(stored.project.path, `.studio-narration-${randomUUID()}.json`);
+  const originalStoryboard = await readFile(storyboardPath, 'utf8');
+  const expectedPaths = new Map<string, string>();
+  const outputDirectories = new Set<string>();
+  for (const scene of document.scenes) {
+    if (!scene.narration.trim()) continue;
+    const assetPath = `assets/audio/narration/${randomUUID()}/${scene.id}.mp3`;
+    expectedPaths.set(scene.id, assetPath);
+    outputDirectories.add(await directory(stored.project.path, dirname(assetPath)));
+    scene.audio.narration = { assetPath, startOffsetSeconds: 0, gain: 1 };
+    scene.raw.audio = scene.audio;
+  }
+  await atomicJson(workingStoryboardPath, document.data);
+  let storyboardCommitted = false;
+  const cleanupFailedGeneration = async (): Promise<void> => {
+    if (storyboardCommitted) await atomicText(storyboardPath, originalStoryboard);
+    await rm(workingStoryboardPath, { force: true });
+    for (const assetPath of expectedPaths.values()) await rm(await localPath(stored.project.path, assetPath), { force: true });
+    for (const outputDirectory of outputDirectories) await rm(outputDirectory, { recursive: true, force: true });
+  };
+  let job;
+  try {
+    job = await services.run({
+      title: `VideoGo: gerar narração Eleven v4 — ${stored.project.title}`,
+      executable: node,
+      args: [cli, 'project', 'narration', workingStoryboardPath, '--generate-audio', '--voice', stored.project.voiceId, '--allow-paid'],
+      cwd: engine,
+      env,
+      projectId: stored.project.id,
+      timeoutMs: 15 * 60 * 1000,
+      onSuccess: async signal => {
+        if (signal.aborted) throw new Error('Geração de narração cancelada.');
+        return serialized(root, async () => {
+          const latest = await load(root, stored.project.id);
+          const latestDocument = await narrationDocument(latest);
+          if (narrationHash(latestDocument.scenes, 'elevenlabs', latest.project.voiceId, latest.localVoice) !== hash) throw new Error('A narração mudou durante a geração; os áudios não foram aprovados.');
+          const generatedDocument = await narrationDocument(latest, workingStoryboardPath);
+          const entries: Record<string, NarrationAudioEntry> = {};
+          for (const scene of latestDocument.scenes) {
+            if (!scene.narration.trim()) continue;
+            const assetPath = expectedPaths.get(scene.id);
+            const generatedScene = generatedDocument.scenes.find(candidate => candidate.id === scene.id);
+            if (!assetPath || !generatedScene || storyboardAssetPath(generatedScene) !== assetPath) throw new Error('O VideoGo alterou o destino isolado do áudio; o original foi preservado.');
+            const path = await localPath(latest.project.path, assetPath);
+            if (!(await lstat(path)).isFile() || kinds[extname(path).toLowerCase()] !== 'audio') throw new Error('O VideoGo não produziu um asset de narração válido.');
+            entries[scene.id] = {
+              assetPath,
+              source: 'elevenlabs',
+              textHash: sceneTextHash(scene),
+              provenance: { schema: 1, provider: 'elevenlabs', modelId: 'eleven_v4', voiceId: latest.project.voiceId! },
+            };
+          }
+          if (!Object.keys(entries).length) throw new Error('O VideoGo não gerou áudios para o roteiro aprovado.');
+          const previous = narrationEntries(latest, latestDocument);
+          const history = [...(latest.narrationAudio?.history ?? [])];
+          for (const [sceneId, entry] of Object.entries(previous)) {
+            if (!entries[sceneId] || history.some(item => item.sceneId === sceneId && item.assetPath === entry.assetPath)) continue;
+            history.push({ ...entry, sceneId, archivedAt: new Date().toISOString() });
+          }
+          latest.narrationAudio = {
+            scenes: { ...Object.fromEntries(Object.entries(previous).filter(([id]) => entries[id] === undefined)), ...entries },
+            ...(history.length ? { history } : {}),
+          };
+          latest.narrationSchemaVersion = 1;
+          latest.narrationProvider = 'elevenlabs';
+          latest.legacyNarrationAudio = undefined;
+          for (const entry of Object.values(entries)) delete latest.approvals[entry.assetPath];
+          await atomicJson(storyboardPath, generatedDocument.data);
+          storyboardCommitted = true;
+          await save(root, latest);
+          await rm(workingStoryboardPath, { force: true }).catch(() => undefined);
+          return Object.keys(previous).some(id => entries[id] !== undefined)
+            ? 'Áudios ElevenLabs gerados novamente e associados às cenas. Versões anteriores preservadas; revise e aprove cada áudio antes do render.'
+            : 'Áudios ElevenLabs gerados e associados às cenas. Revise e aprove cada áudio antes do render.';
+        });
+      },
+      onFailure: cleanupFailedGeneration,
+    });
+  } catch (error) {
+    await cleanupFailedGeneration();
+    throw error;
+  }
   void services.waitJob(job.id).then(() => services.emit({ type: 'refresh' })).catch(() => undefined);
   return job;
 }
@@ -931,7 +1203,13 @@ async function cloneProject(root: string, stored: StoredProject, payload: Record
   const sameEngine = kind === stored.project.kind;
   const format = payload.format === undefined ? (sameEngine ? stored.project.format : undefined) : payload.format;
   const brief = payload.brief === undefined ? stored.project.brief : freeText(payload, 'brief');
-  const created = await create(root, { title: text(payload, 'title', 200), kind, format, brief, brandId: stored.project.brandId });
+  const created = await create(root, {
+    title: text(payload, 'title', 200), kind, format, brief, brandId: stored.project.brandId,
+    ...(sameEngine && stored.project.useBrandImages !== undefined ? { useBrandImages: stored.project.useBrandImages } : {}),
+    ...(kind === 'image' && sameEngine && stored.project.imageBackgroundMode ? { imageBackgroundMode: stored.project.imageBackgroundMode } : {}),
+    ...(kind === 'image' && sameEngine && stored.project.logoPolicy ? { logoPolicy: stored.project.logoPolicy } : {}),
+    ...(kind === 'image' && sameEngine && stored.project.depictedPersonPolicy ? { depictedPersonPolicy: stored.project.depictedPersonPolicy } : {}),
+  });
   created.project.sourceProjectId = stored.project.id;
   try {
     if (payload.copyNotes !== false) created.notes = stored.notes;
@@ -943,7 +1221,12 @@ async function cloneProject(root: string, stored: StoredProject, payload: Record
     const portable = kind === 'video' ? ['audience', 'tone', 'style', 'language'] : ['audience', 'safe_area_percent'];
     for (const key of portable) if (source[key] !== undefined) target[key] = source[key];
     await atomicJson(targetPath, target);
-    if (kind === 'video' && stored.project.voiceId) created.project.voiceId = stored.project.voiceId;
+    if (kind === 'video') {
+      created.project.voiceId = stored.project.voiceId;
+      created.narrationProvider = stored.narrationProvider ?? 'elevenlabs';
+      created.localVoice = stored.localVoice;
+      created.narrationSchemaVersion = 1;
+    }
     return created;
   } catch (error) { await rm(created.project.path, { recursive: true, force: true }); throw error; }
 }
@@ -988,6 +1271,12 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
   const native = object(await readJson(projectPath), 'Projeto PostNow');
   const claimsDocument = object(await readJson(claimsPath), 'Claims PostNow');
   const rawPages = Array.isArray(native.pages) ? native.pages : [];
+  if (stored.project.useBrandImages === false) {
+    blocking.push(...brandImageOptOutIssues(rawPages.map(raw => {
+      const page = object(raw, 'Página PostNow');
+      return page.depicted_person;
+    })));
+  }
   const pages: InternalVisualReview['pages'] = [];
   const promptContents: { path: string; content: string }[] = [];
   for (const [index, raw] of rawPages.entries()) {
@@ -1006,12 +1295,23 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
     const copy = typeof page.copy === 'string' ? page.copy : '';
     const visualFunction = typeof page.visual_function === 'string' ? page.visual_function : '';
     const headline = typeof page.headline === 'string' ? page.headline : '';
-    if (!copy.trim()) blocking.push(`Página ${index + 1}: copy vazia.`);
+    const body = typeof page.body === 'string' ? page.body : '';
+    if (!copy.trim()) blocking.push(`Página ${index + 1}: copy de publicação vazia.`);
+    if (!headline.trim()) blocking.push(`Página ${index + 1}: título da arte vazio. Use Preparar textos para o agente definir o texto visual.`);
+    if (headline.length > 80) blocking.push(`Página ${index + 1}: o título da arte excede 80 caracteres.`);
+    if (!body.trim()) blocking.push(`Página ${index + 1}: subtítulo da arte vazio. Use Preparar textos para o agente definir o texto visual.`);
+    if (body.length > 180) blocking.push(`Página ${index + 1}: o subtítulo da arte excede 180 caracteres.`);
+    if (hasDash(headline)) blocking.push(`Página ${index + 1}: a headline tem travessão. ${DASH_ERROR}`);
+    if (hasDash(body)) blocking.push(`Página ${index + 1}: o subtítulo tem travessão. ${DASH_ERROR}`);
+    if (hasDash(copy)) blocking.push(`Página ${index + 1}: a copy tem travessão. ${DASH_ERROR}`);
     if (!visualFunction.trim()) blocking.push(`Página ${index + 1}: função visual vazia. Use Preparar textos para o agente refazer esta página.`);
-    if (copy.trim() && visualFunction.trim() && (!prompt.includes(copy) || !prompt.includes(visualFunction))) blocking.push(`Página ${index + 1}: a copy ou a função visual não está no arquivo de arte. Use Preparar textos para o agente refazer esta página.`);
+    if (visualFunction.trim() && !prompt.includes(visualFunction)) blocking.push(`Página ${index + 1}: a função visual não está no arquivo de arte. Use Preparar textos para o agente refazer esta página.`);
+    if (headline.trim() && !prompt.includes(headline)) blocking.push(`Página ${index + 1}: o título não está no arquivo de arte. Use Preparar textos para o agente refazer esta página.`);
+    if (body.trim() && !prompt.includes(body)) blocking.push(`Página ${index + 1}: o subtítulo não está no arquivo de arte. Use Preparar textos para o agente refazer esta página.`);
+    if (copy.trim() && captionMirror(prompt)?.trim() !== copy.trim()) blocking.push(`Página ${index + 1}: a copy da legenda não corresponde ao campo de publicação. Use Preparar textos para o agente refazer esta página.`);
     const depictedPerson = typeof page.depicted_person === 'string' ? page.depicted_person : '';
     if (!isDepictedPerson(depictedPerson)) blocking.push(`Página ${index + 1}: defina quem aparece na arte (Ninguém, Outra pessoa ou Cliente (retrato aprovado)).`);
-    pages.push({ page: index + 1, headline, copy, depictedPerson });
+    pages.push({ page: index + 1, headline, body, copy, depictedPerson });
   }
   if (claimsDocument.reviewed !== undefined && typeof claimsDocument.reviewed !== 'boolean') blocking.push('research/claims.json: "reviewed" precisa ser true ou false.');
   if (!Array.isArray(claimsDocument.claims)) blocking.push('research/claims.json precisa conter a lista "claims".');
@@ -1091,8 +1391,11 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
     const pageRange = pagesRangeFor(nativeType);
     if (!postNowFormatAcceptsPageCount(selectedFormat, pages.length)) blocking.push(pageRange.min === pageRange.max ? `O formato ${selectedFormat} exige exatamente uma página.` : `Um carrossel PostNow precisa ter de ${pageRange.min} a ${pageRange.max} páginas.`);
   }
+  if (stored.imagePageCount !== undefined && (pages.length !== stored.imagePageCount || Number(native.page_count) !== stored.imagePageCount)) {
+    blocking.push(`O projeto foi criado com ${stored.imagePageCount} ${stored.imagePageCount === 1 ? 'página' : 'páginas'}; a quantidade aprovada não pode ser alterada durante a preparação dos textos.`);
+  }
   if (pages.length !== Number(native.page_count) || pages.length < 1) blocking.push('A quantidade de páginas nativas não confere com o roteiro.');
-  const portraitApproved = brand ? (await approvedPortraitAt(await postnowHome(services), brand)) !== undefined : false;
+  const portraitApproved = stored.project.useBrandImages === false ? false : brand ? (await approvedPortraitAt(await postnowHome(services), brand)) !== undefined : false;
   if (brand && !formatRemoved) {
     blocking.push(...portraitPlanIssues(nativeType, pages.map(page => page.depictedPerson), portraitApproved));
     blocking.push(...portraitDiversityIssues(nativeType, rawPages.map(p => ({ visualFunction: typeof (p as Record<string, unknown>).visual_function === 'string' ? (p as Record<string, unknown>).visual_function as string : undefined }))));
@@ -1327,10 +1630,14 @@ async function detail(root: string, stored: StoredProject, services: Services): 
         const batchAssets = assets.filter(asset => asset.name.startsWith(`generated/runs/${entry.name}/`) && asset.kind === 'image');
         if (status?.state === 'ready' && !stored.formatAdaptation) {
           const expectedPages = visualReview?.pages.length ?? 0;
-          if (expectedPages < 1 || sourceCount !== expectedPages || batchAssets.length !== expectedPages) {
-            const message = sourceCount !== expectedPages
-              ? `Esta rodada tem ${sourceCount} imagem(ns)-fonte; o roteiro exige ${expectedPages}. Importe ou gere o conjunto completo em uma nova rodada.`
-              : `Esta rodada tem ${batchAssets.length} saída(s); o roteiro exige ${expectedPages}. O conjunto está incompleto e não pode ser aprovado ou derivado.`;
+          const expectedFormat = stored.project.format;
+          const formatMismatch = status.format !== expectedFormat;
+          if (formatMismatch || expectedPages < 1 || sourceCount !== expectedPages || batchAssets.length !== expectedPages) {
+            const message = formatMismatch
+              ? `Esta rodada foi gerada no formato ${status.format ?? 'não registrado'}, mas o projeto está em ${expectedFormat ?? 'formato indisponível'}. Gere uma nova rodada no formato escolhido.`
+              : sourceCount !== expectedPages
+                ? `Esta rodada tem ${sourceCount} imagem(ns)-fonte; o roteiro exige ${expectedPages}. Importe ou gere o conjunto completo em uma nova rodada.`
+                : `Esta rodada tem ${batchAssets.length} saída(s); o roteiro exige ${expectedPages}. O conjunto está incompleto e não pode ser aprovado ou derivado.`;
             await writeBatchStatus(stored.project.path, entry.name, { state: 'failed', message });
             status = await readBatchStatus(stored.project.path, entry.name);
           }
@@ -1353,6 +1660,7 @@ async function detail(root: string, stored: StoredProject, services: Services): 
     const status = await storyboardStatus(stored.project.path);
     result.storyboardAvailable = status.available;
     result.storyboardReady = status.ready;
+    result.storyboardCompositionReady = status.compositionReady;
     if (status.issues.length) result.storyboardIssues = status.issues;
   }
   return result;
@@ -1391,13 +1699,15 @@ export async function chooseImageFormat(root: string, id: string, format: PostNo
     await atomicJson(join(folder, `${snapshotId}.json`), { project: stored.project, notes: stored.notes, files });
   }
   const currentCount = Array.isArray(native.pages) ? native.pages.length : 0;
-  const pageCount = postNowFormatAcceptsPageCount(format, currentCount) ? currentCount : POSTNOW_FORMATS[format].kind === 'carousel' ? 5 : 1;
+  const currentPageCount = stored.imagePageCount ?? currentCount;
+  const pageCount = postNowFormatAcceptsPageCount(format, currentPageCount) ? currentPageCount : POSTNOW_FORMATS[format].kind === 'carousel' ? 5 : 1;
   // Nativo primeiro: se a segunda escrita falhar, o retry reaplica o mesmo formato em vez de retornar cedo.
   native.format = format;
   native.type = POSTNOW_FORMATS[format].kind;
   await atomicJson(nativePath, native);
   stored.project.format = format;
   delete stored.project.unsupportedFormat;
+  stored.imagePageCount = pageCount;
   delete stored.visualApproval;
   stored.formatAdaptation = { sourceFormat, targetFormat: format, pageCount, snapshotId };
   await save(root, stored);
@@ -1455,14 +1765,44 @@ async function create(root: string, payload: Record<string, unknown>): Promise<S
   let brand: Brand | undefined;
   let brandId: string | undefined;
   if (payload.brandId) { brandId = safeId(payload.brandId); brand = await brandAt(root, brandId); }
-  const folder = await createProjectFolder(root, title);
+  let visualStyle: VisualStyle | undefined;
+  if (payload.visualStyleId !== undefined) {
+    visualStyle = kind === 'image' ? visualStyleFor(payload.visualStyleId) : undefined;
+    if (!visualStyle) throw new Error('Estilo visual desconhecido; escolha um modelo de imagem da biblioteca.');
+  }
+  const imageBackgroundMode = kind === 'image'
+    ? resolveImageBackgroundMode(payload.imageBackgroundMode, brand?.colors ?? [])
+    : undefined;
+  if (kind !== 'image' && (payload.imageBackgroundMode !== undefined || payload.logoPolicy !== undefined)) {
+    throw new Error('Fundo e logo só podem ser escolhidos para projetos PostNow.');
+  }
+  const useBrandImages = payload.useBrandImages === undefined
+    ? kind === 'video'
+    : typeof payload.useBrandImages === 'boolean'
+      ? payload.useBrandImages
+      : (() => { throw new Error('Escolha se as fotos da marca podem ser usadas.'); })();
+  const logoPolicy: LogoPolicy | undefined = kind === 'image'
+    ? payload.logoPolicy === undefined
+      ? brand?.logo && extname(brand.logo).toLowerCase() === '.png' ? 'cover-closing' : 'none'
+      : isLogoPolicy(payload.logoPolicy) ? payload.logoPolicy : (() => { throw new Error('Escolha onde aplicar a logo oficial.'); })()
+    : undefined;
+  const depictedPersonPolicy = kind === 'image' && payload.depictedPersonPolicy !== undefined
+    ? (isDepictedPersonPolicy(payload.depictedPersonPolicy) ? payload.depictedPersonPolicy : (() => { throw new Error('Escolha quem aparece na arte.'); })())
+    : undefined;
   const format = projectFormat(payload.format, kind);
   const pageCount = requestedPageCount(payload.pageCount, format);
+  const folder = await createProjectFolder(root, title);
   const project: Project = { id, title, kind, format, brief, createdAt: new Date().toISOString(), path: folder.path };
   if (brandId) project.brandId = brandId;
+  if (visualStyle) project.visualStyle = visualStyle;
+  if (imageBackgroundMode) project.imageBackgroundMode = imageBackgroundMode;
+  if (useBrandImages !== undefined) project.useBrandImages = useBrandImages;
+  if (logoPolicy) project.logoPolicy = logoPolicy;
+  if (depictedPersonPolicy) project.depictedPersonPolicy = depictedPersonPolicy;
   try { await initializeNative(project, brand, pageCount); }
   catch (error) { await rm(project.path, { recursive: true, force: true }); throw error; }
-  return { project, folderName: folder.folderName, notes: '', approvals: {} };
+  const imagePageCount = kind === 'image' ? pageCount ?? (POSTNOW_FORMATS[format as PostNowFormatId].kind === 'carousel' ? 5 : 1) : undefined;
+  return { project, folderName: folder.folderName, notes: '', approvals: {}, imagePageCount, narrationSchemaVersion: 1, narrationProvider: 'elevenlabs' };
 }
 async function saveBrand(root: string, payload: Record<string, unknown>, services: Services): Promise<Brand> {
   const id = payload.id === undefined ? randomUUID() : safeId(payload.id);
@@ -1566,7 +1906,12 @@ async function importProject(root: string, payload: Record<string, unknown>): Pr
       path: folder.path,
       brief: typeof native.objective === 'string' ? native.objective : '',
     };
-    return { project, folderName: folder.folderName, notes: '', approvals: {} };
+    if (kind === 'image') {
+      project.imageBackgroundMode = resolveImageBackgroundMode(undefined, []);
+      project.logoPolicy = 'none';
+    }
+    project.useBrandImages = kind === 'video';
+    return { project, folderName: folder.folderName, notes: '', approvals: {}, narrationSchemaVersion: 1, narrationProvider: 'elevenlabs' };
   } catch (error) { await rm(folder.path, { recursive: true, force: true }); throw error; }
 }
 interface ExportArtifact { key: string; path: string; kind: Asset['kind']; sha256: string; bytes: number; stamp: string; }
@@ -1675,7 +2020,7 @@ async function bridge(root: string, stored: StoredProject, payload: Record<strin
   if (inputs.some(asset => !asset.approved)) throw new Error('Aprove todas as mídias da rodada selecionada antes de criar o projeto derivado.');
   const postNowFormat = kind === 'image' ? postNowFormatForPageCount(requestedFormat, inputs.length) : undefined;
   const format: ProjectFormatId = postNowFormat ?? requestedFormat ?? projectFormat(undefined, kind);
-  const created = await create(root, { title: `${stored.project.title} — ${kind === 'video' ? 'vídeo' : 'imagens'}`, kind, format, brief: stored.project.brief, brandId: stored.project.brandId });
+  const created = await create(root, { title: `${stored.project.title} (${kind === 'video' ? 'vídeo' : 'imagens'})`, kind, format, brief: stored.project.brief, brandId: stored.project.brandId });
   created.project.sourceProjectId = stored.project.id;
   const path = created.project.path;
   const provenance: { source: string; sha256: string; artifact: string }[] = [];
@@ -1703,7 +2048,7 @@ async function bridge(root: string, stored: StoredProject, payload: Record<strin
           if (copy) {
             narration = copy.toLowerCase().startsWith(headline.toLowerCase())
               ? copy
-              : (headline ? `${headline}. ${copy}` : copy);
+              : (headline ? `${headline}${/[.!?…]$/.test(headline) ? '' : '.'} ${copy}` : copy);
           } else if (headline) {
             narration = headline;
           }
@@ -1797,6 +2142,8 @@ async function approveStoryboard(root: string, stored: StoredProject, payload: R
   const silent = stored.narrationMode === 'silent';
   await secureStoryboard(path, stored.project.path, undefined, { allowMissingNarration: silent });
   const native = object(await readJson(path), 'Storyboard');
+  const dashIssues = storyboardDashIssues(native);
+  if (dashIssues.length) throw new Error(dashIssues.join(' '));
   if (native.status !== 'draft' && native.status !== 'ready') throw new Error('Status do storyboard inválido.');
   if (native.format !== (stored.project.format ?? 'reels')) throw new Error('O formato do storyboard difere do formato selecionado.');
   const engine = services.getSettings().enginePaths.videogo;
@@ -1858,11 +2205,16 @@ export async function writeBrandProfile(projectPath: string, brand: Brand, servi
   }
   return { profilesDirectory, style: `profile:${profile.id}` };
 }
+/** Remove o MP4 de um render que não terminou e os arquivos que o VideoGo grava junto dele; não toca em outros renders. */
+export async function discardIncompleteRender(output: string): Promise<void> {
+  const stem = output.replace(/\.mp4$/i, '');
+  await Promise.all([output, `${stem}.videogo.json`, `${output}.storyboard-hash`].map(path => rm(path, { force: true }).catch(() => undefined)));
+}
 async function render(root: string, stored: StoredProject, payload: Record<string, unknown>, services: Services): Promise<unknown> {
   if (stored.project.kind === 'image') {
     const brand = stored.project.brandId ? await brandAt(root, stored.project.brandId, services) : undefined;
     const batchId = text(payload, 'batchId', 100);
-    const logoPolicy = requireLogoPolicy(payload.logoPolicy);
+    const logoPolicy = stored.project.logoPolicy ?? (brand?.logo && extname(brand.logo).toLowerCase() === '.png' ? 'cover-closing' : 'none');
     const review = await requireVisualGenerationApproval(stored.project.id, services);
     const node = await resolveTool('node', services);
     if (!node) throw new Error('Node.js não está instalado.');
@@ -1898,12 +2250,19 @@ async function render(root: string, stored: StoredProject, payload: Record<strin
   const originalPath = join(stored.project.path, 'storyboard.json');
   const silent = stored.narrationMode === 'silent';
   const native = await secureStoryboard(originalPath, stored.project.path, undefined, { allowMissingNarration: silent });
+  const dashIssues = storyboardDashIssues(native);
+  if (dashIssues.length) throw new Error(`${dashIssues.join(' ')} Corrija no roteiro antes de renderizar.`);
   const format = stored.project.format ?? 'reels';
+  if (format !== 'reels' && format !== 'story' && format !== 'feed-square' && format !== 'youtube') {
+    throw new Error(`Formato VideoGo inválido: ${format}. Escolha Reels, Story, Feed quadrado ou YouTube.`);
+  }
   if (native.format !== format) throw new Error('O formato do storyboard difere do formato selecionado. Ajuste o roteiro antes de renderizar.');
   if (native.status !== 'ready') throw new Error('O storyboard está em rascunho. Complete e revise as cenas no VideoGo antes de renderizar.');
   const env = await toolEnvironment(services);
   const ffprobe = await resolveTool('ffprobe', services);
   if (!ffprobe) throw new Error('FFprobe é necessário para verificar o vídeo final. Instale FFmpeg em Motores & Setup.');
+  const ffmpeg = await resolveTool('ffmpeg', services);
+  if (!ffmpeg) throw new Error('FFmpeg é necessário para decodificar e verificar o render final. Instale-o em Motores & Setup.');
   const output = await localPath(stored.project.path, join('renders', 'review', `${basename(stored.project.path)}-${Date.now()}-${randomUUID().slice(0, 8)}.mp4`));
   // VideoGo resolves media relative to the storyboard: keep the temporary copy in the same directory.
   const temporary = silent ? await localPath(stored.project.path, `.studio-silent-${randomUUID()}.json`) : undefined;
@@ -1918,19 +2277,26 @@ async function render(root: string, stored: StoredProject, payload: Record<strin
     const brand = stored.project.brandId ? await brandAt(root, stored.project.brandId, services) : undefined;
     const profile = brand ? await writeBrandProfile(stored.project.path, brand, services) : undefined;
     const job = await services.run({
-      title: `VideoGo: ${stored.project.title} · ${format}`, executable: node, args: [cli, 'project', 'render', path, '--voice', 'demo', '--no-hud', '--output', output, ...(profile ? ['--style', profile.style] : [])], cwd: engine, env: profile ? { ...env, VIDEOGO_PROFILES_DIR: profile.profilesDirectory } : env, projectId: stored.project.id, timeoutMs: 60 * 60 * 1000,
+      title: `VideoGo: ${stored.project.title} · ${format}`, executable: node, args: [cli, 'project', 'render', path, '--voice', 'demo', '--output', output, ...(profile ? ['--style', profile.style] : [])], cwd: engine, env: profile ? { ...env, VIDEOGO_PROFILES_DIR: profile.profilesDirectory } : env, projectId: stored.project.id, timeoutMs: 60 * 60 * 1000,
       onSuccess: async (signal) => {
         const info = await lstat(output).catch(() => undefined);
         if (!info?.isFile() || info.isSymbolicLink() || !info.size) throw new Error('O VideoGo terminou sem produzir o vídeo esperado.');
-        const checked = await services.capture(ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'json', output], { timeoutMs: 30_000, signal });
+        const checked = await services.capture(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type,width,height,avg_frame_rate,r_frame_rate:format=duration', '-of', 'json', output], { timeoutMs: 30_000, signal });
         if (checked.code !== 0) throw new Error(`O vídeo gerado não passou na verificação FFprobe: ${checked.stderr.trim()}`);
-        const probe = object(JSON.parse(checked.stdout), 'Verificação do vídeo');
-        if (!Array.isArray(probe.streams) || !probe.streams.length) throw new Error('O vídeo gerado não contém faixa de vídeo.');
-        return 'Vídeo VideoGo gerado e verificado. Revise-o antes de aprovar.';
+        let probe: unknown;
+        try { probe = JSON.parse(checked.stdout); }
+        catch { throw new Error('O vídeo gerado retornou dados FFprobe ilegíveis.'); }
+        const issue = videoRenderIssue(probe, format, !silent && gate.active);
+        if (issue) throw new Error(issue);
+        const decoded = await services.capture(ffmpeg, ['-v', 'error', '-i', output, '-f', 'null', '-'], { timeoutMs: 60 * 60 * 1000, signal });
+        if (decoded.code !== 0) throw new Error(`O vídeo gerado falhou na decodificação integral: ${decoded.stderr.trim() || 'FFmpeg retornou erro.'}`);
+        return 'Vídeo VideoGo verificado: formato, resolução, 30 FPS, duração, áudio esperado e decodificação integral. Revise-o antes de aprovar.';
       },
     });
-    void services.waitJob(job.id).then(async () => {
+    void services.waitJob(job.id).then(async completed => {
       if (temporary) await rm(temporary, { force: true });
+      // Render cancelado ou falho deixa MP4 incompleto; sem isto ele apareceria na revisão como um vídeo válido.
+      if (completed.status !== 'succeeded') await discardIncompleteRender(output);
       services.emit({ type: 'refresh' });
     }).catch(async () => { if (temporary) await rm(temporary, { force: true }).catch(() => undefined); });
     return job;
@@ -1975,6 +2341,7 @@ export async function handleProjects(action: string, payload: Record<string, unk
       await requireNoPendingDeletion(root, services.dataDir, stored.project.id);
       await requireNoPendingAssetDeletion(root, services.dataDir, stored.project.id);
       switch (action) {
+        case 'projects.visualPreferences': result = await saveVisualPreferences(root, stored, payload, services); break;
         case 'projects.narration.save': result = await saveNarration(root, stored, services, payload); break;
         case 'projects.narration.setMode': {
           if (stored.project.kind !== 'video') throw new Error('A narração só existe em projetos de vídeo.');
@@ -1992,6 +2359,11 @@ export async function handleProjects(action: string, payload: Record<string, unk
           if (typeof payload.format !== 'string' || !isPostNowFormat(payload.format)) throw new Error('Escolha um formato PostNow disponível.');
           await chooseImageFormat(root, stored.project.id, payload.format);
           result = await detail(root, await load(root, stored.project.id), services); break;
+        }
+        case 'projects.videoStyle': {
+          if (stored.project.kind !== 'video') throw new Error('O estilo do vídeo só existe em projetos de vídeo.');
+          stored.project.visualStyle = composeVideoStyle({ styleId: payload.styleId, custom: payload.custom });
+          await save(root, stored); result = await detail(root, stored, services); break;
         }
         case 'projects.notes':
           stored.notes = freeText(payload, 'notes');
@@ -2057,9 +2429,12 @@ export async function handleProjects(action: string, payload: Record<string, unk
           if (payload.approved && batch) {
             const view = await detail(root, stored, services);
             const selected = view.batches?.find(candidate => candidate.id === batch);
-            const expectedPages = view.visualReview?.pages.length ?? 0;
+            const expectedPages = stored.imagePageCount ?? view.visualReview?.pages.length ?? 0;
             if (!selected || selected.status?.state !== 'ready' || expectedPages < 1 || selected.sourceCount !== expectedPages || selected.assets.length !== expectedPages) {
-              throw new Error('A rodada precisa estar completa e verificada antes da aprovação.');
+              const failure = selected?.status?.message;
+              throw new Error(failure
+                ? `A rodada precisa estar completa e verificada antes da aprovação. ${failure}`
+                : 'A rodada precisa estar completa e verificada antes da aprovação.');
             }
           }
           if (payload.approved) {

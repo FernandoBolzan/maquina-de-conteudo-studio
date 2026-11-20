@@ -20,9 +20,9 @@
 2. Commit a versão validada; crie a tag anotada correspondente: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`.
 3. Envie commit e tag ao GitHub. `.github/workflows/release.yml` confere os builds nativos de Linux, Windows e macOS. A publicação só começa quando os três builds terminam.
 4. O job final publica uma release estável no repositório `FernandoBolzan/maquina-de-conteudo-studio`, com notas geradas pelo GitHub e os instaladores/artefatos `latest*.yml` produzidos pelo electron-builder.
-5. Confirme na página Releases que os três alvos e metadados de atualização estão anexados. Falha em um build impede a publicação.
+5. Confirme na página Releases que os três alvos e metadados de atualização estão anexados. Falha em um build impede a publicação. Antes de publicar, `scripts/verify-release-assets.mjs` confere cada `latest*.yml` contra os arquivos (versão igual à tag, nome, tamanho e sha512); qualquer divergência cancela a publicação, porque um feed errado quebra a atualização de todas as instalações já distribuídas.
 
-O workflow não assina/notariza binários. Assinatura e validação nativa de cada sistema permanecem responsabilidade do mantenedor; macOS pode exigir identidade/notarização para distribuição confiável.
+O workflow não usa certificado de assinatura de código nem notariza builds; macOS recebe assinatura ad hoc verificada no CI, não uma identidade Developer ID. A distribuição confiável sem avisos do Gatekeeper ainda exige certificados Apple Developer e notarização.
 
 ## Descoberta e instalação pelo app
 
@@ -30,7 +30,11 @@ O workflow não assina/notariza binários. Assinatura e validação nativa de ca
 - Os metadados `latest*.yml` e arquivos da release dizem à biblioteca a versão e os artefatos. Não publicar uma release sem esses arquivos.
 - Em pacote instalado, o app consulta releases 15 s após abrir e depois a cada 6 h. A nova versão é baixada automaticamente, sem confirmação. Quando termina, Configuração mostra **Reiniciar e atualizar**; se o usuário não reiniciar, a atualização é aplicada ao fechar o app. O restart é recusado enquanto houver tarefas em execução. **Verificar atualização** força uma consulta imediata.
 - Em desenvolvimento (`app.isPackaged === false`), a verificação não é disponibilizada.
-- Linux: `electron-updater` suporta atualização automática pelo formato AppImage; pacotes `.deb` devem ser atualizados pelo mecanismo/distribuição do sistema. macOS/Windows precisam manter os artefatos e pré-requisitos de assinatura apropriados para instalação confiável.
+- Linux: `electron-updater` suporta atualização automática pelo formato AppImage; pacotes `.deb` devem ser atualizados pelo mecanismo/distribuição do sistema. Windows atualiza pelo NSIS sem assinatura (o app só verifica a assinatura se `publisherName` estiver configurado).
+- macOS: o build é assinado ad hoc (`identity: "-"`, `hardenedRuntime: false`) para o Gatekeeper tratá-lo como "desenvolvedor não identificado" em vez de "danificado". A atualização automática só liga com Apple Developer ID: o app lê o `TeamIdentifier` com `codesign` ao abrir (`src/main/update-policy.ts`) e, sem ele, não baixa nada e orienta a baixar a versão nova. Ao adotar Developer ID, troque `identity` e reative `hardenedRuntime` com o entitlement `com.apple.security.device.audio-input` e `disable-library-validation`.
+- Windows NSIS usa `perMachine: false`: instala por usuário por padrão, sem UAC nas atualizações. O usuário ainda pode escolher a instalação para todos no assistente; essa opção exige administrador e pode pedir UAC durante updates.
+- O CI macOS extrai o ZIP, exige que `codesign --verify --deep --strict` passe e confirma `Signature=adhoc` antes de aceitar o artefato.
+- VideoGo no Linux exige Node 22. Se Node do sistema faltar ou for antigo, o Studio baixa Node 22 oficial para `appData/runtime/tools/node/managed`, verifica SHA-256 contra `SHASUMS256.txt`, testa a versão antes e depois da ativação e não altera Node global. Só Linux x64/arm64; instalador de fallback usa o `tar` do sistema.
 
 ## Recuperação
 

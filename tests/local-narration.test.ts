@@ -42,3 +42,25 @@ test('local narration sends text via stdin and never overwrites existing output'
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('local narration abort kills Piper and removes partial output', { skip: process.platform === 'win32' }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'piper-cancel-test-'));
+  const originalPath = process.env.PATH;
+  try {
+    const modelPath = join(dir, 'voice.onnx');
+    const outputPath = join(dir, 'output.wav');
+    await writeFile(modelPath, 'model');
+    await writeFile(`${modelPath}.json`, '{}');
+    await writeFile(join(dir, 'piper'), `#!${process.execPath}\nprocess.stdin.resume(); setTimeout(() => process.exit(0), 30000);\n`, { mode: 0o755 });
+    process.env.PATH = dir;
+    const controller = new AbortController();
+    const generation = generateLocalNarration({ text: 'Olá', modelPath, outputPath, signal: controller.signal });
+    // Keep a real child process pending so AbortSignal cancellation is tested end-to-end.
+    setTimeout(() => controller.abort(), 25);
+    await assert.rejects(generation, { name: 'AbortError' });
+    await assert.rejects(readFile(outputPath));
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH; else process.env.PATH = originalPath;
+    await rm(dir, { recursive: true, force: true });
+  }
+});

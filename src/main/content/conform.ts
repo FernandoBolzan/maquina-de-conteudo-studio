@@ -63,39 +63,11 @@ export const CONFORM_SCRIPT = [
   '    image = image.resize((tw, th), Image.Resampling.LANCZOS)',
   'image.save(dst, "PNG")',
 ].join('\n');
+/** Fixed lower-right anchor for the PostNow logo; it never moves to another side based on image pixels. */
+export function officialLogoPosition(canvas: ImageSize, logo: ImageSize): { x: number; y: number } {
+  return {
+    x: canvas.width - Math.round(canvas.width * 0.06) - logo.width,
+    y: canvas.height - Math.round(canvas.height * 0.06) - logo.height,
+  };
+}
 
-/** Finds the cleanest, highest-contrast free area (with lowest variance) to place the brand logo without cluttering art. */
-export const FIND_FREE_AREA_SCRIPT = [
-  'import sys, json',
-  'from PIL import Image, ImageStat',
-  'try:',
-  '    src_path, lgo_path, lw_s, lh_s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]',
-  '    lw, lh = int(lw_s), int(lh_s)',
-  '    with Image.open(src_path) as src, Image.open(lgo_path) as lgo:',
-  '        w, h = src.size',
-  '        lgo_lum = ImageStat.Stat(lgo.convert("L")).mean[0]',
-  '        pad_x = round(w * 0.07)',
-  '        pad_y = round(h * 0.10)',
-  '        candidates = [',
-  '            (w - pad_x - lw, h - pad_y - lh),',
-  '            (pad_x, h - pad_y - lh),',
-  '            (round((w - lw) / 2), h - pad_y - lh),',
-  '        ]',
-  '        best_score = -1e9',
-  '        best_x, best_y = candidates[0]',
-  '        for i, (cx, cy) in enumerate(candidates):',
-  '            cx = max(0, min(w - lw, cx))',
-  '            cy = max(0, min(h - lh, cy))',
-  '            crop = src.crop((cx, cy, cx + lw, cy + lh)).convert("L")',
-  '            st = ImageStat.Stat(crop)',
-  '            contrast = abs(st.mean[0] - lgo_lum)',
-  '            stddev = st.stddev[0]',
-  '            pref = 35 if i == 0 and stddev < 20 else 0',
-  '            score = contrast * 1.5 - stddev * 2.0 + pref',
-  '            if score > best_score:',
-  '                best_score = score',
-  '                best_x, best_y = cx, cy',
-  '    print(json.dumps({"x": best_x, "y": best_y}))',
-  'except Exception:',
-  '    sys.exit(1)',
-].join('\n');

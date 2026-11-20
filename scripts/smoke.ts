@@ -83,12 +83,13 @@ async function main(): Promise<void> {
     const native = JSON.parse(await readFile(projectJsonPath, 'utf8')) as Record<string, unknown>;
     const page = (native.pages as Record<string, unknown>[])[0]!;
     const copy = 'Dor na mandíbula ao acordar merece atenção.';
+    const body = 'Perceba a tensão ao despertar e procure orientação.';
     const visualFunction = 'Mostrar uma pessoa percebendo desconforto na mandíbula ao despertar.';
     native.audience = 'Pessoas adultas com desconforto ao acordar.';
     native.page_count_approved = true;
-    native.pages = [{ ...page, headline: 'Acorda com dor?', copy, visual_function: visualFunction, depicted_person: 'other_person' }];
+    native.pages = [{ ...page, headline: 'Acorda com dor?', body, copy, visual_function: visualFunction, depicted_person: 'other_person' }];
     await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
-    await writeFile(join(imageProject.path, String(page.prompt_file)), `Copy: ${copy}\nFunção visual: ${visualFunction}\nComposição editorial refinada, contraste alto, texto legível e margens seguras.\n`);
+    await writeFile(join(imageProject.path, String(page.prompt_file)), `## Texto na arte\nHeadline: Acorda com dor?\nBody: ${body}\n\n## Composição\n${visualFunction}\nComposição editorial refinada, contraste alto, texto legível e margens seguras.\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\n${copy}\n`);
     await writeFile(join(imageProject.path, 'storyboard.md'), `# ${imageProject.title}\n\n${imageProject.brief}\n`);
     await writeFile(join(imageProject.path, 'research', 'claims.json'), `${JSON.stringify({
       reviewed: false,

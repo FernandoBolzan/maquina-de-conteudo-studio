@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyArtText, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, visualTextPageIssues, VISUAL_TEXT_LIMITS } from '../src/shared/visual-text.js';
+import { applyArtText, CAPTION_MIRROR_LABEL, captionMirror, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, visualTextPageIssues, VISUAL_TEXT_LIMITS } from '../src/shared/visual-text.js';
+import { removeDashes } from '../src/shared/writing-style.js';
 
 function validPage(page: number) {
-  return { page, headline: 'Dez dicas simples', copy: 'Texto da página.', depictedPerson: 'none' };
+  return { page, headline: 'Dez dicas simples', body: 'Resumo curto na arte.', copy: 'Texto da página.', depictedPerson: 'none' };
 }
 
 test('página sem headline é bloqueada com mensagem em português', () => {
@@ -21,6 +22,10 @@ test('headline fora de 2 a 6 palavras é salva com aviso, não bloqueio', () => 
 test('copy acima do limite é bloqueada', () => {
   const issues = visualTextPageIssues({ ...validPage(1), copy: 'x'.repeat(VISUAL_TEXT_LIMITS.copy + 1) });
   assert.equal(issues.errors[0].field, 'copy');
+});
+test('subtítulo acima do limite é bloqueado', () => {
+  const issues = visualTextPageIssues({ ...validPage(1), body: 'x'.repeat(VISUAL_TEXT_LIMITS.body + 1) });
+  assert.equal(issues.errors[0].field, 'body');
 });
 
 test('quem aparece aceita as três opções do app e recusa valor fora da lista', () => {
@@ -63,23 +68,48 @@ test('texto na tela acima de 300 caracteres é recusado com o id da cena', () =>
   assert.ok(result.errors[0].startsWith('Cena cena-1:'));
 });
 
-test('troca headline e copy no arquivo de arte e preserva o resto do texto', () => {
-  const art = 'Título: Sono\nCopy: Sono importa para a memória.\nRegra: sem pessoas.';
-  const result = applyArtText(art, { headline: 'Sono', copy: 'Sono importa para a memória.' }, { headline: 'Dormir bem', copy: 'Dormir ajuda a memória.' });
+test('editar a arte e a legenda atualiza campos distintos, sem imprimir copy na imagem', () => {
+  const art = [
+    '## Texto na arte',
+    'Headline: Sono',
+    'Body: Resumo sobre sono.',
+    '',
+    '## Composição',
+    'Use um ícone de lua.',
+    '',
+    '## Copy para publicação/legenda, NÃO imprimir na arte:',
+    'Sono importa para a memória.',
+  ].join('\n');
+  const result = applyArtText(art, { headline: 'Sono', body: 'Resumo sobre sono.', copy: 'Sono importa para a memória.' }, { headline: 'Dormir bem', body: 'Resumo do descanso.', copy: 'Dormir ajuda a memória.' });
   assert.deepEqual(result.missing, []);
-  assert.equal(result.text, 'Título: Dormir bem\nCopy: Dormir ajuda a memória.\nRegra: sem pessoas.');
+  assert.equal(captionMirror(result.text), 'Dormir ajuda a memória.');
+  assert.match(result.text, /Headline: Dormir bem/);
+  assert.match(result.text, /Body: Resumo do descanso\./);
+  assert.match(result.text, /Use um ícone de lua\./);
+  assert.doesNotMatch(result.text.slice(0, result.text.indexOf('## Copy para publicação')), /Dormir ajuda a memória/);
 });
 
-test('headline que aparece dentro da copy nova não corrompe a copy', () => {
-  const art = 'Título: Sono\nCopy: Sono é importante.';
-  const result = applyArtText(art, { headline: 'Sono', copy: 'Sono é importante.' }, { headline: 'Dormir', copy: 'Sono é importante hoje.' });
+test('headline repetida na legenda não altera a copy ao editar campos de arte', () => {
+  const art = '## Texto na arte\nHeadline: Sono\nBody: Uma pausa melhora a atenção.\n\n## Composição\nLua\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\nSono é importante.';
+  const result = applyArtText(art, { headline: 'Sono', body: 'Uma pausa melhora a atenção.', copy: 'Sono é importante.' }, { headline: 'Dormir', body: 'Uma pausa melhora o foco.', copy: 'Sono é importante hoje.' });
   assert.deepEqual(result.missing, []);
-  assert.equal(result.text, 'Título: Dormir\nCopy: Sono é importante hoje.');
+  assert.equal(captionMirror(result.text), 'Sono é importante hoje.');
+  assert.match(result.text, /Headline: Dormir/);
 });
 
 test('texto anterior ausente do arquivo de arte não é trocado e fica reportado', () => {
-  const art = 'Título: Sono\nCopy: outro texto.';
-  const result = applyArtText(art, { headline: 'Sono', copy: 'Texto que não está no arquivo.' }, { headline: 'Dormir', copy: 'Novo texto.' });
+  const art = '## Texto na arte\nHeadline: Sono\nBody: Resumo.\n\n## Composição\nLua\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\nOutra copy.';
+  const result = applyArtText(art, { headline: 'Sono', body: 'Resumo.', copy: 'Texto que não está no arquivo.' }, { headline: 'Dormir', body: 'Novo resumo.', copy: 'Nova copy.' });
   assert.deepEqual(result.missing, ['copy']);
   assert.equal(result.text, art);
+});
+
+test('o rótulo da copy de legenda sobrevive ao filtro de travessões enviado aos agentes', () => {
+  assert.equal(removeDashes(CAPTION_MIRROR_LABEL), CAPTION_MIRROR_LABEL);
+  assert.equal(captionMirror(`## ${removeDashes(CAPTION_MIRROR_LABEL)}\nCopy integral.\n`), 'Copy integral.');
+});
+
+test('linhas POSTNOW_ depois da copy não entram na copy de legenda', () => {
+  const prompt = `## Texto na arte\nHeadline: Sono\n\n## ${CAPTION_MIRROR_LABEL}\nCopy integral.\n\nPOSTNOW_COPY_RENDERING=generated_in_image\n`;
+  assert.equal(captionMirror(prompt), 'Copy integral.');
 });

@@ -1,24 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, AudioLines, BookOpen, Check, CheckCheck, ChevronLeft, ChevronRight, FileText, Film, FolderOpen, Image, Layers, Mic2, Play, Plus, Save, Send, Sparkles, TerminalSquare, WandSparkles } from 'lucide-react';
-import { VIDEO_AGENT_EFFORT, VIDEO_AGENT_MODEL, postNowFormatAcceptsPageCount, type Asset, type ElevenLabsVoice, type Job, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type Provider } from '../shared/contracts';
+import { ArrowLeft, ArrowRight, AudioLines, BookOpen, Check, CheckCheck, ChevronLeft, ChevronRight, Film, FileText, FolderOpen, Image, Layers, Mic2, Plus, Send, Sparkles, TerminalSquare } from 'lucide-react';
+import { VIDEO_AGENT_EFFORT, VIDEO_AGENT_MODEL, postNowFormatAcceptsPageCount, type Asset, type ElevenLabsVoice, type Job, type LocalVoiceCatalogState, type LocalVoiceOperationEvent, type LocalVoiceOption, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type Provider } from '../shared/contracts';
 import { Empty, ErrorNotice, Loading } from './components';
-import { errorMessage, invoke, useJobs, type ScreenProps } from './state';
+import { api, errorMessage, invoke, useJobs, type ScreenProps } from './state';
 import { ActivityCard } from './Console';
 import { MODEL_CATALOG } from './model-catalog';
 import { PromptLibrary } from './PromptLibrary';
 import { getProjectJourney, type JourneyStepId } from './project-journey';
-import { AgentQuestionsDialog, DeliveryOptions, ImageReviewGrid, StepBar, StepNav, StepShell, type ImageReviewItem, type StepBarItem } from './studio-steps';
+import { DecisionToggle, AgentQuestionsDialog, DeliveryOptions, ImageReviewGrid, StepBar, StepNav, StepShell, type ImageReviewItem, type StepBarItem } from './studio-steps';
 import { NarrationTeleprompter } from './NarrationTeleprompter';
 import { LOGO_POLICY_OPTIONS, isLogoPolicy, type LogoPolicy } from '../shared/logo-policy';
+import { DEPICTED_PERSON_POLICY_LABELS, DEPICTED_PERSON_POLICY_VALUES, isDepictedPersonPolicy, type DepictedPersonPolicy } from '../shared/depicted-person';
+import { IMAGE_BACKGROUND_OPTIONS, defaultImageBackgroundMode, isImageBackgroundMode, type ImageBackgroundMode } from '../shared/image-background';
 import { composeAgentFollowUp, formatAgentAnswers, lastAgentMessage, parseAgentQuestions, type AgentAnswer } from '../shared/agent-followup';
 import { GenerationProgress, type GenerationProgressState } from './GenerationProgress';
+import { AIEscapeDialog } from './AIEscapeDialog';
 import { VisualTextEditor } from './VisualTextEditor';
 import { VideoSceneEditor, type StoryboardSceneText } from './VideoSceneEditor';
 import type { VisualTextEditPage, VisualTextEditScene } from '../shared/visual-text';
 import { hasTextContent, shouldAutoStartTextGeneration } from '../shared/text-generation';
 import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, isPostNowFormat } from '../shared/formats';
+import { motionDirectorPrompt, videoRevisionPrompt, videoStylePrompt } from '../shared/video-production';
+import { VideoStylePanel, type VideoStyleChoice } from './VideoStylePanel';
+import { audioCheckUnavailable, classifyBatch, exportReachable, hasVideoGoRender, journeyOutputAssets as getJourneyOutputAssets, latestReviewVideo, narrationBlocked as isNarrationBlocked, reviewVideos as getReviewVideos, isBatchStale } from '../shared/video-state';
+import { imageFooterAction, videoFooterAction, type FooterAction } from '../shared/step-action';
+import type { TextEditorHandle } from './editor-handle';
 
-function Media({ projectId, asset }: { projectId: string; asset: Asset }) {
+function Media({ projectId, asset, large = false }: { projectId: string; asset: Asset; large?: boolean }) {
   const [content, setContent] = useState<string | null>(null);
   const [textError, setTextError] = useState('');
   useEffect(() => {
@@ -33,7 +41,7 @@ function Media({ projectId, asset }: { projectId: string; asset: Asset }) {
   }, [projectId, asset.kind, asset.path]);
 
   if (asset.kind === 'image') return <img className="media-image" src={asset.url} alt={asset.name} />;
-  if (asset.kind === 'video') return <video className="media-video" src={asset.url} controls preload="metadata" aria-label={asset.name} />;
+  if (asset.kind === 'video') return <video className={`media-video${large ? ' is-review' : ''}`} src={asset.url} controls preload="metadata" aria-label={asset.name} />;
   if (asset.kind === 'audio') return <div className="audio-preview"><AudioLines size={52} strokeWidth={1} /><p>{asset.name}</p><audio src={asset.url} controls preload="metadata" aria-label={asset.name} /></div>;
   return (
     <div className="text-preview-wrap">
@@ -76,13 +84,19 @@ function progressStateFor(job: Job): GenerationProgressState {
 
 function narrationChanged(saved: NarrationState | null, draft: NarrationState | null): boolean {
   return Boolean(saved && draft && (
+    saved.provider !== draft.provider ||
     saved.voiceId !== draft.voiceId ||
+    JSON.stringify(saved.localVoice) !== JSON.stringify(draft.localVoice) ||
     saved.scenes.length !== draft.scenes.length ||
     saved.scenes.some((scene, index) => scene.id !== draft.scenes[index]?.id || scene.narration !== draft.scenes[index]?.narration || scene.spokenText !== draft.scenes[index]?.spokenText)
   ));
 }
 
-export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, openJob, onOpen, onBack, initialPrompt, onOpenVoiceSetup, onOpenTerminal, onDirtyChange }: ScreenProps & { id: string; initialPrompt: string; onOpen: (id: string, initialPrompt?: string) => void; onOpenVoiceSetup: () => void; onOpenTerminal: (job: Job) => void; onBack: () => void; onDirtyChange: (dirty: boolean) => void }) {
+function formatBytes(bytes: number): string {
+  return `${bytes.toLocaleString()} bytes (${(bytes / 1048576).toFixed(2)} MiB)`;
+}
+
+export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onOpen, onBack, initialPrompt, onOpenVoiceSetup, onOpenTerminal, onDirtyChange }: ScreenProps & { id: string; initialPrompt: string; onOpen: (id: string, initialPrompt?: string) => void; onOpenVoiceSetup: () => void; onOpenTerminal: (job: Job) => void; onBack: () => void; onDirtyChange: (dirty: boolean) => void }) {
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [loadError, setLoadError] = useState('');
   const [reload, setReload] = useState(0);
@@ -96,6 +110,8 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
   const [prompt, setPrompt] = useState(initialPrompt);
   const [videoCorrection, setVideoCorrection] = useState('');
   const [promptLibraryOpen, setPromptLibraryOpen] = useState(false);
+  const [afterJob, setAfterJob] = useState<{ jobId: string; step: JourneyStepId } | null>(null);
+  const [revisionOpen, setRevisionOpen] = useState(false);
   const [provider, setProvider] = useState<Provider>(detail?.kind === 'video' ? 'claude' : snapshot.settings.provider);
   const [model, setModel] = useState('');
   const [customModel, setCustomModel] = useState('');
@@ -108,16 +124,30 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
   const [narrationJobId, setNarrationJobId] = useState<string | null>(null);
   const [teleprompterOpen, setTeleprompterOpen] = useState(false);
   const [teleprompterIndex, setTeleprompterIndex] = useState(0);
-  const [localVoiceModel, setLocalVoiceModel] = useState('');
+  const [localCatalog, setLocalCatalog] = useState<LocalVoiceCatalogState | null>(null);
+  const [localCatalogError, setLocalCatalogError] = useState('');
+  const [localVoiceQuery, setLocalVoiceQuery] = useState('');
+  const [localEngineFilter, setLocalEngineFilter] = useState<'all' | 'piper' | 'kokoro'>('all');
+  const [localLanguageFilter, setLocalLanguageFilter] = useState('all');
+  const [localAuditions, setLocalAuditions] = useState<Record<string, string>>({});
+  const [localOperation, setLocalOperation] = useState<LocalVoiceOperationEvent | null>(null);
+  const [localOperationError, setLocalOperationError] = useState('');
   const [trackedJobId, setTrackedJobId] = useState<string | null>(null);
+  const [arcadeOpen, setArcadeOpen] = useState(false);
   const [storyboardScenes, setStoryboardScenes] = useState<StoryboardSceneText[] | null>(null);
   const [storyboardError, setStoryboardError] = useState('');
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [closedAgentJobId, setClosedAgentJobId] = useState<string | null>(null);
   const [visualTextDirty, setVisualTextDirty] = useState(false);
+  const [visualTextInvalid, setVisualTextInvalid] = useState(false);
+  const [storyboardInvalid, setStoryboardInvalid] = useState(false);
+  const [videoRevisionRequested, setVideoRevisionRequested] = useState<{ path: string; stale: boolean } | null>(null);
+  const visualTextEditorRef = useRef<TextEditorHandle>(null);
+  const storyboardEditorRef = useRef<TextEditorHandle>(null);
   const [adaptationStarting, setAdaptationStarting] = useState(false);
   const [adaptationError, setAdaptationError] = useState('');
   const adaptationLock = useRef(false);
+  const [imagePreferenceDraft, setImagePreferenceDraft] = useState<{ backgroundMode: ImageBackgroundMode; useBrandImages: boolean; logoPolicy: LogoPolicy; depictedPersonPolicy: DepictedPersonPolicy }>({ backgroundMode: 'light', useBrandImages: true, logoPolicy: 'cover-closing', depictedPersonPolicy: 'auto' });
   const rootPromptRef = useRef('');
   const narrationRef = useRef<{ saved: NarrationState | null; draft: NarrationState | null }>({ saved: null, draft: null });
   narrationRef.current = { saved: narration, draft: narrationDraft };
@@ -131,6 +161,9 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
   const recommendedModel = detail?.kind === 'video' ? VIDEO_AGENT_MODEL : provider === 'codex' ? 'gpt-6-luna' : 'sonnet';
   const selectedModel = model === 'custom' ? customModel.trim() : model || recommendedModel;
   const selectedModelInfo = MODEL_CATALOG[provider].find(option => option.id === selectedModel);
+  useEffect(() => {
+    if (!running) setArcadeOpen(false);
+  }, [running?.id]);
 
   useEffect(() => {
     let active = true;
@@ -165,6 +198,13 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
     void invoke<ProjectDetail>('projects.detail', { id }).then(project => { if (active) setDetail(project); }).catch(error => { if (active) setLoadError(errorMessage(error)); });
     return () => { active = false; };
   }, [id, runningJobId]);
+  const afterJobStatus = projectJobs.find(job => job.id === afterJob?.jobId)?.status;
+  // Quando o render (ou a revisão) termina, leva a pessoa para onde a decisão é tomada: o player do vídeo (ou o botão de renderizar de novo).
+  useEffect(() => {
+    if (!afterJob || !afterJobStatus || afterJobStatus === 'running') return;
+    if (afterJobStatus === 'succeeded') setSelectedStepId(afterJob.step);
+    setAfterJob(null);
+  }, [afterJob, afterJobStatus]);
   useEffect(() => {
     if (!detail || detail.kind !== 'video') { setNarration(null); return; }
     let active = true;
@@ -222,15 +262,81 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
   }, [detail?.kind]);
 
   useEffect(() => {
+    if (!api) return;
+    return api.onEvent(event => {
+      if (event.type !== 'local-voice' || !event.localVoiceOperation) return;
+      setLocalOperation(event.localVoiceOperation);
+      if (event.localVoiceOperation.phase === 'failed') setLocalOperationError(event.localVoiceOperation.message);
+      if (event.localVoiceOperation.phase === 'ready') setLocalOperationError('');
+    });
+  }, []);
+  useEffect(() => {
     let active = true;
+    setLocalCatalogError('');
+    void invoke<LocalVoiceCatalogState>('localVoices.catalog')
+      .then(value => { if (active) setLocalCatalog(value); })
+      .catch(error => { if (active) setLocalCatalogError(errorMessage(error)); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    if (narrationDraft?.provider !== 'elevenlabs' || !snapshot.integrations.elevenLabs.configured) {
+      setVoices([]);
+      setVoiceError('');
+      return () => { active = false; };
+    }
     setVoiceError('');
-    if (!snapshot.integrations.elevenLabs.configured) { setVoices([]); return; }
     void invoke<ElevenLabsVoice[]>('elevenlabs.voices')
       .then(value => { if (active) setVoices(value); })
       .catch(error => { if (active) setVoiceError(errorMessage(error)); });
     return () => { active = false; };
-  }, [snapshot.integrations.elevenLabs.configured]);
+  }, [narrationDraft?.provider, snapshot.integrations.elevenLabs.configured]);
 
+  async function auditionLocalVoice(voice: LocalVoiceOption) {
+    if (!localCatalog?.installedIds.includes(voice.id)) return;
+    const operationId = crypto.randomUUID();
+    setLocalOperationError('');
+    const result = await run(`local-audition-${voice.id}`, () => invoke<{ url: string }>('localVoices.audition', { id: voice.id, operationId }));
+    if (result?.url) setLocalAuditions(current => ({ ...current, [voice.id]: result.url }));
+  }
+
+  async function installLocalVoice(voice: LocalVoiceOption) {
+    if (!await confirm('Instalar voz local?', `O download instalará ${voice.modelId} (${formatBytes(voice.sizeBytes)}) e o runtime necessário (${formatBytes(voice.runtimeSizeBytes)}). Licença: ${voice.license}. Fonte: ${voice.licenseEvidence}.`, 'Instalar')) return;
+    const operationId = crypto.randomUUID();
+    setLocalOperationError('');
+    const result = await run(`local-install-${voice.id}`, () => invoke<{ installed: boolean }>('localVoices.install', { id: voice.id, operationId }));
+    if (result?.installed) {
+      setLocalCatalog(current => current ? { ...current, installedIds: [...new Set([...current.installedIds, voice.id])] } : current);
+    }
+  }
+
+  async function cancelLocalOperation() {
+    if (!localOperation || !['preparing', 'downloading', 'verifying', 'synthesizing'].includes(localOperation.phase)) return;
+    await invoke<{ cancelled: boolean }>('localVoices.cancel', { operationId: localOperation.operationId });
+  }
+
+  const filteredLocalVoices = (localCatalog?.voices ?? []).filter(voice =>
+    (localEngineFilter === 'all' || voice.engine === localEngineFilter) &&
+    (localLanguageFilter === 'all' || voice.language === localLanguageFilter) &&
+    `${voice.name} ${voice.language} ${voice.engine} ${voice.modelId} ${voice.voiceId}`.toLocaleLowerCase().includes(localVoiceQuery.toLocaleLowerCase().trim())
+  );
+
+  useEffect(() => {
+    if (!detail || detail.kind !== 'video' || !videoRevisionRequested) return;
+    const latest = latestReviewVideo(getReviewVideos(detail.assets, narration?.mode));
+    if (latest && latest.path !== videoRevisionRequested.path) setVideoRevisionRequested(null);
+  }, [detail, narration?.mode, videoRevisionRequested]);
+  useEffect(() => { setVideoRevisionRequested(null); }, [id, reload]);
+  useEffect(() => {
+    if (!detail) return;
+    const linkedBrand = snapshot.brands.find(item => item.id === detail.brandId);
+    setImagePreferenceDraft({
+      backgroundMode: detail.imageBackgroundMode ?? defaultImageBackgroundMode(linkedBrand?.colors ?? []),
+      useBrandImages: detail.useBrandImages ?? true,
+      logoPolicy: detail.logoPolicy ?? (linkedBrand?.logo?.toLowerCase().endsWith('.png') ? 'cover-closing' : 'none'),
+      depictedPersonPolicy: detail.depictedPersonPolicy ?? 'auto',
+    });
+  }, [detail, snapshot.brands]);
   const studioDirty = Boolean(detail) && (brief !== detail?.brief || notes !== detail?.notes || narrationChanged(narration, narrationDraft) || visualTextDirty);
   const dirtyListener = useRef(onDirtyChange);
   useEffect(() => { dirtyListener.current = onDirtyChange; }, [onDirtyChange]);
@@ -259,22 +365,32 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
   const postNowDerivationFits = postNowFormatAcceptsPageCount(selectedDerivedFormat, videoAssets.length);
   const visibleAssets = project.kind === 'image' ? imageAssets : project.assets;
   const selected = visibleAssets.find(asset => asset.path === selectedPath) ?? visibleAssets.find(asset => asset.kind === 'image' || asset.kind === 'video') ?? visibleAssets[0];
-  const reviewVideos = project.assets.filter(asset => asset.kind === 'video'
-    && /^renders\/(?:review|final)\//i.test(asset.name.replace(/\\/g, '/'))
-    && (narration?.mode === 'silent' || (narration?.mode === 'narrated' && asset.hasAudio === true)))
-    .sort((a, b) => b.name.localeCompare(a.name));
-  const reviewSelected = reviewVideos.find(asset => asset.path === selectedPath) ?? reviewVideos[0];
+  const reviewVideos = getReviewVideos(project.assets, narration?.mode);
+  const latestVideo = latestReviewVideo(reviewVideos);
+  const reviewSelected = reviewVideos.find(asset => asset.path === selectedPath) ?? latestVideo;
   const visualIndex = reviewSelected ? reviewVideos.findIndex(asset => asset.path === reviewSelected.path) : -1;
-  const audioCheckUnavailable = project.assets.some(asset => asset.kind === 'video' && /^renders\/(?:review|final)\//i.test(asset.name.replace(/\\/g, '/')) && asset.hasAudio === undefined);
+  const audioUnavailable = audioCheckUnavailable(project.assets);
   const approved = project.assets.filter(asset => asset.approved);
   const deliveryAssets = project.kind === 'video' ? project.assets.filter(asset => /^delivery\/(?:cover-(?:youtube|reels|feed-square)\.png|copy-(?:youtube|reels|feed-square)\.txt)$/.test(asset.name)) : [];
   const dirty = brief !== project.brief || notes !== project.notes;
   const brand = snapshot.brands.find(item => item.id === project.brandId);
+  const savedVisualPreferences = {
+    backgroundMode: project.imageBackgroundMode ?? defaultImageBackgroundMode(brand?.colors ?? []),
+    useBrandImages: project.useBrandImages ?? true,
+    logoPolicy: project.logoPolicy ?? (brand?.logo?.toLowerCase().endsWith('.png') ? 'cover-closing' : 'none'),
+    depictedPersonPolicy: project.depictedPersonPolicy ?? 'auto',
+  };
+  const visualPreferencesDirty = project.kind === 'image'
+    ? imagePreferenceDraft.backgroundMode !== savedVisualPreferences.backgroundMode
+      || imagePreferenceDraft.useBrandImages !== savedVisualPreferences.useBrandImages
+      || imagePreferenceDraft.logoPolicy !== savedVisualPreferences.logoPolicy
+      || imagePreferenceDraft.depictedPersonPolicy !== savedVisualPreferences.depictedPersonPolicy
+    : imagePreferenceDraft.useBrandImages !== savedVisualPreferences.useBrandImages;
   const narrationDirty = narrationChanged(narration, narrationDraft);
-  const narrationBlocked = !narration || narrationDirty || !narration.ready || (narration.mode === 'narrated' && !narration.active);
+  const narrationBlocked = isNarrationBlocked(narration, narrationDirty);
   const expectedImageCount = visualReview?.pages.length ?? 0;
   const renderInputsReady = project.kind === 'image'
-    ? Boolean(selectedBatch && expectedImageCount > 0 && selectedBatch.sourceCount === expectedImageCount && !insufficientCarousel && visualReview?.ready && visualReview.approved && selectedBatch.assets.length === 0)
+    ? Boolean(!visualPreferencesDirty && selectedBatch && expectedImageCount > 0 && selectedBatch.sourceCount === expectedImageCount && !insufficientCarousel && visualReview?.ready && visualReview.approved && selectedBatch.assets.length === 0)
     : (project.storyboardReady === true || project.storyboardAvailable === true) && !narrationBlocked;
   const canDerive = project.kind === 'image'
     ? selectedBatchId !== 'all' && expectedImageCount > 0 && (selectedBatch
@@ -309,48 +425,52 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
         ? 'Uma mídia pode virar Post ou Story; selecione um desses formatos. Carrossel exige de 3 a 10 mídias.'
         : `O PostNow aceita Post/Story com 1 mídia ou carrossel com 3 a 10; esta seleção contém ${videoAssets.length} mídias.`
       : '';
-  const journeyOutputAssets = project.kind === 'image'
-    ? (selectedBatchId === 'all' ? [] : selectedBatch ? (selectedBatch.status?.state === 'ready' ? selectedBatch.assets : []) : legacyAssets)
-    : reviewVideos;
-  // VideoGo's CLI names renders with <storyboard-id>-<timestamp>-<8-char-id>.mp4;
-  // the FFmpeg carousel derivation is deliberately named derived.mp4 instead.
-  const hasVideoGoRender = project.kind === 'video' && reviewVideos.some(asset =>
-    /(?:^|\/)renders\/(?:review|final)\/[^/]+-\d{13}-[a-f0-9]{8}(?:-with-audio)?\.mp4$/i.test(asset.name.replace(/\\/g, '/')),
-  );
+  const imageOutputsReady = project.kind === 'image' && !visualPreferencesDirty && !project.formatAdaptation && (latestBatch
+    ? latestBatch.status?.state === 'ready' && latestBatch.format === project.format
+      && latestBatch.sourceCount === expectedImageCount && latestBatch.assets.length === expectedImageCount
+    : batches.length === 0 && expectedImageCount > 0 && legacyAssets.length === expectedImageCount);
+  const journeyOutputAssets = getJourneyOutputAssets({
+    kind: project.kind,
+    batches,
+    legacyAssets,
+    reviewVideos,
+  });
+  const hasVideoGoRenderValue = project.kind === 'video' && hasVideoGoRender(reviewVideos);
   const journey = getProjectJourney({
     kind: project.kind,
     hasBrief: Boolean(project.brief.trim()) && !dirty,
-    hasScript: project.kind === 'video' ? project.storyboardAvailable === true : Boolean(visualReview?.ready),
-    hasRender: project.kind === 'image' ? journeyOutputAssets.length > 0 : hasVideoGoRender,
+    hasScript: project.kind === 'video' ? project.storyboardReady === true : Boolean(visualReview?.ready),
+    hasRender: project.kind === 'image' ? journeyOutputAssets.length > 0 : hasVideoGoRenderValue,
     outputs: journeyOutputAssets.map(asset => ({ approved: asset.approved })),
+    ...(project.kind === 'image' ? { imagesReady: imageOutputsReady } : {}),
     textsApproved: Boolean(visualReview?.approved && !project.formatAdaptation && !adaptationStarting),
     isRunning: Boolean(running),
     voice: {
       selected: true,
-      ready: !narrationBlocked,
-      needsKey: narration?.mode !== 'silent' && Boolean(narration?.voiceId) && !snapshot.integrations.elevenLabs.configured,
+      ready: !narrationBlocked && project.storyboardReady === true,
+      needsKey: narration?.provider === 'elevenlabs' && narration.mode !== 'silent' && Boolean(narration.voiceId) && !snapshot.integrations.elevenLabs.configured && project.storyboardReady === true,
     },
   });
   const selectedVoice = voices.find(voice => voice.id === narrationDraft?.voiceId);
-  const stepItems: StepBarItem[] = journey.steps.map(step => ({ id: step.id, title: step.title, status: step.status, reachable: step.status !== 'upcoming' || (step.id === 'export' && (project.kind === 'video' || approved.length > 0)) }));
+  const localOperationBusy = Boolean(localOperation && ['preparing', 'downloading', 'verifying', 'synthesizing'].includes(localOperation.phase));
+  const reviewDone = journey.steps.find(step => step.id === 'review')?.status === 'done';
+  const canOpenExport = exportReachable({ kind: project.kind, reviewDone, deliveryAssetCount: deliveryAssets.length });
+  const stepItems: StepBarItem[] = journey.steps.map(step => ({
+    id: step.id,
+    title: step.title,
+    status: step.status,
+    reachable: step.status !== 'upcoming'
+      || (step.id === 'export' && canOpenExport)
+      || (project.kind === 'video' && step.id === 'voice' && project.storyboardAvailable === true)
+      || (project.kind === 'video' && step.id === 'render' && (hasVideoGoRenderValue || Boolean(videoRevisionRequested)))
+      || (project.kind === 'video' && step.id === 'review' && hasVideoGoRenderValue),
+  }));
   const activeStepId = stepItems.find(item => item.id === selectedStepId && item.reachable)?.id ?? journey.nextStep.id;
   const activeStep = journey.steps.find(step => step.id === activeStepId) ?? journey.nextStep;
   const activeIndex = journey.steps.findIndex(step => step.id === activeStep.id);
   const previousStep = activeIndex > 0 ? stepItems[activeIndex - 1] : undefined;
-  const followingStep = stepItems[activeIndex + 1];
-  const briefDirty = activeStep.id === 'brief' && dirty;
-  const batchBlocked = project.kind === 'image' && (activeStep.id === 'images' || activeStep.id === 'review') && latestBatch !== undefined && latestBatch.status?.state !== 'ready';
   const reviewBlockMessage = running ? 'Há um processo em andamento. Acompanhe-o antes de revisar.' : !latestBatch ? 'Gere as imagens antes de revisar.' : !latestBatch.status ? 'Esta versão antiga não tem comprovação de processamento completo. Gere as imagens novamente para prepará-la.' : latestBatch.status.state !== 'ready' ? (latestBatch.status.message ?? 'Aguarde a rodada ficar pronta para revisar.') : undefined;
-  const nextLabel = briefDirty ? 'Salvar e continuar' : 'Próximo';
-  const stepAccepts = activeStep.id === 'texts' || activeStep.id === 'script' || activeStep.id === 'voice';
-  const stepAcceptReady = activeStep.id === 'texts' ? Boolean(visualReview?.ready) && !visualTextDirty && !project.formatAdaptation && !adaptationStarting
-    : activeStep.id === 'script' ? project.storyboardAvailable === true && !storyboardDirty
-    : narration?.mode === 'silent' || (Boolean(narration?.audioReady || narration?.ready) && !narrationDirty);
-  const stepReadyToAdvance = stepAccepts ? !running && stepAcceptReady : activeStep.status === 'done';
-  const nextDisabled = !briefDirty && (batchBlocked || !stepReadyToAdvance);
-  const nextAction = !followingStep ? undefined : briefDirty ? async () => { if (await save()) selectStep(followingStep.id); } : async () => { if (await acceptActiveStep()) selectStep(followingStep.id); };
-  const stepHint = briefDirty ? 'Você tem alterações no briefing ainda não salvas.' : batchBlocked ? reviewBlockMessage : activeStep.status === 'running' ? 'Aguarde o processo em andamento terminar.' : followingStep && activeStep.status !== 'done' ? 'Conclua esta etapa para liberar a próxima.' : undefined;
-  const stepDescription = project.kind === 'image' && activeStep.id === 'review' ? 'Marque cada imagem como Manter ou Refazer. Refazer gera uma nova versão só dessas imagens.' : project.kind === 'video' && activeStep.id === 'script' && project.storyboardAvailable && !project.storyboardReady ? 'O roteiro está disponível para edição e narração, mas ainda precisa de revisão no VideoGo antes do render.' : project.kind === 'video' && activeStep.id === 'export' ? 'Gere e revise copy e capas por formato. Entregue os arquivos aprovados em ZIP ou pasta.' : STEP_DESCRIPTION[activeStep.id];
+  const stepDescription = project.kind === 'image' && activeStep.id === 'review' ? 'Aprove cada imagem ou peça revisão. Depois, avance para a entrega.' : project.kind === 'video' && activeStep.id === 'script' && project.storyboardAvailable && !project.storyboardReady ? 'Revise as cenas e aprove o roteiro antes de continuar. A narração pode ser editada enquanto isso.' : project.kind === 'video' && activeStep.id === 'export' ? 'Gere e revise copy e capas por formato. Entregue os arquivos aprovados em ZIP ou pasta.' : STEP_DESCRIPTION[activeStep.id];
   const videoCorrectionBlock = project.kind === 'video' && project.storyboardAvailable ? (
     <div className="video-correction">
       <p className="field-help">Pedir correção altera o storyboard e volta o roteiro a rascunho. Depois, aprove o roteiro e renderize de novo.</p>
@@ -359,15 +479,96 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
       <button type="button" className="button secondary small" disabled={!videoCorrection.trim() || Boolean(running) || busy.has('agent')} onClick={() => { void requestVideoCorrection(); }}>Pedir correção ao agente</button>
     </div>
   ) : null;
+  const basicPostVideo = project.kind === 'video' && Boolean(project.sourceProjectId) && !project.storyboardCompositionReady;
+  const productionBusy = Boolean(running) || busy.has('agent') || !project.storyboardAvailable;
+  const postVideoCard = project.kind === 'video' && project.sourceProjectId ? (
+    <section className="video-production" aria-labelledby="video-production-title">
+      <h2 id="video-production-title">{project.storyboardCompositionReady ? 'Composição HTML encontrada' : 'Produzir cenas 3D e motion com Opus'}</h2>
+      <p className="field-help">
+        Claude Opus 5.5 cria o roteiro visual, as cenas 3D e a composição HTML/Three.js no VideoGo. A prévia rasteriza os frames diretamente do HTML. A produção não envia cenas para Codex/ImageGen; o Codex fica separado para gerar a capa da entrega. Revise e aprove o roteiro antes do render final.
+      </p>
+      <div className="heading-actions">
+        <button type="button" className="button small secondary" disabled={productionBusy} onClick={() => { void produceVideoWithAi(); }}>
+          <Sparkles size={15} />{project.storyboardCompositionReady ? 'Refazer com Opus' : 'Produzir com Opus'}
+        </button>
+      </div>
+    </section>
+  ) : null;
   const reviewItems = latestBatch ? latestBatch.assets.map(toReviewItem) : [];
   const reviewEditable = project.kind === 'image' && latestBatch?.status?.state === 'ready' && !running && reviewItems.length > 0;
   const keptCount = reviewItems.filter(item => item.decision === 'kept').length;
   const redoCount = reviewItems.filter(item => item.decision === 'redo').length;
   const pendingCount = reviewItems.filter(item => item.decision === 'pending').length;
-  const canReviseImages = reviewEditable && redoCount > 0 && pendingCount === 0 && Boolean(visualReview?.approved);
-  const canGenerateImages = !running && !adaptationStarting && !project.formatAdaptation && !visualTextDirty && !busy.has('image-generation') && Boolean(visualReview?.ready && visualReview.approved);
-  const imageGenerationMessage = project.formatAdaptation || adaptationStarting ? 'Adapte e revise os textos na etapa anterior antes de gerar imagens.' : visualTextDirty ? 'Salve ou descarte as alterações em Textos antes de gerar imagens.' : running ? 'Há um processo em andamento. Acompanhe-o antes de gerar imagens.' : !visualReview?.approved ? 'Aprove os textos na etapa anterior para liberar a geração.' : latestBatch?.status?.state === 'failed' ? (latestBatch.status.message ?? 'A última rodada está incompleta. Gere as imagens novamente.') : 'O Codex gera as artes a partir dos textos aprovados. O PostNow aplica formato e logo. Nenhum vídeo é iniciado.';
+  const canGenerateImages = !visualPreferencesDirty && !running && !adaptationStarting && !project.formatAdaptation && !visualTextDirty && !busy.has('image-generation') && Boolean(visualReview?.ready && visualReview.approved);
+  const imageGenerationMessage = visualPreferencesDirty ? 'Salve as preferências visuais do projeto antes de gerar imagens.' : project.formatAdaptation || adaptationStarting ? 'Adapte e revise os textos na etapa anterior antes de gerar imagens.' : visualTextDirty ? 'Salve ou descarte as alterações em Textos antes de gerar imagens.' : running ? 'Há um processo em andamento. Acompanhe-o antes de gerar imagens.' : !visualReview?.approved ? 'Aprove os textos na etapa anterior para liberar a geração.' : latestBatch?.status?.state === 'failed' ? (latestBatch.status.message ?? 'A última rodada está incompleta. Gere as imagens novamente.') : 'O Codex gera as artes a partir dos textos aprovados. O PostNow aplica formato e logo. Nenhum vídeo é iniciado.';
   const visibleImageItems = visibleAssets.map(toReviewItem);
+  const batchState = classifyBatch(latestBatch, legacyAssets.length > 0);
+  const textAgentRunning = projectJobs.some(job => job.status === 'running' && job.agentSession);
+  const imageAction = project.kind === 'image' ? imageFooterAction({
+    step: activeStep.id as 'brief' | 'texts' | 'images' | 'review' | 'export',
+    brief: { dirty, empty: !project.brief.trim() && !brief.trim() },
+    texts: {
+      present: hasTextContent(visualReview?.pages ?? []),
+      ready: Boolean(visualReview?.ready),
+      approved: Boolean(visualReview?.approved),
+      dirty: visualTextDirty,
+      invalid: visualTextInvalid,
+      blockingCount: visualReview?.blocking.length ?? 0,
+      unsupportedFormat: Boolean(project.unsupportedFormat),
+      adapting: Boolean(project.formatAdaptation || adaptationStarting),
+    },
+    images: {
+      expected: expectedImageCount,
+      batchState,
+      stale: isBatchStale(latestBatch, project.format),
+      formatLabel: POSTNOW_FORMATS[project.format as PostNowFormatId]?.label ?? project.format ?? '',
+      canGenerate: canGenerateImages,
+      canPreparePostnow: renderInputsReady,
+      blockMessage: renderBlockMessage,
+    },
+    review: { kept: keptCount, redo: redoCount, pending: pendingCount },
+    busy: { imageGeneration: busy.has('image-generation'), imageRevision: busy.has('image-revision') },
+    anyJobRunning: Boolean(running),
+    textAgentRunning,
+    agentBlocked: dirty || visualPreferencesDirty || (model === 'custom' && !customModel.trim()),
+  }) : undefined;
+  const voiceScenes = narrationDraft?.scenes ?? [];
+  const missingAudioScenes = voiceScenes.filter(scene => scene.narration.trim() && !scene.audioAttached && !scene.stray);
+  const voiceAssets = voiceScenes.map(scene => scene.audioPath ? project.assets.find(asset => asset.kind === 'audio' && asset.name === scene.audioPath) : undefined).filter((asset): asset is Asset => Boolean(asset));
+  const videoAction = project.kind === 'video' ? videoFooterAction({
+    step: activeStep.id as 'brief' | 'script' | 'voice' | 'render' | 'review' | 'export',
+    brief: { dirty, empty: !project.brief.trim() && !brief.trim() },
+    script: {
+      available: project.storyboardAvailable === true,
+      dirty: storyboardDirty,
+      invalid: storyboardInvalid,
+      issuesCount: project.storyboardIssues?.length ?? 0,
+      textAgentRunning,
+      promptPresent: Boolean(prompt.trim()),
+    },
+    agentBlocked: dirty || visualPreferencesDirty || (model === 'custom' && !customModel.trim()),
+    voice: {
+      loaded: Boolean(narrationDraft),
+      mode: narrationDraft?.mode,
+      dirty: narrationDirty,
+      active: Boolean(narrationDraft?.active),
+      scenesMissingAudio: missingAudioScenes.length,
+      strayScenes: voiceScenes.filter(scene => scene.stray).length,
+      audiosPendingApproval: voiceAssets.filter(asset => !asset.approved).length,
+      voiceChosen: Boolean(narrationDraft?.provider === 'local' ? narrationDraft.localVoice : narrationDraft?.voiceId),
+      elevenConfigured: snapshot.integrations.elevenLabs.configured,
+      anyManualAudio: voiceScenes.some(scene => ['upload', 'recording', 'local'].includes(scene.audioSource ?? '')),
+    },
+    storyboardReady: project.storyboardReady === true,
+    narrationBlocked,
+    render: { hasRender: hasVideoGoRenderValue, rendering: busy.has('render'), audioCheckUnavailable: audioUnavailable && narration?.mode === 'narrated' },
+    videoRevisionRequested: Boolean(videoRevisionRequested),
+    review: { latestApproved: Boolean(latestVideo?.approved) },
+    busy: { approving: busy.has('approve-storyboard'), rendering: busy.has('render'), narrationGeneration: busy.has('generate-narration') },
+    anyJobRunning: Boolean(running),
+  }) : undefined;
+  const footerAction: FooterAction | undefined = project.kind === 'image' ? imageAction : videoAction;
+  const selectedLocalVoice = localCatalog?.voices.find(voice => voice.engine === narrationDraft?.localVoice?.engine && voice.modelId === narrationDraft?.localVoice.modelId && voice.voiceId === narrationDraft?.localVoice.voiceId);
   const agentJobs = projectJobs.filter(job => job.agentSession).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const agentQuestionsJob = running ? undefined : agentJobs.find(job => job.status === 'succeeded');
   const agentQuestionsMessage = agentQuestionsJob ? lastAgentMessage(agentQuestionsJob.log) : '';
@@ -378,7 +579,7 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
   async function saveNarration(): Promise<boolean> {
     if (!narrationDraft) return false;
     const result = await run('save-narration', () => invoke<NarrationState>('projects.narration.save', {
-      id, voiceId: narrationDraft.voiceId, scenes: narrationDraft.scenes,
+      id, provider: narrationDraft.provider, localVoice: narrationDraft.localVoice, voiceId: narrationDraft.voiceId, scenes: narrationDraft.scenes,
     }), 'Narração salva no projeto.');
     if (result) { setNarration(result); setNarrationDraft(result); await refresh(); }
     return Boolean(result);
@@ -388,22 +589,29 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
     const result = await run('narration-mode', () => invoke<NarrationState>('projects.narration.setMode', { id, mode }));
     if (result) { setNarration(result); setNarrationDraft(result); setNarrationError(''); }
   }
-  async function chooseLocalVoiceModel() {
-    const path = await run('local-voice-model', () => invoke<string | undefined>('app.pick', { extensions: ['onnx'] }));
-    if (path) setLocalVoiceModel(path);
-  }
   async function generateLocalVoice(sceneId: string) {
-    if (!localVoiceModel || narrationDirty || narration?.mode !== 'narrated') return;
+    if (!narrationDraft?.localVoice || narrationDirty || narration?.mode !== 'narrated') return;
     const scene = narration.scenes.find(item => item.id === sceneId);
     if (!scene?.narration.trim()) return;
     if ((scene.audioAttached || scene.stray) && !await confirm('Substituir áudio da cena?', 'A geração local substituirá o áudio atual desta cena. O novo áudio precisará de revisão e aprovação antes do render.', 'Gerar áudio local')) return;
-    const result = await run('local-voice', () => invoke<NarrationState>('projects.narration.generateLocal', { id, sceneId, modelPath: localVoiceModel }), 'Áudio local gerado. Revise e aprove o arquivo antes do render.');
+    const selection = localCatalog?.voices.find(voice => voice.engine === narrationDraft.localVoice?.engine && voice.modelId === narrationDraft.localVoice.modelId && voice.voiceId === narrationDraft.localVoice.voiceId);
+    if (!selection?.supported || !localCatalog?.platformSupported || !localCatalog?.installedIds.includes(selection.id)) return;
+    const result = await run('local-voice', () => invoke<NarrationState>('projects.narration.generateLocal', { id, sceneId, voiceId: selection.id }), 'Áudio local gerado. Revise e aprove o arquivo antes do render.');
     if (result) { setNarration(result); setNarrationDraft(result); await refresh(); }
   }
   async function generateNarration() {
-    if (!narration || narrationDirty || !narrationDraft?.voiceId || narration.mode === 'silent') return;
+    if (narrationDraft?.provider === 'local') {
+      if (!narrationDraft.localVoice || narrationDirty || narration?.mode !== 'narrated') return;
+      const selected = localCatalog?.voices.find(voice => voice.engine === narrationDraft.localVoice?.engine && voice.modelId === narrationDraft.localVoice.modelId && voice.voiceId === narrationDraft.localVoice.voiceId);
+      if (!selected?.supported || !localCatalog?.platformSupported || !localCatalog?.installedIds.includes(selected.id)) return;
+      if (narration.scenes.some(scene => scene.narration.trim() && (scene.audioAttached || scene.stray)) && !await confirm('Substituir áudios existentes?', 'A geração local substituirá os áudios das cenas narradas. Os arquivos gerados precisarão de revisão e aprovação antes do render.', 'Gerar áudio local')) return;
+      const result = await run('local-voice', () => invoke<NarrationState>('projects.narration.generateLocal', { id, voiceId: selected.id }), 'Geração local iniciada. Revise e aprove os arquivos antes do render.');
+      if (result) { setNarration(result); setNarrationDraft(result); await refresh(); }
+      return;
+    }
+    if (!narration || narrationDirty || !narrationDraft?.voiceId || narrationDraft.provider !== 'elevenlabs' || narration.mode === 'silent') return;
     const voice = voices.find(item => item.id === narrationDraft.voiceId);
-    if (!await confirm('Gerar narração Eleven v4', `Isso aprova o texto e a voz ${voice?.name ?? narrationDraft.voiceId} e envia o texto ao ElevenLabs, o que pode consumir créditos. Os áudios enviados nas cenas narradas serão substituídos pelos gerados. Ao avançar, os áudios gerados são aprovados para o render.`, 'Gerar áudio')) return;
+    if (!await confirm('Gerar narração Eleven v4', `Isso aprova o texto e a voz ${voice?.name ?? narrationDraft.voiceId} e envia o texto ao ElevenLabs, o que pode consumir créditos. Os áudios das cenas narradas serão substituídos; as versões anteriores são preservadas. Revise e aprove cada novo áudio antes do render.`, 'Gerar áudio')) return;
     if (!narration.approved) {
       const approved = await run('approve-narration', () => invoke<NarrationState>('projects.narration.approve', { id, approved: true }));
       if (!approved) return;
@@ -441,6 +649,18 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
     }
     return true;
   }
+  async function saveVisualPreferences() {
+    const updated = await run('visual-preferences', () => invoke<ProjectDetail>('projects.visualPreferences', {
+      id,
+      useBrandImages: imagePreferenceDraft.useBrandImages,
+      ...(project.kind === 'image' ? {
+        imageBackgroundMode: imagePreferenceDraft.backgroundMode,
+        logoPolicy: imagePreferenceDraft.logoPolicy,
+        depictedPersonPolicy: imagePreferenceDraft.depictedPersonPolicy,
+      } : {}),
+    }), 'Preferências visuais salvas no projeto.');
+    if (updated) { setDetail(updated); await refresh(); }
+  }
   async function importAsset() {
     await run('import-asset', async () => {
       const selected = await invoke<string | string[] | undefined>('app.pick', { multiple: project.kind === 'image' });
@@ -456,17 +676,9 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
     const result = await run('delete-image', () => invoke<ProjectDetail>('projects.deleteAsset', { id, path: asset.name, confirm: true }), 'Imagem apagada do projeto e do disco.');
     if (result) { setDetail(result); setSelectedPath(null); }
   }
-  async function approve(asset: Asset) {
+  async function approveDelivery(asset: Asset) {
     const result = await run('approve', () => invoke<ProjectDetail>('projects.approve', { id, path: asset.path, approved: !asset.approved }));
-    if (result) {
-      setDetail(result);
-      if (result.kind === 'video') {
-        try {
-          const state = await invoke<NarrationState>('projects.narration', { id });
-          setNarration(state); setNarrationDraft(draft => narrationChanged(narration, draft) ? draft : state);
-        } catch (error) { setNarrationError(errorMessage(error)); }
-      }
-    }
+    if (result) setDetail(result);
   }
   async function exportPackage() {
     const output = await run('export', async () => {
@@ -490,18 +702,10 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
     const result = await run('derive', () => invoke<Project>('projects.bridge', { id, kind: targetKind, format, ...(project.kind === 'image' && activeBatchId ? { batchId: activeBatchId } : {}) }), 'Projeto derivado com sucesso.');
     if (result) { await refresh(); onOpen(result.id); }
   }
-  function chooseLogoPolicy(request: { title: string; description: string; action: string }): Promise<LogoPolicy | undefined> {
-    return choose({ ...request, groupLabel: 'Onde aplicar a logo oficial?', options: LOGO_POLICY_OPTIONS, initial: 'cover-closing' }).then(value => (isLogoPolicy(value) ? value : undefined));
-  }
-  async function render() {
+  async function render(options: { batchId?: string } = {}) {
     if (project.kind === 'image') {
-      const logoPolicy = await chooseLogoPolicy({
-        title: 'Preparar imagens no PostNow',
-        description: `O PostNow vai sincronizar a logo oficial da marca ${brand?.name ?? ''} e aplicá-la às imagens reais desta rodada, conforme a escolha abaixo. A revisão editorial e a aprovação para exportação continuam separadas. O PostNow não gera imagens por IA.`,
-        action: 'Preparar no PostNow',
-      });
-      if (!logoPolicy) return;
-      const job = await run('render', () => invoke<Job>('projects.render', { id, logoPolicy, ...(activeBatchId ? { batchId: activeBatchId } : {}) }), 'Preparando imagens no PostNow…');
+      const batchId = options.batchId ?? activeBatchId;
+      const job = await run('render', () => invoke<Job>('projects.render', { id, ...(batchId ? { batchId } : {}) }), 'Preparando imagens no PostNow…');
       if (job) {
         trackJob(job);
         setSelectedPath(null);
@@ -509,40 +713,102 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
       return;
     }
     if (project.kind === 'video' && !project.storyboardReady) { await approveAndRenderVideo(); return; }
-    if (!await confirm('Renderizar vídeo com VideoGo', `O VideoGo executará o storyboard no formato ${project.format ?? 'reels'} e gerará o vídeo MP4. A narração só é sintetizada após aprovação explícita.`, 'Iniciar renderização')) return;
+    if (!await confirm('Renderizar vídeo com VideoGo', `O VideoGo executará o storyboard no formato ${project.format ?? 'reels'} e gerará o vídeo MP4. A narração só é sintetizada após aprovação explícita.${basicPostVideo ? ' Atenção: este vídeo ainda usa as artes do post com movimento básico. Para um resultado melhor, cancele e use “Produzir vídeo com IA”.' : ''}`, 'Iniciar renderização')) return;
     const job = await run('render', () => invoke<Job>('projects.render', { id }), 'Renderizando vídeo…');
     if (job) {
       trackJob(job);
+      setAfterJob({ jobId: job.id, step: 'review' });
       setSelectedPath(null);
     }
   }
   async function approveAndRenderVideo() {
-    if (!await confirm('Aprovar roteiro e renderizar vídeo?', `Confirme que revisou cenas, textos, fatos e fontes. O VideoGo validará o storyboard, o aprovará e renderizará o MP4 no formato ${project.format ?? 'reels'}. A narração só é sintetizada após aprovação explícita.`, 'Aprovar e renderizar')) return;
+    if (!await confirm('Aprovar roteiro e renderizar vídeo?', `Confirme que revisou cenas, textos, fatos e fontes. O VideoGo validará o storyboard, o aprovará e renderizará o MP4 no formato ${project.format ?? 'reels'}. A narração só é sintetizada após aprovação explícita.${basicPostVideo ? ' Atenção: este vídeo ainda usa as artes do post com movimento básico. Para um resultado melhor, cancele e use “Produzir vídeo com IA”.' : ''}`, 'Aprovar e renderizar')) return;
     const approved = await run('approve-storyboard', () => invoke<ProjectDetail>('projects.storyboard.approve', { id, confirm: true }), 'Roteiro validado e aprovado.');
     if (!approved) return;
     setDetail(approved);
     const job = await run('render', () => invoke<Job>('projects.render', { id }), 'Renderizando vídeo…');
-    if (job) { trackJob(job); setSelectedPath(null); }
+    if (job) { trackJob(job); setAfterJob({ jobId: job.id, step: 'review' }); setSelectedPath(null); }
   }
   async function requestVideoCorrection() {
     const request = videoCorrection.trim();
-    if (!request) return;
-    if (!await confirm('Pedir correção ao agente?', 'O agente altera o storyboard.json conforme o pedido e o roteiro volta a rascunho. Aprove de novo antes do render.', 'Pedir correção')) return;
-    const correctionPrompt = [
-      'Corrija o storyboard.json deste projeto de vídeo conforme o pedido abaixo.',
-      'Mantenha a marca selecionada, o formato e as fontes verificadas. Altere somente o necessário.',
-      'Não gere narração, não renderize e não marque o roteiro como ready.',
-      '',
-      'Pedido de correção:',
-      request,
-    ].join('\n');
-    const job = await run('agent', () => invoke<Job>('agents.start', { id, provider, model: selectedModel || undefined, prompt: correctionPrompt, confirm: true }), 'Correção enviada ao agente.');
-    if (job) { setVideoCorrection(''); setSelectedPath(null); trackJob(job); }
+    if (!request || !latestVideo) return;
+    if (!await confirm('Pedir revisão ao agente?', 'O Claude Opus 5.5 altera o roteiro e a animação conforme o pedido e confere uma prévia. Depois, renderize de novo; se o roteiro voltar a rascunho, aprove-o antes. A narração já gerada não é refeita.', 'Pedir revisão')) return;
+    if (latestVideo.approved) {
+      const updated = await run('approve', () => invoke<ProjectDetail>('projects.approve', { id, path: latestVideo.path, approved: false }));
+      if (!updated) return;
+      setDetail(updated);
+    }
+    const contactSheet = project.assets.find(asset => /^renders\/(?:review|final)\/folha-contato\.png$/i.test(asset.name.replace(/\\/g, '/')))?.path;
+    const job = await run('agent', () => invoke<Job>('agents.start', { id, provider, model: selectedModel || undefined, prompt: videoRevisionPrompt(request, { contactSheet }), confirm: true }), 'Revisão enviada ao agente.');
+    if (job) {
+      setVideoRevisionRequested({ path: latestVideo.path, stale: true });
+      setVideoCorrection('');
+      setRevisionOpen(false);
+      setSelectedPath(null);
+      setAfterJob({ jobId: job.id, step: 'render' });
+      trackJob(job);
+    }
   }
-  function imageRequestFor(briefText: string) { return [...new Set([initialPrompt.trim(), briefText.trim()])].filter(Boolean).join('\n\n'); }
+
+  async function approveLatestVideo() {
+    if (!latestVideo || !project.storyboardReady || videoRevisionRequested?.path === latestVideo.path) return;
+    for (const older of reviewVideos.slice(1).filter(asset => asset.approved)) {
+      const updated = await run('approve', () => invoke<ProjectDetail>('projects.approve', { id, path: older.path, approved: false }));
+      if (!updated) return;
+      setDetail(updated);
+    }
+    const updated = await run('approve', () => invoke<ProjectDetail>('projects.approve', { id, path: latestVideo.path, approved: !latestVideo.approved }));
+    if (!updated) return;
+    setDetail(updated);
+    try {
+      const state = await invoke<NarrationState>('projects.narration', { id });
+      setNarration(state);
+      setNarrationDraft(draft => narrationChanged(narration, draft) ? draft : state);
+    } catch (error) {
+      setNarrationError(errorMessage(error));
+    }
+  }
+  async function applyVideoStyle(choice: VideoStyleChoice) {
+    const fromReview = activeStep.id === 'review';
+    const confirmation = fromReview
+      ? {
+          title: 'Trocar estilo e voltar à renderização?',
+          description: 'A IA vai adaptar o visual e preparar uma nova prévia. Quando terminar, você volta para Renderizar no VideoGo e confirma a geração do novo MP4. O vídeo atual fica guardado para comparação; a narração não será gerada novamente.',
+          action: 'Aplicar e voltar ao render',
+        }
+      : {
+          title: 'Trocar estilo do vídeo?',
+          description: 'A IA vai adaptar o visual e preparar uma nova prévia. Depois, aprove o roteiro e confirme a renderização para gerar outro MP4. O vídeo atual fica guardado para comparação; a narração não será gerada novamente.',
+          action: 'Aplicar estilo',
+        };
+    if (!await confirm(confirmation.title, confirmation.description, confirmation.action)) return;
+    const updated = await run('video-style', () => invoke<ProjectDetail>('projects.videoStyle', { id, ...choice }));
+    if (!updated?.visualStyle) return;
+    setDetail(updated);
+    const contactSheet = project.assets.find(asset => /^renders\/(?:review|final)\/folha-contato\.png$/i.test(asset.name.replace(/\\/g, '/')))?.path;
+    const job = await run('agent', () => invoke<Job>('agents.start', { id, provider, model: selectedModel || undefined, prompt: videoStylePrompt(updated.visualStyle!, { contactSheet }), confirm: true }), 'Mudança de estilo enviada ao agente.');
+    if (job) { setRevisionOpen(false); setSelectedPath(null); setAfterJob({ jobId: job.id, step: 'render' }); trackJob(job); }
+  }
+  const videoStylePanel = project.kind === 'video' && project.storyboardAvailable ? (
+    <VideoStylePanel current={project.visualStyle} disabled={Boolean(running) || busy.has('agent') || busy.has('video-style')} defaultOpen={activeStep.id === 'render'} onApply={choice => { void applyVideoStyle(choice); }} />
+  ) : null;
+  async function produceVideoWithAi() {
+    if (!await confirm('Produzir vídeo com Claude Opus 5.5', 'Claude Opus 5.5 vai criar as cenas 3D e a composição HTML/Three.js, renderizar e conferir uma prévia no VideoGo. A produção não chama Codex/ImageGen para criar frames. O roteiro fica em rascunho para sua revisão; o render final continua sendo uma ação separada.', 'Produzir com Opus')) return;
+    const job = await run('agent', () => invoke<Job>('agents.start', {
+      id, provider: 'claude', model: VIDEO_AGENT_MODEL,
+      prompt: motionDirectorPrompt({ fromPost: Boolean(project.sourceProjectId) }), confirm: true,
+    }), 'Produção de vídeo enviada ao Claude Opus 5.5.');
+    if (job) {
+      setAfterJob({ jobId: job.id, step: 'script' });
+      setSelectedPath(null);
+      trackJob(job);
+    }
+  }
+  function imageRequestFor(briefText: string) { return [...new Set([prompt.trim(), briefText.trim()])].filter(Boolean).join('\n\n'); }
   const imageRequest = imageRequestFor(project.brief);
   const agentRequest = project.kind === 'image' ? imageRequest : prompt.trim();
   async function startAgent(options?: { request?: string; confirmed?: boolean }) {
+    if (visualPreferencesDirty) return;
     const request = options?.request ?? agentRequest;
     if (!options?.confirmed) {
       const modelLabel = ` usando ${selectedModel}${provider === 'codex' ? ' · xhigh' : ''}`;
@@ -553,6 +819,13 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
     }
     const job = await run('agent', () => invoke<Job>('agents.start', { id, provider, model: selectedModel || undefined, prompt: request, confirm: true }), 'Sessão de IA iniciada.');
     if (job) { rootPromptRef.current = request; setPrompt(''); setSelectedPath(null); trackJob(job); }
+  }
+
+  async function cancelJob(job: Job) {
+    if (!await confirm('Cancelar esta geração?', 'O processo é interrompido e o que ainda não terminou é descartado. Arquivos já finalizados continuam no projeto. Créditos já consumidos não são devolvidos. Depois você pode revisar o que quiser mudar e gerar de novo.', 'Interromper geração')) return;
+    // Rastreia o job para o card continuar na tela mostrando "Cancelado." mesmo quando a geração foi aberta antes (outra tela ou sessão).
+    setTrackedJobId(job.id);
+    await run(`cancel-${job.id}`, () => invoke('jobs.cancel', { id: job.id }), 'Geração cancelada. Você pode revisar e gerar de novo.');
   }
 
   function trackJob(job: Job) {
@@ -566,14 +839,26 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
       throw new Error(errorMessage(error));
     }
   }
-  async function saveVisualText(pages: VisualTextEditPage[]) {
-    setDetail(await invokeEditor<ProjectDetail>('projects.visual.save', { projectId: id, pages }));
+  async function saveVisualText(pages: VisualTextEditPage[]): Promise<ProjectDetail> {
+    const result = await invokeEditor<ProjectDetail>('projects.visual.save', { projectId: id, pages });
+    setDetail(result);
+    return result;
   }
-  async function saveStoryboardScenes(scenes: VisualTextEditScene[]) {
-    setDetail(await invokeEditor<ProjectDetail>('projects.storyboard.save', { projectId: id, scenes }));
+  async function saveStoryboardScenes(scenes: VisualTextEditScene[]): Promise<ProjectDetail> {
+    const result = await invokeEditor<ProjectDetail>('projects.storyboard.save', { projectId: id, scenes });
+    setDetail(result);
+    return result;
   }
   async function approveStoryboard(): Promise<boolean> {
     const result = await run('approve-storyboard', () => invoke<ProjectDetail>('projects.storyboard.approve', { id, confirm: true }), 'Roteiro validado e aprovado.');
+    if (result) setDetail(result);
+    return Boolean(result);
+  }
+
+  async function approveVisualContentFor(saved: ProjectDetail): Promise<boolean> {
+    const review = saved.visualReview;
+    if (!review || saved.formatAdaptation || adaptationStarting || !review.ready || review.blocking.length > 0) return false;
+    const result = await run('approve-visual-content', () => invoke<ProjectDetail>('projects.visual.approve', { id, approved: true, contentHash: review.contentHash }), 'Textos e fontes aprovados para esta versão.');
     if (result) setDetail(result);
     return Boolean(result);
   }
@@ -583,6 +868,88 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
     const result = await run('approve-visual-content', () => invoke<ProjectDetail>('projects.visual.approve', { id, approved: true, contentHash: visualReview.contentHash }), 'Textos e fontes aprovados para esta versão.');
     if (result) setDetail(result);
     return Boolean(result);
+  }
+
+  async function saveEditorAndApprove(editorRef: { current: TextEditorHandle | null }, approve: (detail: ProjectDetail) => Promise<boolean>): Promise<boolean> {
+    const result = await editorRef.current?.save();
+    if (!result || !result.ok) return false;
+    return approve(result.detail);
+  }
+
+  async function performFooterAction(action: FooterAction | undefined) {
+    if (!action?.enabled) return;
+    const next = project.kind === 'image' ? 'texts' : 'script';
+    switch (action.kind) {
+      case 'save-brief':
+        if (await save()) selectStep(next);
+        break;
+      case 'continue':
+        if (activeStep.id === 'brief') selectStep(next);
+        else if (activeStep.id === 'texts') selectStep('images');
+        else if (activeStep.id === 'script') selectStep('voice');
+        else if (activeStep.id === 'voice') selectStep('render');
+        else if (activeStep.id === 'images') { setSelectedBatchId('latest'); selectStep('review'); }
+        else if (activeStep.id === 'render') selectStep('review');
+        else if (activeStep.id === 'review') selectStep('export');
+        break;
+      case 'prepare-texts':
+      case 'prepare-script':
+        await startAgent();
+        break;
+      case 'approve-texts':
+        if (await approveVisualContent()) selectStep('images');
+        break;
+      case 'save-approve-texts':
+        if (await saveEditorAndApprove(visualTextEditorRef, approveVisualContentFor)) selectStep('images');
+        break;
+      case 'generate':
+      case 'regenerate':
+        await generateImages();
+        break;
+      case 'prepare-postnow':
+        if (latestBatch) await render({ batchId: latestBatch.id });
+        break;
+      case 'go-review':
+        setSelectedBatchId('latest');
+        selectStep('review');
+        break;
+      case 'revise':
+        setSelectedStepId('images');
+        await reviseImages();
+        break;
+      case 'deliver':
+        selectStep('export');
+        break;
+      case 'approve-script':
+        if (await approveStoryboard()) selectStep('voice');
+        break;
+      case 'save-approve-script':
+        if (await saveEditorAndApprove(storyboardEditorRef, async () => approveStoryboard())) selectStep('voice');
+        break;
+      case 'go-script':
+        selectStep('script');
+        break;
+      case 'save-voice':
+        await saveNarration();
+        break;
+      case 'generate-audio':
+        await generateNarration();
+        break;
+      case 'approve-audio':
+        if (await acceptNarrationAudio()) selectStep('render');
+        break;
+      case 'approve-render':
+        await approveAndRenderVideo();
+        break;
+      case 'render':
+        await render();
+        break;
+      case 'go-render':
+        selectStep('render');
+        break;
+      case 'wait':
+        break;
+    }
   }
 
   async function acceptNarrationAudio(): Promise<boolean> {
@@ -603,22 +970,10 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
     return true;
   }
 
-  async function acceptActiveStep(): Promise<boolean> {
-    if (activeStep.id === 'texts') return visualReview?.approved ? true : approveVisualContent();
-    if (activeStep.id === 'script') return project.storyboardReady ? true : approveStoryboard();
-    if (activeStep.id === 'voice') return acceptNarrationAudio();
-    return true;
-  }
   async function generateImages() {
     if (!visualReview?.ready || !visualReview.approved || project.formatAdaptation || adaptationStarting || visualTextDirty) return;
-    const logoPolicy = await chooseLogoPolicy({
-      title: 'Gerar imagens com Codex + PostNow',
-      description: `O Codex GPT-6 Luna xhigh usará a ferramenta nativa de imagem para gerar ${visualReview.pages.length} ${visualReview.pages.length === 1 ? 'arte' : 'artes'} a partir dos textos aprovados. O PostNow ajustará o formato e aplicará a logo oficial conforme a escolha abaixo. Confira o enquadramento antes de aprovar. Esta ação não inicia vídeo.`,
-      action: 'Gerar imagens',
-    });
-    if (!logoPolicy) return;
-    const job = await run('image-generation', () => invoke<Job>('agents.generateImages', { id, confirm: true, logoPolicy }), 'Gerando artes no Codex…');
-    if (job) { setSelectedPath(null); trackJob(job); }
+    const job = await run('image-generation', () => invoke<Job>('agents.generateImages', { id, confirm: true }), 'Gerando artes no Codex…');
+    if (job) { setSelectedPath(null); setAfterJob({ jobId: job.id, step: 'review' }); trackJob(job); }
   }
   async function startFormatAdaptation() {
     if (adaptationLock.current || running || busy.has('agent') || visualTextDirty) return;
@@ -695,7 +1050,7 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
     if (result) setDetail(result);
   }
   async function redoImage(path: string, note: string) {
-    const result = await run('review-image', () => invoke<ProjectDetail>('projects.review', { id, path, redo: true, note }));
+    const result = await run(`review-image-note:${path}`, () => invoke<ProjectDetail>('projects.review', { id, path, redo: true, note }));
     if (result) setDetail(result);
   }
   async function clearImageDecision(path: string) {
@@ -709,15 +1064,17 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
     if (asset) void deleteImage(asset);
   }
   async function reviseImages() {
-    const logoPolicy = await chooseLogoPolicy({ title: 'Gerar nova versão das imagens marcadas', description: `O Codex refaz somente ${redoCount === 1 ? 'a imagem marcada' : `as ${redoCount} imagens marcadas`} para refazer e mantém as aprovadas. O PostNow ajusta formato e aplica a logo oficial conforme a escolha abaixo. Esta ação não inicia vídeo.`, action: 'Gerar nova versão' });
-    if (!logoPolicy) return;
-    const job = await run('image-revision', () => invoke<Job>('agents.reviseImages', { id, confirm: true, logoPolicy }), 'Gerando nova versão das imagens marcadas…');
+    const job = await run('image-revision', () => invoke<Job>('agents.reviseImages', { id, confirm: true }), 'Gerando nova versão das imagens marcadas…');
     if (job) { setSelectedPath(null); trackJob(job); }
   }
   async function generateVideoDelivery(coverOnly = false) {
+    if (visualPreferencesDirty) return;
     const label = deliveryFormat === 'youtube' ? 'YouTube' : deliveryFormat === 'reels' ? 'Reels' : 'Feed quadrado';
     const what = coverOnly ? 'a capa' : 'capa e copy';
-    if (!await confirm(`Gerar ${what} para ${label}`, `O Codex ImageGen cria a capa com o título, a pessoa das fotos de referência e as cores da marca; o Studio aplica a logo oficial por cima.${coverOnly ? ' A copy atual é mantida.' : ' Depois, o Claude Opus 5.5 escreve a copy.'} A geração pode consumir créditos. Arquivos anteriores deste formato, inclusive os aprovados, serão substituídos e precisarão de nova aprovação.`, `Gerar ${what}`)) return;
+    const photoDirection = imagePreferenceDraft.useBrandImages
+      ? 'com fotos autorizadas da marca quando forem pertinentes'
+      : 'sem usar fotos nem retratos da marca';
+    if (!await confirm(`Gerar ${what} para ${label}`, `O Codex ImageGen cria a capa com o título, ${photoDirection} e as cores da marca; o Studio aplica a logo oficial por cima.${coverOnly ? ' A copy atual é mantida.' : ' Depois, o Claude Opus 5.5 escreve a copy.'} A geração pode consumir créditos. Arquivos anteriores deste formato, inclusive os aprovados, serão substituídos e precisarão de nova aprovação.`, `Gerar ${what}`)) return;
     const job = await run('video-delivery', () => invoke<Job>('agents.generateVideoDelivery', { id, format: deliveryFormat, coverOnly, confirm: true }), coverOnly ? 'Gerando capa no Codex ImageGen…' : 'Gerando capa no Codex ImageGen e copy no Claude…');
     if (job) trackJob(job);
   }
@@ -741,6 +1098,7 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
 
   return (
     <>
+      {arcadeOpen && <AIEscapeDialog onClose={() => setArcadeOpen(false)} />}
       {agentQuestionsOpen && agentQuestionsJob && (
         <AgentQuestionsDialog
           key={agentQuestionsJob.id}
@@ -767,7 +1125,7 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
             <FolderOpen size={16} />Abrir pasta
           </button>
           {agentQuestionsClosed && (
-            <button className="button primary" onClick={() => setClosedAgentJobId(null)}>
+            <button className="button secondary" onClick={() => setClosedAgentJobId(null)}>
               <Send size={16} aria-hidden="true" />Responder perguntas do agente
             </button>
           )}
@@ -782,11 +1140,11 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
           title={activeStep.title}
           description={stepDescription}
           footer={(
-            <StepNav onBack={previousStep?.reachable ? () => selectStep(previousStep.id) : undefined} nextLabel={nextLabel} onNext={nextAction} nextDisabled={nextDisabled} hint={stepHint} />
+            <StepNav onBack={previousStep?.reachable ? () => selectStep(previousStep.id) : undefined} nextLabel={footerAction?.label} onNext={() => { void performFooterAction(footerAction); }} nextDisabled={!footerAction?.enabled} hint={footerAction?.hint} />
           )}
         >
           {trackedJob && (
-            <GenerationProgress title={trackedJob.title} job={trackedJob} state={progressStateFor(trackedJob)} onOpenTerminal={() => onOpenTerminal(trackedJob)} />
+            <GenerationProgress title={trackedJob.title} job={trackedJob} state={progressStateFor(trackedJob)} onOpenTerminal={() => onOpenTerminal(trackedJob)} onOpenGame={() => setArcadeOpen(true)} onCancel={() => { void cancelJob(trackedJob); }} cancelling={busy.has(`cancel-${trackedJob.id}`)} />
           )}
           {project.kind === 'video' && activeStep.id === 'review' && (
           <section className="preview-panel" id="project-preview">
@@ -822,32 +1180,43 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
 
             <div className="media-stage">
               {reviewSelected ? (
-                <Media key={reviewSelected.path} projectId={project.id} asset={reviewSelected} />
+                <Media key={reviewSelected.path} projectId={project.id} asset={reviewSelected} large />
               ) : (
                 <Empty icon={<Film />} headingLevel={3} title="Ainda não há vídeo para revisar">
-                  {!narration ? 'Carregando o modo de narração…' : audioCheckUnavailable && narration.mode === 'narrated' ? 'Não foi possível verificar o áudio dos vídeos. Confira se o FFprobe está instalado e tente novamente.' : 'Nenhum vídeo compatível com o modo de narração foi encontrado. Renderize o vídeo na etapa anterior.'}
+                  {!narration ? 'Carregando o modo de narração…' : audioUnavailable && narration.mode === 'narrated' ? 'Não foi possível verificar o áudio dos vídeos. Confira se o FFprobe está instalado e tente novamente.' : 'Nenhum vídeo compatível com o modo de narração foi encontrado. Renderize o vídeo na etapa anterior.'}
                 </Empty>
               )}
             </div>
+            {reviewSelected && reviewSelected.path === latestVideo?.path && !project.storyboardReady && (
+              <p className="inline-warning" role="status">Vídeo possivelmente desatualizado. Aprove o roteiro e renderize a versão atualizada antes de entregar.</p>
+            )}
 
             {reviewSelected && (
-              <div className="asset-review">
+              <div className="asset-review video-decision">
                 <div>
                   <strong title={reviewSelected.name}>{reviewSelected.name}</strong>
-                  <span>{reviewSelected.approved ? 'Aprovado para exportação' : 'Aguardando sua revisão'}</span>
+                  <span>{reviewSelected.path !== latestVideo?.path ? 'Versão anterior — não bloqueia a entrega.' : reviewSelected.approved ? 'Aprovado para exportação' : 'Assista ao vídeo e decida: aprovar ou pedir revisão.'}</span>
                 </div>
                 <div className="heading-actions">
-                  <button className={`button small ${reviewSelected.approved ? 'approved' : ''}`} disabled={busy.has('approve')} onClick={() => { void approve(reviewSelected); }}>
-                    {reviewSelected.approved ? <CheckCheck size={15} /> : <Check size={15} />}
-                    {reviewSelected.approved ? 'Remover aprovação' : 'Aprovar arquivo'}
-                  </button>
+                  <DecisionToggle kind="approve" active={Boolean(reviewSelected.approved)} label={reviewSelected.approved ? 'Aprovado' : 'Aprovar'} ariaLabel={`Aprovar vídeo ${reviewSelected.name}`} title={reviewSelected.approved ? 'Clique para desfazer' : undefined} disabled={busy.has('approve') || Boolean(running) || reviewSelected.path !== latestVideo?.path || !project.storyboardReady || videoRevisionRequested?.path === latestVideo?.path} onClick={() => { void approveLatestVideo(); }} />
+                  <DecisionToggle kind="revision" active={videoRevisionRequested?.path === latestVideo?.path} label={videoRevisionRequested?.path === latestVideo?.path ? 'Revisão solicitada' : 'Pedir revisão'} ariaLabel={`Pedir revisão do vídeo ${reviewSelected.name}`} title={videoRevisionRequested?.path === latestVideo?.path ? 'Pedido enviado ao agente' : undefined} disabled={Boolean(running) || busy.has('agent') || reviewSelected.path !== latestVideo?.path || videoRevisionRequested?.path === latestVideo?.path} onClick={() => setRevisionOpen(open => !open)} />
+                  <button type="button" className="button small secondary" onClick={() => selectStep('script')}>Editar cenas</button>
                 </div>
               </div>
             )}
+            {reviewSelected && revisionOpen && (
+              <div className="video-correction" id="video-revision">
+                <label htmlFor="video-correction">O que mudar no vídeo?</label>
+                <p className="field-help">O Claude Opus 5.5 altera o roteiro e a animação conforme o pedido e confere uma prévia. Quando terminar, renderize de novo para ver a nova versão; o vídeo atual continua disponível para comparação. A narração já gerada não é refeita.</p>
+                <textarea id="video-correction" className="project-editor" rows={4} value={videoCorrection} disabled={Boolean(running) || busy.has('agent')} onChange={event => setVideoCorrection(event.target.value)} placeholder="Ex.: o gancho está lento; deixe a palavra “filhos” em destaque; troque a transição da cena 3; a fonte da estatística está errada." />
+                <button type="button" className="button small secondary" disabled={!videoCorrection.trim() || Boolean(running) || busy.has('agent')} onClick={() => { void requestVideoCorrection(); }}>
+                  <Send size={15} />Enviar revisão ao agente
+                </button>
+              </div>
+            )}
+            {reviewSelected && videoStylePanel}
           </section>
           )}
-
-          {project.kind === 'video' && activeStep.id === 'review' && videoCorrectionBlock}
 
           {project.kind === 'video' && activeStep.id === 'voice' && (
             <section className="narration-panel" id="narration-panel">
@@ -859,7 +1228,7 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
                   </button>
                 </div>
               </div>
-              {!snapshot.integrations.elevenLabs.configured && (
+              {narrationDraft?.provider === 'elevenlabs' && !snapshot.integrations.elevenLabs.configured && (
                 <div className="voice-setup-callout">
                   <p className="field-help">A voz é opcional. Configure sua API key, consulte vozes e veja os passos seguros para clonagem em Motores &amp; Setup. Eleven v4 só gera áudio depois da sua confirmação, e avançar aprova os áudios gerados.</p>
                   <button type="button" className="button small secondary" onClick={() => { void openVoiceSetupSafely(); }}><AudioLines size={14} />Configurar voz do VideoGo</button>
@@ -876,24 +1245,50 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
                     <p className="field-help">Sem narração, os textos e áudios ficam guardados para você reativar depois. Esta escolha não aprova o roteiro nem os arquivos.</p>
                     {narrationDirty && <p className="field-help">Salve as alterações antes de mudar esta escolha.</p>}
                   </fieldset>
-                  <div className="narration-local">
-                    <strong>Voz IA local · Piper</strong>
-                    <p className="field-help">Instale o executável Piper no PATH e selecione um modelo de voz .onnx já disponível no computador, com o arquivo .onnx.json ao lado. Nada é baixado ou enviado. Gere por cena; avançar aprova os áudios antes do render.</p>
-                    <button type="button" className="button small secondary" disabled={Boolean(running) || busy.has('local-voice')} onClick={() => { void chooseLocalVoiceModel(); }}>Selecionar modelo local</button>
-                    <span className="field-help">{localVoiceModel ? `Modelo: ${localVoiceModel}` : 'Nenhum modelo selecionado.'}</span>
-                  </div>
-                  <label className="narration-voice">
-                    Voz ElevenLabs
-                    <select
-                      disabled={Boolean(running) || busy.has('local-voice')}
-                      value={narrationDraft.voiceId ?? ''}
-                      onChange={event => setNarrationDraft(current => current ? { ...current, voiceId: event.target.value || undefined, approved: false, audioReady: false, audioApproved: false } : current)}
-                    >
-                      <option value="">Selecione uma voz</option>
-                      {voices.map(voice => <option value={voice.id} key={voice.id}>{voice.name}{voice.isClone ? ' · clonada' : ''}</option>)}
-                    </select>
-                  </label>
-                  {selectedVoice?.previewUrl && <audio className="voice-preview" src={selectedVoice.previewUrl} controls preload="none" aria-label={`Ouvir amostra da voz ${selectedVoice.name}`} />}
+                  <fieldset className="voice-provider">
+                    <legend>Motor de voz</legend>
+                    <label><input type="radio" name="narration-provider" checked={narrationDraft.provider === 'local'} disabled={Boolean(running) || busy.has('local-voice') || localOperationBusy} onChange={() => setNarrationDraft(current => current ? { ...current, provider: 'local', approved: false, audioReady: false, audioApproved: false } : current)} /> Voz local</label>
+                    <label><input type="radio" name="narration-provider" checked={narrationDraft.provider === 'elevenlabs'} disabled={Boolean(running) || busy.has('local-voice') || localOperationBusy} onChange={() => setNarrationDraft(current => current ? { ...current, provider: 'elevenlabs', approved: false, audioReady: false, audioApproved: false } : current)} /> ElevenLabs · online</label>
+                  </fieldset>
+                  {narrationDraft.provider === 'local' ? (
+                    <section className="narration-local" aria-labelledby="local-voices-title">
+                      <div className="local-catalog-heading"><div><h3 id="local-voices-title">Catálogo de vozes locais</h3><p className="field-help">Navegar e selecionar não baixa nem sintetiza. Instale e sintetize a audição em ações separadas.</p></div></div>
+                      {localCatalog && !localCatalog.python311Available && <p className="catalog-state" role="status">CPython 3.11 não foi encontrado. Instale-o separadamente; o Studio não baixa nem instala Python automaticamente.</p>}
+                      {localCatalog && !localCatalog.platformSupported && localCatalog.unsupportedReason && <p className="catalog-state" role="status">{localCatalog.unsupportedReason}</p>}
+                      {localCatalog?.exclusions.length ? <details className="catalog-state"><summary>Por que outras opções estão indisponíveis?</summary><ul>{localCatalog.exclusions.map(item => <li key={item.source}><strong>{item.source}</strong>: {item.reason}</li>)}</ul></details> : null}
+                      {(localCatalogError || localCatalog?.error) && <ErrorNotice message={localCatalogError || localCatalog?.error || ''} />}
+                      {localOperationError && <p className="catalog-state" role="alert">{localOperationError}</p>}
+                      {localOperation && <div className="local-operation" role={localOperation.phase === 'failed' ? 'alert' : 'status'} aria-live={localOperation.phase === 'failed' ? 'assertive' : 'polite'}>
+                        <span>{localOperation.kind === 'install' ? 'Instalação' : 'Síntese da audição'} · {localOperation.phase}: {localOperation.message}</span>
+                        {localOperation.progress !== undefined && <progress max="1" value={localOperation.progress} aria-label={`Progresso ${localOperation.kind === 'install' ? 'da instalação' : 'da síntese'}`} />}
+                        {['preparing', 'downloading', 'verifying', 'synthesizing'].includes(localOperation.phase) && <button type="button" className="button small secondary" onClick={() => { void cancelLocalOperation(); }}>Cancelar operação</button>}
+                      </div>}
+                      <div className="catalog-filters">
+                        <label>Buscar vozes<input type="search" value={localVoiceQuery} onChange={event => setLocalVoiceQuery(event.target.value)} placeholder="Nome, idioma ou motor" /></label>
+                        <label>Motor<select value={localEngineFilter} onChange={event => setLocalEngineFilter(event.target.value as 'all' | 'piper' | 'kokoro')}><option value="all">Todos</option><option value="piper">Piper</option><option value="kokoro">Kokoro</option></select></label>
+                        <label>Idioma<select value={localLanguageFilter} onChange={event => setLocalLanguageFilter(event.target.value)}><option value="all">Todos</option>{[...new Set(localCatalog?.voices.map(voice => voice.language) ?? [])].sort().map(language => <option key={language} value={language}>{language}</option>)}</select></label>
+                      </div>
+                      <div className="local-voice-grid" aria-live="polite">
+                        {filteredLocalVoices.map(voice => {
+                          const installed = localCatalog?.installedIds.includes(voice.id) ?? false;
+                          const selected = narrationDraft.localVoice?.engine === voice.engine && narrationDraft.localVoice.modelId === voice.modelId && narrationDraft.localVoice.voiceId === voice.voiceId;
+                          return <article className={`local-voice-card${selected ? ' is-selected' : ''}`} key={voice.id}>
+                            <label className="local-voice-choice"><input type="radio" name="local-voice-choice" checked={selected} disabled={Boolean(running) || busy.has('local-voice') || localOperationBusy} onChange={() => setNarrationDraft(current => current ? { ...current, provider: 'local', localVoice: { engine: voice.engine, modelId: voice.modelId, voiceId: voice.voiceId }, approved: false, audioReady: false, audioApproved: false } : current)} /><span><strong>{voice.name}</strong><small>{voice.language} · {voice.engine} · {voice.quality}</small><small>Modelo: {voice.modelId} · {formatBytes(voice.sizeBytes)}</small><small>Runtime: {formatBytes(voice.runtimeSizeBytes)}</small><small>Licença: {voice.license} · Fonte/evidência: {voice.licenseEvidence}</small>{voice.attribution && <small>Atribuição: {voice.attribution}</small>}</span></label>
+                            {!voice.supported && <p className="catalog-state">{voice.unsupportedReason ?? 'Voz indisponível nesta plataforma.'}</p>}
+                            {localAuditions[voice.id] && <audio controls preload="none" src={localAuditions[voice.id]} aria-label={`Audição sintetizada localmente: ${voice.name}`} />}
+                            {installed ? <button type="button" className="button small secondary" disabled={!voice.supported || !localCatalog?.platformSupported || Boolean(running) || localOperationBusy || busy.has(`local-audition-${voice.id}`)} onClick={() => { void auditionLocalVoice(voice); }}>{localAuditions[voice.id] ? 'Sintetizar audição novamente' : 'Sintetizar audição local'}</button> : <button type="button" className="button small secondary" disabled={!voice.supported || !localCatalog?.platformSupported || !localCatalog?.python311Available || Boolean(running) || localOperationBusy} onClick={() => { void installLocalVoice(voice); }}>Instalar voz e runtime</button>}
+                          </article>;
+                        })}
+                        {filteredLocalVoices.length === 0 && <p className="field-help">Nenhuma voz corresponde aos filtros.</p>}
+                      </div>
+                    </section>
+                  ) : (
+                    <div className="narration-eleven">
+                      <label className="narration-voice">Voz ElevenLabs<select disabled={Boolean(running) || busy.has('local-voice')} value={narrationDraft.voiceId ?? ''} onChange={event => setNarrationDraft(current => current ? { ...current, voiceId: event.target.value || undefined, approved: false, audioReady: false, audioApproved: false } : current)}><option value="">Selecione uma voz</option>{voices.map(voice => <option value={voice.id} key={voice.id}>{voice.name}{voice.isClone ? ' · clonada' : ''}</option>)}</select></label>
+                      {selectedVoice?.previewUrl && <audio className="voice-preview" src={selectedVoice.previewUrl} controls preload="none" aria-label={`Ouvir amostra da voz ${selectedVoice.name}`} />}
+                      {!snapshot.integrations.elevenLabs.configured && <p className="catalog-state" role="status">Configure a integração ElevenLabs para carregar vozes e gerar áudio.</p>}
+                    </div>
+                  )}
                   <div className="narration-scenes">
                   {narrationDraft.scenes.map((scene, index) => {
                     const audioAsset = scene.audioPath ? project.assets.find(asset => asset.kind === 'audio' && asset.name === scene.audioPath) : undefined;
@@ -926,7 +1321,7 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
                           {audioAsset.approved && <span className="field-help">Áudio aprovado</span>}
                         </>}
                         {scene.audioAttached && !audioAsset && <span className="field-help">Carregando áudio da cena…</span>}
-                        <button type="button" className="button small secondary" disabled={Boolean(running) || narrationDirty || narration?.mode !== 'narrated' || !localVoiceModel || !scene.narration.trim() || busy.has('local-voice')} onClick={() => { void generateLocalVoice(scene.id); }}>Gerar voz local</button>
+                        <button type="button" className="button small secondary" disabled={Boolean(running) || narrationDirty || narration?.mode !== 'narrated' || narrationDraft.provider !== 'local' || !selectedLocalVoice?.supported || !localCatalog?.platformSupported || !localCatalog?.installedIds.includes(selectedLocalVoice.id) || !scene.narration.trim() || busy.has('local-voice')} onClick={() => { void generateLocalVoice(scene.id); }}>Gerar voz local</button>
                         <button type="button" className="button small secondary" disabled={Boolean(running) || narrationDirty || busy.has('local-voice')} onClick={() => { setTeleprompterIndex(index); setTeleprompterOpen(true); }}>Gravar cena</button>
                         <button type="button" className="button small secondary" disabled={Boolean(running) || busy.has('narration-audio') || busy.has('local-voice')} onClick={() => { void attachSceneAudio(scene.id); }}>Enviar áudio</button>
                         {(scene.audioAttached || scene.stray) && <button type="button" className="button small secondary" disabled={Boolean(running) || busy.has('narration-audio') || busy.has('local-voice')} onClick={() => { void removeSceneAudio(scene.id); }}>Remover áudio</button>}
@@ -934,24 +1329,21 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
                     </article>;
                   })}
                   </div>
-                  <p className="field-help">Use tags expressivas como [excited] e [whispers], sem SSML. Para nomes difíceis, use IPA entre barras, por exemplo /ʒuˈɐ̃w̃/. O texto falado deve manter as mesmas palavras da narração editorial; a validação ocorre antes da chamada paga.</p>
-                  <div className="narration-status">
+                  {narrationDraft.provider === 'elevenlabs' && <p className="field-help">Use tags expressivas como [excited] e [whispers], sem SSML. Para nomes difíceis, use IPA entre barras, por exemplo /ʒuˈɐ̃w̃/. O texto falado deve manter as mesmas palavras da narração editorial; a validação ocorre antes da chamada paga.</p>}
+                  <div className="narration-status" role="status" aria-live="polite">
                     {narrationDirty ? 'Alterações não salvas — a aprovação anterior não vale para este texto/voz.' :
                       narration?.mode === 'silent' ? 'Sem narração neste render. Para adicionar voz depois, escolha “Usar narração”; os áudios existentes permanecem guardados.' :
                       !narration?.active ? 'Escolha “Seguir sem narração” ou adicione voz às cenas para continuar.' :
-                      !narration.ready && narration.voiceId && !narration.audioReady ? 'Gere o áudio com ElevenLabs; o texto e a voz são aprovados nesse passo.' :
-                      !narration.ready ? 'Há cenas narradas sem áudio. Gere, envie ou grave o áudio de cada cena; avançar aprova os áudios.' :
-                      'Áudios das cenas prontos para render.'}
+                      narrationDraft.provider === 'local' && !narrationDraft.localVoice ? 'Escolha uma voz local para gerar áudio. Áudios existentes permanecem preservados até a geração.' :
+                      narrationDraft.provider === 'local' && selectedLocalVoice && !selectedLocalVoice.supported ? selectedLocalVoice.unsupportedReason ?? 'Esta voz não é compatível com a plataforma atual.' :
+                      narrationDraft.provider === 'local' && selectedLocalVoice && !localCatalog?.installedIds.includes(selectedLocalVoice.id) ? 'Instale a voz local selecionada antes de gerar.' :
+                      narrationDraft.provider === 'elevenlabs' && !narrationDraft.voiceId ? 'Selecione uma voz ElevenLabs para gerar áudio.' :
+                      !narration.ready ? 'Há cenas narradas sem áudio válido. Gere, envie ou grave o áudio de cada cena; revise e aprove antes do render.' :
+                      'Áudios das cenas prontos para revisão antes do render.'}
                   </div>
-                  <div className="editor-footer">
-                    <button className="button small secondary" disabled={!narrationDirty || Boolean(running) || busy.has('save-narration')} onClick={() => { void saveNarration(); }}>
-                      <Save size={14} />Salvar narração
-                    </button>
-                    <div className="heading-actions">
-                      <button className="button small primary" disabled={!narration || narration.mode === 'silent' || narrationDirty || !narrationDraft.voiceId || !snapshot.integrations.elevenLabs.configured || narration.audioReady || busy.has('generate-narration') || busy.has('local-voice') || Boolean(running)} onClick={() => { void generateNarration(); }}>
-                        <AudioLines size={14} />Gerar áudio
-                      </button>
-                    </div>
+                  <div className="narration-controls">
+                    <button type="button" className="button secondary" disabled={!narrationDirty || Boolean(running) || busy.has('save-narration')} onClick={() => { void saveNarration(); }}>Salvar voz e narração</button>
+                    <button type="button" className="button primary" disabled={narrationDirty || narration?.mode !== 'narrated' || Boolean(running) || localOperationBusy || busy.has('local-voice') || busy.has('generate-narration') || (narrationDraft.provider === 'local' ? !selectedLocalVoice?.supported || !localCatalog?.platformSupported || !localCatalog?.installedIds.includes(selectedLocalVoice.id) : !narrationDraft.voiceId)} onClick={() => { void generateNarration(); }}>{narrationDraft.provider === 'local' ? 'Gerar narração local' : 'Gerar narração ElevenLabs'}</button>
                   </div>
                 </>
               )}
@@ -988,9 +1380,6 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
               {model === 'custom' && !customModel.trim() && <p className="field-help">Volte a Textos e informe o ID do modelo ou escolha outro modelo antes de trocar o formato.</p>}
               {adaptationError && <ErrorNotice message={adaptationError} />}
               {project.unsupportedFormat && <p className="field-help" role="status">O formato escolhido foi removido do app. Escolha outro formato para gerar as imagens.</p>}
-              <button className="button primary" disabled={!canGenerateImages} onClick={() => { void generateImages(); }}>
-                <Image size={16} />Gerar {expectedImageCount} {expectedImageCount === 1 ? 'imagem' : 'imagens'} com Codex
-              </button>
             </section>
           )}
           {project.kind === 'image' && activeStep.id === 'review' && (
@@ -999,14 +1388,17 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
                 <h2 id="image-review-title">Revisar imagem a imagem</h2>
                 <p className="field-help">{keptCount} para manter · {redoCount} para refazer · {pendingCount} sem decisão</p>
               </div>
-              <button className="button primary" disabled={!canReviseImages || busy.has('image-revision')} onClick={() => { void reviseImages(); }}>
-                <WandSparkles size={16} />{redoCount > 0 ? `Gerar nova versão de ${redoCount} ${redoCount === 1 ? 'imagem' : 'imagens'}` : 'Marque imagens para refazer'}
-              </button>
               {!reviewEditable && reviewBlockMessage && <p className="field-help" role="status">{reviewBlockMessage}</p>}
-              <ImageReviewGrid items={reviewItems} disabled={!reviewEditable || busy.has('review-image')} decisions={{ onKeep: keepImage, onRedo: redoImage, onClear: clearImageDecision }} onDelete={deleteImageByPath} />
+              <ImageReviewGrid items={reviewItems} disabled={!reviewEditable || busy.has('review-image')} decisions={{ onApprove: keepImage, onRevise: redoImage, onClear: clearImageDecision }} onDelete={deleteImageByPath} />
             </section>
           )}
 
+          {project.kind === 'video' && activeStep.id === 'render' && (
+            <>
+              {postVideoCard}
+              {videoStylePanel}
+            </>
+          )}
           {((project.kind === 'image' && activeStep.id === 'images') || (project.kind === 'video' && activeStep.id === 'render')) && (
           <details className="assets-section" open={project.kind === 'video'}>
             <summary className="assets-summary"><h2>{project.kind === 'image' ? 'Arquivos e ações avançadas' : 'Arquivos do projeto'}</h2></summary>
@@ -1022,10 +1414,6 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
                     </select>
                   </label>
                 )}
-                <button className="button small primary" disabled={busy.has('render') || Boolean(running) || !renderInputsReady} onClick={() => { void render(); }}>
-                  {project.kind === 'image' ? <WandSparkles size={15} /> : <Play size={15} />}
-                  {project.kind === 'image' ? 'Preparar no PostNow' : project.storyboardReady ? 'Renderizar no VideoGo' : 'Aprovar roteiro e renderizar'}
-                </button>
                 <button className="button small secondary" disabled={busy.has('import-asset')} onClick={() => { void importAsset(); }}>
                   <Plus size={15} />Importar arquivo
                 </button>
@@ -1094,7 +1482,7 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
                 </div>
               </div>
               {hasTextContent(visualReview.pages) ? <>
-              <VisualTextEditor key={id} pages={visualReview.pages} disabled={Boolean(running) || adaptationStarting || Boolean(project.formatAdaptation)} disabledReason={project.formatAdaptation ? 'Conclua a adaptação antes de editar os textos; o conteúdo original está preservado para novas tentativas.' : running || adaptationStarting ? 'Aguarde o processo em andamento terminar.' : undefined} hasGeneratedImages={Boolean(latestBatch)} onDirtyChange={setVisualTextDirty} onSave={saveVisualText} />
+              <VisualTextEditor ref={visualTextEditorRef} key={id} pages={visualReview.pages} storyInteraction={project.visualStyle?.id === 'story-interaction-image'} disabled={Boolean(running) || adaptationStarting || Boolean(project.formatAdaptation)} disabledReason={project.formatAdaptation ? 'Conclua a adaptação antes de editar os textos; o conteúdo original está preservado para novas tentativas.' : running || adaptationStarting ? 'Aguarde o processo em andamento terminar.' : undefined} hasGeneratedImages={Boolean(latestBatch)} onStateChange={state => { setVisualTextDirty(state.dirty); setVisualTextInvalid(state.invalid); }} onSave={saveVisualText} />
               <details className="editorial-review-group">
                 <summary>Afirmações e fontes · {visualReview.claims.length} claims</summary>
                 {visualReview.claims.map(claim => (
@@ -1119,7 +1507,7 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
               ) : null}
               </> : (
                 <div className="empty-state">
-                  <p>{running?.agentSession ? 'Os textos estão sendo preparados. Os campos aparecem preenchidos quando a sessão terminar.' : 'Os textos ainda não foram preparados. Use Preparar textos abaixo para gerá-los com a pauta salva.'}</p>
+                  <p>{running?.agentSession ? 'Os textos estão sendo preparados. Os campos aparecem preenchidos quando a sessão terminar.' : 'Os textos ainda não foram preparados. Use o botão abaixo para gerá-los com a pauta salva.'}</p>
                 </div>
               )}
             </section>
@@ -1138,10 +1526,11 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
                   <option value="feed-square">Feed quadrado · 1:1</option>
                 </select>
               </label>
-              <button type="button" className="button secondary" disabled={Boolean(running) || busy.has('video-delivery')} onClick={() => { void generateVideoDelivery(); }}>
+              {visualPreferencesDirty && <p className="field-help" role="status">Salve as preferências visuais do projeto antes de gerar a capa.</p>}
+              <button type="button" className="button secondary" disabled={Boolean(running) || visualPreferencesDirty || busy.has('video-delivery')} onClick={() => { void generateVideoDelivery(); }}>
                 <Sparkles size={16} />Gerar capa (Codex) e copy (Claude)
               </button>
-              <button type="button" className="button secondary" disabled={Boolean(running) || busy.has('video-delivery')} onClick={() => { void generateVideoDelivery(true); }}>
+              <button type="button" className="button secondary" disabled={Boolean(running) || visualPreferencesDirty || busy.has('video-delivery')} onClick={() => { void generateVideoDelivery(true); }}>
                 <Image size={16} />Gerar só a capa (Codex)
               </button>
               {deliveryAssets.some(asset => asset.name === `delivery/cover-${deliveryFormat}.png`) && (
@@ -1156,9 +1545,7 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
                   <div className="media-stage"><Media key={`${asset.path}-${trackedJobId}-${trackedJob?.status}`} projectId={project.id} asset={{ ...asset, url: `${asset.url}?v=${trackedJobId ?? 'original'}-${trackedJob?.status ?? 'idle'}` }} /></div>
                   <div className="asset-review">
                     <span>{asset.approved ? 'Aprovado para exportação' : 'Aguardando sua revisão'}</span>
-                    <button type="button" className={`button small ${asset.approved ? 'approved' : ''}`} aria-label={`${asset.approved ? 'Remover aprovação' : 'Aprovar arquivo'}: ${asset.name}`} disabled={Boolean(running) || busy.has('approve')} onClick={() => { void approve(asset); }}>
-                      {asset.approved ? 'Remover aprovação' : 'Aprovar arquivo'}
-                    </button>
+                    <DecisionToggle kind="approve" active={asset.approved} label={asset.approved ? 'Aprovado' : 'Aprovar'} ariaLabel={`Aprovar arquivo ${asset.name}`} title={asset.approved ? 'Clique para desfazer' : undefined} disabled={Boolean(running) || busy.has('approve')} onClick={() => { void approveDelivery(asset); }} />
                   </div>
                 </article>
               ))}
@@ -1202,11 +1589,11 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
                 </select>
               </label>
               {project.kind === 'image' ? (
-                <button className="button small primary" disabled={busy.has('derive') || Boolean(running) || !canDerive} onClick={() => { void derive('video'); }}>
+                <button className="button small secondary" disabled={busy.has('derive') || Boolean(running) || !canDerive} onClick={() => { void derive('video'); }}>
                   <Film size={15} />Converter em Vídeo (VideoGo)<ArrowRight size={14} />
                 </button>
               ) : (
-                <button className="button small primary" disabled={busy.has('derive') || Boolean(running) || !canDerive} onClick={() => { void derive('image'); }}>
+                <button className="button small secondary" disabled={busy.has('derive') || Boolean(running) || !canDerive} onClick={() => { void derive('image'); }}>
                   <Image size={15} />Extrair Imagens (PostNow)<ArrowRight size={14} />
                 </button>
               )}
@@ -1215,6 +1602,55 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
           </section>
           )}
 
+          {activeStep.id === 'brief' && (
+            <section className="preview-panel" aria-labelledby="visual-preferences-title">
+              <div className="panel-heading"><h2 id="visual-preferences-title">Preferências visuais do projeto</h2></div>
+              <p className="field-help">Escolha no início se o agente pode usar fotos da marca e quem aparece na arte. Esta preferência fica salva e vale para geração, revisão e renderização.</p>
+              <div className="form-row-2col">
+                {project.kind === 'image' && (
+                  <label className="field-group">
+                    <span className="field-title">Fundo das artes</span>
+                    <select value={imagePreferenceDraft.backgroundMode} onChange={event => { const mode = event.target.value; if (isImageBackgroundMode(mode)) setImagePreferenceDraft(value => ({ ...value, backgroundMode: mode })); }}>
+                      {IMAGE_BACKGROUND_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                )}
+                <label className="field-group">
+                  <span className="field-title">Fotos e referências da marca</span>
+                  <select value={imagePreferenceDraft.useBrandImages ? 'yes' : 'no'} onChange={event => setImagePreferenceDraft(value => ({ ...value, useBrandImages: event.target.value === 'yes' }))}>
+                    <option value="no">Não usar fotos</option>
+                    <option value="yes">Usar quando pertinentes</option>
+                  </select>
+                </label>
+                {project.kind === 'image' && (
+                  <label className="field-group">
+                    <span className="field-title">Logo oficial nas artes</span>
+                    <select value={imagePreferenceDraft.logoPolicy} onChange={event => { const policy = event.target.value; if (isLogoPolicy(policy)) setImagePreferenceDraft(value => ({ ...value, logoPolicy: policy })); }}>
+                      {LOGO_POLICY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                )}
+                {project.kind === 'image' && (
+                  <label className="field-group">
+                    <span className="field-title">Quem aparece na arte</span>
+                    <select value={imagePreferenceDraft.depictedPersonPolicy} onChange={event => { const policy = event.target.value; if (isDepictedPersonPolicy(policy)) setImagePreferenceDraft(value => ({ ...value, depictedPersonPolicy: policy })); }}>
+                      {DEPICTED_PERSON_POLICY_VALUES.map(value => <option key={value} value={value}>{DEPICTED_PERSON_POLICY_LABELS[value]}</option>)}
+                    </select>
+                  </label>
+                )}
+              </div>
+              <p className="field-help">
+                {imagePreferenceDraft.useBrandImages
+                  ? 'Fotos só serão usadas quando disponíveis, pertinentes e autorizadas.'
+                  : 'Fotos da marca não serão anexadas ao agente. Paleta e documentos textuais continuam disponíveis.'}
+                {project.kind === 'image' && !imagePreferenceDraft.useBrandImages ? ' Páginas configuradas para retrato do cliente precisam ser revisadas para “Ninguém” ou “Outra pessoa”.' : ''}
+                {project.kind === 'image' && imagePreferenceDraft.logoPolicy === 'none' ? ' Sem logo nas artes; ainda é obrigatório cadastrar uma logo oficial PNG no PostNow.' : ''}
+              </p>
+              <button type="button" className="button secondary" disabled={!visualPreferencesDirty || Boolean(running) || busy.has('visual-preferences')} onClick={() => { void saveVisualPreferences(); }}>
+                Salvar preferências
+              </button>
+            </section>
+          )}
           {activeStep.id === 'brief' && (
           <section className="editor-panel">
             <div className="editor-tabs">
@@ -1231,36 +1667,31 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
               placeholder={editor === 'brief' ? 'Objetivo, público, formato e mensagem. Um bom briefing dá direção à criação.' : 'Registre ajustes, referências e decisões para a próxima sessão.'}
               maxLength={50000}
             />
-            <div className="editor-footer">
-              <span>{dirty ? 'Alterações não salvas' : 'Salvo no projeto'}</span>
-              <button className="button small secondary" disabled={!dirty || busy.has('save-notes')} onClick={() => { void save(); }}>
-                <Save size={14} />Salvar
-              </button>
-            </div>
           </section>
           )}
 
           {project.kind === 'video' && activeStep.id === 'script' && (
             <>
+              {postVideoCard}
               {!project.storyboardAvailable && <p className="muted">O storyboard aparece aqui quando o agente preparar as cenas.</p>}
-              {project.storyboardAvailable && !project.storyboardReady && <p className="inline-warning" role="status">Roteiro em rascunho: revise cenas, fatos e fontes. “Aprovar roteiro e renderizar” valida o arquivo no VideoGo e renderiza em seguida.</p>}
+              {project.storyboardAvailable && !project.storyboardReady && <p className="inline-warning" role="status">Roteiro em rascunho: revise cenas, fatos e fontes. Aprove o roteiro para continuar; a renderização é uma etapa separada.</p>}
               {storyboardError && <ErrorNotice message={storyboardError} />}
-              {project.storyboardIssues?.length ? <p className="inline-warning" role="status">Pendências do storyboard: {project.storyboardIssues.slice(0, 3).join('; ')}{project.storyboardIssues.length > 3 ? ` (+${project.storyboardIssues.length - 3} em seguida)` : ''}. Corrija-as antes do render.</p> : null}
+              {project.storyboardIssues?.length ? <p className="inline-warning" role="status">Pendências do storyboard: {project.storyboardIssues.slice(0, 3).join('; ')}{project.storyboardIssues.length > 3 ? ` (+${project.storyboardIssues.length - 3} em seguida)` : ''}. Corrija-as antes de aprovar.</p> : null}
               {project.storyboardAvailable && !storyboardError && !storyboardScenes && <Loading label="Carregando cenas…" />}
               {storyboardScenes && (
-                <VideoSceneEditor scenes={storyboardScenes} disabled={Boolean(running) || busy.has('approve-storyboard')} disabledReason={running ? 'Aguarde o processo em andamento terminar.' : busy.has('approve-storyboard') ? 'Validando o roteiro no VideoGo…' : undefined} onSave={saveStoryboardScenes} onDirtyChange={setStoryboardDirty} />
+                <VideoSceneEditor ref={storyboardEditorRef} scenes={storyboardScenes} disabled={Boolean(running) || busy.has('approve-storyboard')} disabledReason={running ? 'Aguarde o processo em andamento terminar.' : busy.has('approve-storyboard') ? 'Validando o roteiro no VideoGo…' : undefined} onSave={saveStoryboardScenes} onStateChange={state => { setStoryboardDirty(state.dirty); setStoryboardInvalid(state.invalid); }} />
               )}
               {videoCorrectionBlock}
             </>
           )}
 
-          {(activeStep.id === 'texts' || activeStep.id === 'script') && (
-          <section className="composer-panel">
-            <div className="panel-heading">
+          {((activeStep.id === 'brief' && project.kind === 'image') || activeStep.id === 'script') && (
+          <details className="composer-panel composer-optional" open={project.kind !== 'image' || !hasTextContent(visualReview?.pages ?? [])}>
+            <summary className="panel-heading">
               <h2><Sparkles size={17} />Assistente de criação</h2>
               <span className="badge">IA</span>
-            </div>
-            <p>{project.kind === 'image' ? 'Os textos são preparados sozinhos ao salvar uma pauta nova, enquanto as páginas estiverem vazias. Para refazê-los com o briefing salvo, use o botão abaixo; isso pode substituir os textos atuais. A geração de imagens continua separada e depende da sua aprovação.' : 'Escolha um modelo ou escreva seu pedido. O agente prepara roteiro e arquivos; a renderização PostNow/VideoGo é uma etapa separada e explícita.'}</p>
+            </summary>
+            <p>{project.kind === 'image' ? 'Ao salvar uma pauta nova, os textos são preparados com estas instruções enquanto as páginas estiverem vazias. Para refazê-los, use o botão abaixo; isso pode substituir os textos atuais. Revise e aprove os textos na etapa Textos; a geração de imagens começa só depois da sua aprovação.' : 'Escolha um modelo ou escreva seu pedido. O agente prepara roteiro e arquivos; a renderização PostNow/VideoGo é uma etapa separada e explícita.'}</p>
             {project.kind === 'image' && !imageRequest && <p className="field-help">Salve o briefing do projeto antes de preparar os textos.</p>}
             <details className="agent-options">
               <summary>Opções avançadas · agente e modelo</summary>
@@ -1300,9 +1731,8 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
             <p id="agent-model-help" className="field-help">Vídeo roda sempre no Claude Opus 5.5 fixo ({VIDEO_AGENT_MODEL}) com esforço {VIDEO_AGENT_EFFORT}, independentemente da escolha acima; só a capa da entrega usa o Codex ImageGen. Nos demais projetos: Codex GPT-6 Luna com xhigh; Claude usa o alias Sonnet, que o CLI resolve para a versão atual; para fixar uma versão, informe seu ID completo em “Outro ID”.</p>
               </div>
             </details>
-            {project.kind === 'video' && <>
             <div className="prompt-library-launch">
-              <label htmlFor="agent-prompt">Instruções para o agente</label>
+              <label htmlFor="agent-prompt">{project.kind === 'image' ? 'Instruções para preparar os textos' : 'Instruções para o agente'}</label>
               <button type="button" className="button small secondary" onClick={() => setPromptLibraryOpen(true)}><BookOpen size={14} />Biblioteca de prompts</button>
             </div>
             <textarea
@@ -1311,21 +1741,23 @@ export function Studio({ id, snapshot, run, busy, confirm, choose, refresh, open
               onChange={event => setPrompt(event.target.value)}
               rows={5}
               maxLength={20000}
-              placeholder="Ex.: Crie um vídeo de 30 segundos sobre uma curiosidade científica, com roteiro por cena e narração para revisão…"
+              placeholder={project.kind === 'image' ? 'Escolha um molde na biblioteca ou escreva uma orientação para os textos…' : 'Escolha um molde na biblioteca ou escreva orientações para roteiro e storyboard…'}
               disabled={Boolean(running) || busy.has('agent')}
             />
-            </>}
             {dirty && <p className="field-help warning-text">Salve o briefing e as notas antes de iniciar para incluir suas alterações.</p>}
-            <button className="button primary full" disabled={!agentRequest || (model === 'custom' && !customModel.trim()) || Boolean(running) || busy.has('agent') || dirty || visualTextDirty || Boolean(project.formatAdaptation) || adaptationStarting} onClick={() => { void startAgent(); }}>
-              <Send size={16} />{running ? 'Sessão em andamento…' : project.kind === 'image' ? 'Preparar textos' : 'Preparar roteiro com IA'}
-            </button>
+            {(project.kind === 'image' || project.storyboardAvailable) && (
+              <button type="button" className="button secondary full" disabled={!agentRequest || (model === 'custom' && !customModel.trim()) || Boolean(running) || busy.has('agent') || dirty || visualTextDirty || visualPreferencesDirty || Boolean(project.formatAdaptation) || adaptationStarting} onClick={() => { void startAgent(); }}>
+                <Send size={16} />{project.kind === 'image' ? (hasTextContent(visualReview?.pages ?? []) ? 'Refazer textos com IA' : 'Preparar textos com IA') : 'Refazer roteiro com IA'}
+              </button>
+            )}
             <p className="composer-footnote"><TerminalSquare size={13} />Acompanhe o progresso ao vivo no console.</p>
-          </section>
+          </details>
           )}
           {promptLibraryOpen && <PromptLibrary
             kind={project.kind}
             projectTitle={project.title}
             format={project.format ?? (project.kind === 'image' ? DEFAULT_POSTNOW_FORMAT : 'reels')}
+            useBrandImages={imagePreferenceDraft.useBrandImages}
             currentPrompt={prompt}
             onUse={value => { setPrompt(value); setPromptLibraryOpen(false); }}
             onClose={() => setPromptLibraryOpen(false)}

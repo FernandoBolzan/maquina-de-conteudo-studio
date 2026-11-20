@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MobileAuthManager, generatePin, normalizePin, comparePinTimingSafe } from '../src/main/mobile/token.js';
@@ -8,7 +8,7 @@ import { MobileServer } from '../src/main/mobile/server.js';
 import { generateTerminalQR, generateSvgQR, generateDataUrlQR } from '../src/main/mobile/qr.js';
 import { Runtime } from '../src/main/runtime.js';
 import { toolStatus, resolveTool } from '../src/main/setup/tools.js';
-import type { AppEvent, Brand, Project } from '../src/shared/contracts.js';
+import type { AppEvent, Brand, Project, ProjectDetail } from '../src/shared/contracts.js';
 
 test('MobileAuthManager generates valid 6-char PIN and validates correctly', () => {
   const pin = generatePin();
@@ -222,13 +222,15 @@ test('MobileServer handles auth, serves SPA, streams media, and supports HTTP Ra
         format: 'carousel-4x5',
         pageCount: 5,
         brief: 'Pauta de teste criada pelo celular',
+        useBrandImages: false,
       }),
     });
     assert.equal(createRes.status, 200);
-    const createData = (await createRes.json()) as { ok: boolean; project: { id: string; title: string; kind: string } };
+    const createData = (await createRes.json()) as { ok: boolean; project: { id: string; title: string; kind: string; useBrandImages: boolean } };
     assert.equal(createData.ok, true);
     assert.equal(createData.project.title, 'Novo Carrossel Mobile');
     assert.equal(createData.project.kind, 'image');
+    assert.equal(createData.project.useBrandImages, false);
 
     // 12. GET /api/jobs (Check jobs list returned to mobile)
     const jobsRes = await fetch(`${baseUrl}/api/jobs`, {
@@ -401,20 +403,21 @@ test('Mobile creation advances journey steps from brief to texts and images', as
     // Initial pages prepared
     const initialPages = (native.pages as Record<string, unknown>[]).map((page, index) => {
       const headline = `Título da página ${index + 1}`;
+      const body = `Resumo curto da página ${index + 1}.`;
       const copy = `Copy editorial da página ${index + 1}.`;
       const visual_function = index === 0 ? 'Capa com tipografia de destaque' : index === 2 ? 'Fechamento com checklist e chamada' : 'Card central explicativo';
-      return { ...page, headline, copy, visual_function, depicted_person: 'none' };
+      return { ...page, headline, body, copy, visual_function, depicted_person: 'none' };
     });
     native.pages = initialPages;
     await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
     for (const page of initialPages) {
-      await writeFile(join(projectDetail.path, String(page.prompt_file)), `${page.headline}\n${page.copy}\nFunção visual: ${page.visual_function}\nArte oficial.\n`);
+      await writeFile(join(projectDetail.path, String(page.prompt_file)), `## Texto na arte\nHeadline: ${page.headline}\nBody: ${page.body}\n\n## Composição\n${page.visual_function}\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\n${page.copy}\n`);
     }
-    // 3. Save visual texts from mobile (updating headline)
+    // 3. Save visual texts from mobile (updating headline).
     const updatedPages = [
-      { page: 1, headline: 'Novo Título Capa', copy: 'Copy editorial da página 1.', depictedPerson: 'none' },
-      { page: 2, headline: 'Título da página 2', copy: 'Copy editorial da página 2.', depictedPerson: 'none' },
-      { page: 3, headline: 'Título da página 3', copy: 'Copy editorial da página 3.', depictedPerson: 'none' },
+      { page: 1, headline: 'Novo Título Capa', body: 'Resumo curto da página 1.', copy: 'Copy editorial da página 1.', depictedPerson: 'none' },
+      { page: 2, headline: 'Título da página 2', body: 'Resumo curto da página 2.', copy: 'Copy editorial da página 2.', depictedPerson: 'none' },
+      { page: 3, headline: 'Título da página 3', body: 'Resumo curto da página 3.', copy: 'Copy editorial da página 3.', depictedPerson: 'none' },
     ];
     const saveRes = await fetch(`${baseUrl}/api/projects/${projectId}/action`, {
       method: 'POST',
@@ -454,4 +457,101 @@ test('Mobile creation advances journey steps from brief to texts and images', as
     await runtime.dispose();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+const MOBILE_TEST_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p2sAAAAASUVORK5CYII=', 'base64');
+
+async function withMobileRuntime(pin: string, run: (ctx: { runtime: Runtime; workspace: string; root: string; baseUrl: string; headers: Record<string, string> }) => Promise<void>): Promise<void> {
+  const root = await mkdtemp(join(tmpdir(), 'mdc-mobile-footer-test-'));
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace, { recursive: true });
+  const runtime = new Runtime(join(root, 'data'), {
+    assetPrefix: '/api/media/',
+    secureStorageAvailable: () => false,
+    encryptSecret: () => { throw new Error('unavailable'); },
+    decryptSecret: () => { throw new Error('unavailable'); },
+    pickFile: async () => undefined,
+    openPath: async () => undefined,
+    openExternal: async () => undefined,
+    update: async () => ({ available: false, message: 'disabled' }),
+  });
+  await runtime.init();
+  await runtime.invoke('app.settings', { workspace, provider: 'codex' });
+  runtime.mobile.authManager.setPin(pin);
+  const port = await runtime.mobile.server.start(0);
+  const baseUrl = `http://127.0.0.1:${port}`;
+  try {
+    const authRes = await fetch(`${baseUrl}/api/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: pin }),
+    });
+    const { sessionToken } = (await authRes.json()) as { sessionToken: string };
+    await run({ runtime, workspace, root, baseUrl, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` } });
+  } finally {
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+interface FooterActionsBody {
+  footerActions: Record<string, { kind: string; label: string; enabled: boolean } | undefined>;
+  journey: { steps: Array<{ id: string; status: string }> };
+}
+
+test('Mobile image project exposes footerActions from the latest round with status.state', async () => {
+  await withMobileRuntime('F1B2C3', async ({ runtime, root, baseUrl, headers }) => {
+    const project = (await runtime.invoke('projects.create', { title: 'Footer mobile', kind: 'image', format: 'post-1x1', brief: 'Pauta para o teste do rodapé.' })) as Project;
+    const fixture = join(root, 'fixture.png');
+    await writeFile(fixture, MOBILE_TEST_PNG);
+    const imported = (await runtime.invoke('projects.importAsset', { id: project.id, path: fixture })) as { batches?: Array<{ id: string }> };
+    const batchId = imported.batches?.[0]?.id;
+    assert.ok(batchId);
+    const run = join(project.path, 'generated', 'runs', batchId);
+    const inputName = (await readdir(join(run, '.input')))[0]!;
+    await writeFile(join(run, 'slide-01.png'), MOBILE_TEST_PNG);
+    await writeFile(join(run, '.mapping.json'), JSON.stringify({ pages: [{ page: 1, input: inputName, output: 'slide-01.png' }] }));
+    const fetchProject = async (): Promise<FooterActionsBody> => (await (await fetch(`${baseUrl}/api/projects/${project.id}`, { headers })).json()) as FooterActionsBody;
+
+    // A processing round with no running job is rewritten as failed by projects.detail, so the state is forced on the detail.
+    const original = runtime.invoke.bind(runtime);
+    runtime.invoke = (async (action: string, payload: Record<string, unknown> = {}) => {
+      const result = await original(action, payload);
+      if (action !== 'projects.detail') return result;
+      const detail = result as ProjectDetail;
+      return { ...detail, batches: (detail.batches ?? []).map(batch => ({ ...batch, status: { state: 'processing' as const, updatedAt: new Date().toISOString() } })) };
+    }) as typeof runtime.invoke;
+    const processing = await fetchProject();
+    assert.equal(processing.footerActions.review?.kind, 'wait');
+    assert.equal(processing.footerActions.review?.label, 'Gerando nova versão…');
+    assert.equal(processing.footerActions.images?.label, 'Gerando…');
+    assert.notEqual(processing.journey.steps.find(step => step.id === 'review')?.status, 'done');
+    runtime.invoke = original as typeof runtime.invoke;
+
+    await writeFile(join(run, '.status.json'), JSON.stringify({ state: 'ready', format: 'post-1x1', updatedAt: new Date().toISOString() }));
+    const ready = await fetchProject();
+    assert.equal(ready.footerActions.review?.kind, 'wait');
+    assert.equal(ready.footerActions.review?.label, 'Falta decidir 1');
+    assert.equal(ready.footerActions.review?.enabled, false);
+    assert.equal(ready.footerActions.brief?.kind, 'continue');
+  });
+});
+
+test('Mobile approve-storyboard sends confirm:true to projects.storyboard.approve', async () => {
+  await withMobileRuntime('S1B2C3', async ({ runtime, baseUrl, headers }) => {
+    const project = (await runtime.invoke('projects.create', { title: 'Roteiro mobile', kind: 'video', format: 'reels', brief: 'Pauta de vídeo.' })) as Project;
+    const calls: Array<{ action: string; payload: Record<string, unknown> }> = [];
+    const original = runtime.invoke.bind(runtime);
+    runtime.invoke = (async (action: string, payload: Record<string, unknown> = {}) => {
+      if (action === 'projects.storyboard.approve') {
+        calls.push({ action, payload });
+        return { id: project.id };
+      }
+      return original(action, payload);
+    }) as typeof runtime.invoke;
+    const res = await fetch(`${baseUrl}/api/projects/${project.id}/action`, { method: 'POST', headers, body: JSON.stringify({ action: 'approve-storyboard' }) });
+    assert.equal(res.status, 200);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0]!.payload, { id: project.id, approved: true, confirm: true });
+  });
 });

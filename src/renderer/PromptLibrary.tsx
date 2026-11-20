@@ -18,6 +18,7 @@ interface PromptLibraryProps {
   projectTitle: string;
   currentPrompt: string;
   format: ProjectFormatId;
+  useBrandImages?: boolean;
   onUse: (prompt: string) => void;
   onClose: () => void;
 }
@@ -32,14 +33,14 @@ function asPersonalCard(item: PersonalPrompt): PromptCard {
   return { id: item.id, title: item.title, category: 'Meu prompt', description: 'Salvo nesta biblioteca pessoal.', prompt: item.prompt, personal: true };
 }
 
-export function PromptLibrary({ kind, format, projectTitle, currentPrompt, onUse, onClose }: PromptLibraryProps) {
+export function PromptLibrary({ kind, format, projectTitle, currentPrompt, useBrandImages = true, onUse, onClose }: PromptLibraryProps) {
   const [library, setLibrary] = useState<PromptLibraryData>(() => loadPromptLibrary(window.localStorage));
   const [view, setView] = useState<LibraryView>('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [topic, setTopic] = useState(projectTitle);
   const [audience, setAudience] = useState('Público geral');
-  const [tone, setTone] = useState('claro e curioso');
+  const [tone, setTone] = useState('claro e direto');
   const [callToAction, setCallToAction] = useState('salve e compartilhe');
   const [promptDraft, setPromptDraft] = useState('');
   const [saveTitle, setSaveTitle] = useState('');
@@ -64,8 +65,8 @@ export function PromptLibrary({ kind, format, projectTitle, currentPrompt, onUse
   useEffect(() => {
     if (!selected) { setPromptDraft(''); return; }
     const recipe = PROMPT_RECIPES.find(item => item.id === selected.id);
-    setPromptDraft(recipe ? composePrompt(recipe, { topic, audience, tone, callToAction, format }) : selected.prompt);
-  }, [selected, topic, audience, tone, callToAction, format]);
+    setPromptDraft(recipe ? composePrompt(recipe, { topic, audience, tone, callToAction, format, useBrandImages }) : selected.prompt);
+  }, [selected, topic, audience, tone, callToAction, format, useBrandImages]);
 
   function updateLibrary(next: PromptLibraryData): boolean {
     if (!savePromptLibrary(next, window.localStorage)) {
@@ -104,7 +105,7 @@ export function PromptLibrary({ kind, format, projectTitle, currentPrompt, onUse
 
   return <Modal title="Biblioteca de prompts" wide className="prompt-library-modal" onClose={onClose}>
     <div className="prompt-library-intro">
-      <p>Escolha uma receita, ajuste tema e público e revise o texto exato que será enviado ao agente. PostNow e VideoGo continuam responsáveis pela produção.</p>
+      <p>Escolha uma estrutura para post único, Story, carrossel ou vídeo. Os moldes priorizam utilidade, clareza e atenção sem prometer viralização. Referências de marca são opcionais: use apenas imagens existentes e pertinentes; sem elas, o prompt continua completo.</p>
       <button type="button" className="button small secondary" disabled={!currentPrompt.trim()} onClick={() => { setSaveTitle(''); setSaveFormOpen(value => !value); }}><BookmarkPlus size={14} />Salvar prompt atual</button>
     </div>
     {saveFormOpen && <form className="prompt-save-form" onSubmit={event => { event.preventDefault(); saveCurrentPrompt(); }}>

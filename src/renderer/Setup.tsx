@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import {
   AudioLines,
   BookOpen,
@@ -6,13 +6,11 @@ import {
   ChevronRight,
   CircleStop,
   CloudDownload,
-  Cpu,
   ExternalLink,
   Film,
   FolderOpen,
   Image,
   KeyRound,
-  Layers,
   Link2,
   LogOut,
   PackagePlus,
@@ -22,7 +20,6 @@ import {
   RotateCcw,
   ShieldAlert,
   Smartphone,
-  Terminal,
   Wrench
 } from 'lucide-react';
 import type {
@@ -111,6 +108,20 @@ export function Setup({
     setLocalSubmenu(next);
     onSelectSubmenu?.(next);
   };
+  function handleSubmenuKeyDown(event: KeyboardEvent<HTMLButtonElement>, current: SetupSubmenu) {
+    const next = event.key === 'Home'
+      ? 'engines'
+      : event.key === 'End'
+        ? 'elevenlabs'
+        : event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+          ? current === 'engines' ? 'elevenlabs' : 'engines'
+          : null;
+
+    if (!next) return;
+    event.preventDefault();
+    setSubmenu(next);
+    document.getElementById(`tab-${next}`)?.focus();
+  }
 
   const selectedEngineId: EngineId = firstGoal === 'image' ? 'postnow' : 'videogo';
   const selectedEngine = status?.engines.find(engine => engine.id === selectedEngineId);
@@ -119,10 +130,6 @@ export function Setup({
   const selectedEngineReady = Boolean(selectedEngine?.installed && selectedEngine.dependencies.every(dependency => dependency.installed));
   const integrationsReady = Boolean(selectedAgent?.installed && selectedAgent.authenticated && selectedEngineReady && (provider !== 'codex' || githubReady));
   const canFinishOnboarding = integrationsReady && (!voiceEnabled || snapshot.integrations.elevenLabs.configured);
-
-  const readyEngines = status?.engines.filter(engine => engine.installed && engine.dependencies.every(d => d.installed)).length ?? 0;
-  const systemTools = status?.tools.filter(tool => tool.id !== 'codex' && tool.id !== 'claude') ?? [];
-  const installedSystemTools = systemTools.filter(tool => tool.installed).length;
 
   const checkCliVersions = useCallback(async () => {
     setUpdatesLoading(true);
@@ -236,6 +243,7 @@ export function Setup({
       } catch (error) {
         if (errorMessage(error).includes('ENGINE_ACCESS_DENIED')) {
           setAccessDenied(previous => ({ ...previous, [engine.id]: true }));
+          await invoke('app.external', { url: 'https://www.fernandobolzan.com/maquina-de-conteudo' });
         }
         throw error;
       }
@@ -315,12 +323,11 @@ export function Setup({
           aria-controls="panel-engines"
           className={`setup-tab-btn ${currentSubmenu === 'engines' ? 'active' : ''}`}
           onClick={() => setSubmenu('engines')}
+          tabIndex={currentSubmenu === 'engines' ? 0 : -1}
+          onKeyDown={event => handleSubmenuKeyDown(event, 'engines')}
         >
           <Wrench size={15} />
           <span>Motores &amp; CLIs</span>
-          <span className="setup-tab-badge">
-            {status ? `${readyEngines}/${status.engines.length}` : '…'}
-          </span>
         </button>
         <button
           type="button"
@@ -330,6 +337,8 @@ export function Setup({
           aria-controls="panel-elevenlabs"
           className={`setup-tab-btn ${currentSubmenu === 'elevenlabs' ? 'active' : ''}`}
           onClick={() => setSubmenu('elevenlabs')}
+          tabIndex={currentSubmenu === 'elevenlabs' ? 0 : -1}
+          onKeyDown={event => handleSubmenuKeyDown(event, 'elevenlabs')}
         >
           <AudioLines size={15} />
           <span>ElevenLabs &amp; Voz</span>
@@ -352,84 +361,15 @@ export function Setup({
           confirm={confirm}
           choose={choose}
           openJob={openJob}
-          onGoEngines={() => setSubmenu('engines')}
         />
       ) : (
-        <div className="setup-stack" role="tabpanel" id="panel-engines" aria-labelledby="tab-engines">
-          {/* Executive Overview Banner */}
-          <div className="setup-overview-banner" role="region" aria-label="Resumo do ambiente operacional">
-            <div className="setup-stat-card">
-              <div className="setup-stat-icon"><Terminal size={18} /></div>
-              <div className="setup-stat-info">
-                <span className="setup-stat-label">Assistente de IA</span>
-                <span className="setup-stat-value">
-                  <span>{provider === 'codex' ? 'Codex' : 'Claude Code'}</span>
-                  <span className={`status-pill ${selectedAgent?.authenticated ? 'ok' : 'warn'} mini`}>
-                    {selectedAgent?.authenticated ? 'Conectado' : 'Aguardando'}
-                  </span>
-                </span>
-              </div>
-            </div>
-
-            <div className="setup-stat-card">
-              <div className="setup-stat-icon"><Layers size={18} /></div>
-              <div className="setup-stat-info">
-                <span className="setup-stat-label">Motores de Produção</span>
-                <span className="setup-stat-value">
-                  <span>{readyEngines} de {status.engines.length}</span>
-                  <span className={`status-pill ${readyEngines === status.engines.length ? 'ok' : 'warn'} mini`}>
-                    {readyEngines === status.engines.length ? 'Prontos' : 'Atenção'}
-                  </span>
-                </span>
-              </div>
-            </div>
-
-            <div className="setup-stat-card">
-              <div className="setup-stat-icon"><Cpu size={18} /></div>
-              <div className="setup-stat-info">
-                <span className="setup-stat-label">Ferramentas de Sistema</span>
-                <span className="setup-stat-value">
-                  <span>{installedSystemTools} de {systemTools.length}</span>
-                  <span className={`status-pill ${installedSystemTools === systemTools.length ? 'ok' : 'warn'} mini`}>
-                    {installedSystemTools === systemTools.length ? 'OK' : 'Faltam'}
-                  </span>
-                </span>
-              </div>
-            </div>
-
-            <div
-              className="setup-stat-card clickable"
-              onClick={() => setSubmenu('elevenlabs')}
-              role="button"
-              tabIndex={0}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setSubmenu('elevenlabs');
-                }
-              }}
-              aria-label="Abrir submenu ElevenLabs & Voz"
-              title="Abrir submenu ElevenLabs & Voz"
-            >
-              <div className="setup-stat-icon"><AudioLines size={18} /></div>
-              <div className="setup-stat-info">
-                <span className="setup-stat-label">Narração VideoGo</span>
-                <span className="setup-stat-value">
-                  <span>ElevenLabs</span>
-                  <span className={`status-pill ${snapshot.integrations.elevenLabs.configured ? 'ok' : 'warn'} mini`}>
-                    {snapshot.integrations.elevenLabs.configured ? 'Ativo' : 'Setup'}
-                  </span>
-                </span>
-              </div>
-            </div>
-          </div>
+        <div className="setup-stack setup-engine-workspace" role="tabpanel" id="panel-engines" aria-labelledby="tab-engines">
 
           {guideOpen && (
-            <section className="onboarding-guide" aria-labelledby="onboarding-title">
+            <section className="onboarding-guide setup-onboarding-workspace" aria-labelledby="onboarding-title">
               <div className="onboarding-heading">
-                <span className="eyebrow">PRIMEIRO USO</span>
                 <h2 id="onboarding-title">O que você quer criar primeiro?</h2>
-                <p>Escolha um objetivo. O Studio prepara o agente e o motor necessários; os outros ficam para quando você precisar.</p>
+                <p>Escolha um objetivo. O Studio prepara o agente e o motor necessários; os demais podem ser configurados depois.</p>
               </div>
               <div className="onboarding-goals" role="group" aria-label="Primeiro conteúdo">
                 <button
@@ -464,7 +404,7 @@ export function Setup({
                   <span className="onboarding-step-number">A</span>
                   <div>
                     <h3>Pasta dos projetos</h3>
-                    <p>Marcas e arquivos ficam aqui. Nada será movido.</p>
+                    <p>Onde ficam suas marcas, projetos e arquivos gerados. Você pode trocar a pasta depois; nada é movido.</p>
                     <code className="mono-path">{snapshot.settings.workspace}</code>
                   </div>
                   <button type="button" className="button small" onClick={() => { void chooseWorkspace(); }}>
@@ -475,7 +415,7 @@ export function Setup({
                   <span className="onboarding-step-number">B</span>
                   <div>
                     <h3>Agente: {provider === 'codex' ? 'Codex' : 'Claude Code'}</h3>
-                    <p>Instale e conecte sua conta. O Studio abre o login oficial e não guarda sua senha.</p>
+                    <p>É quem escreve briefings e textos. Clique em Entrar: o login oficial abre e o Studio não guarda sua senha.</p>
                     <label className="onboarding-provider">
                       Agente
                       <select value={provider} disabled={busy.has('onboarding-provider')} onChange={event => { void saveProvider(event.target.value as Provider); }}>
@@ -492,7 +432,7 @@ export function Setup({
                   <span className="onboarding-step-number">C</span>
                   <div>
                     <h3>GitHub</h3>
-                    <p>Conecte sua conta para instalar os motores privados VideoGo e PostNow. O Studio não guarda sua senha.</p>
+                    <p>Os motores PostNow e VideoGo são privados e liberados para alunos do curso. Conecte a conta GitHub que tem acesso a eles. Sem acesso, o Studio mostra como adquirir o curso. O Studio não guarda sua senha.</p>
                   </div>
                   <span className={`status-pill ${githubReady ? 'ok' : 'warn'}`}>
                     {githubReady ? 'Conectado' : 'Conectar'}
@@ -502,7 +442,7 @@ export function Setup({
                   <span className="onboarding-step-number">D</span>
                   <div>
                     <h3>Motor: {engineLabels[selectedEngineId].title}</h3>
-                    <p>{engineLabels[selectedEngineId].role}</p>
+                    <p>{engineLabels[selectedEngineId].role} O motor é o programa que gera as peças; instale-o aqui.</p>
                   </div>
                   <span className={`status-pill ${selectedEngineReady ? 'ok' : 'warn'}`}>
                     {selectedEngineReady ? 'Pronto' : selectedEngine?.installed ? 'Precisa de atenção' : 'Instalar'}
@@ -543,11 +483,6 @@ export function Setup({
                     <RefreshCw size={14} />Preparar {engineLabels[selectedEngineId].title}
                   </button>
                 )}
-                {accessDenied[selectedEngineId] && (
-                  <button type="button" className="button small secondary" onClick={() => { void run('engine-acquire', () => invoke('app.external', { url: 'https://www.fernandobolzan.com/maquina-de-conteudo' })); }}>
-                    <ExternalLink size={14} />Adquirir agora
-                  </button>
-                )}
                 {selectedEngineReady && (
                   <button type="button" className="button small secondary" disabled={busy.has(`engine-${selectedEngineId}-test`)} onClick={() => { if (selectedEngine) void testEngine(selectedEngine); }}>
                     <Play size={14} />Testar {engineLabels[selectedEngineId].title}
@@ -563,7 +498,7 @@ export function Setup({
                 </button>
               )}
               <div className="onboarding-footer">
-                <p>{canFinishOnboarding ? 'Integrações necessárias prontas. Você poderá ajustar marca e roteiro ao criar o primeiro projeto.' : `Conecte o agente${provider === 'codex' ? ' e o GitHub' : ''}, o ${engineLabels[selectedEngineId].title}${voiceEnabled ? ' e configure a voz ElevenLabs' : ''} para começar.`}</p>
+                <p>{canFinishOnboarding ? 'Integrações necessárias prontas. Você poderá ajustar marca e roteiro ao criar o primeiro projeto.' : 'Finalize os itens necessários acima para começar. Integrações não selecionadas podem ser configuradas depois.'}</p>
                 <div className="card-actions">
                   <button type="button" className="button primary" disabled={!canFinishOnboarding || busy.has('onboarding-complete')} onClick={() => { void finishOnboarding(); }}>
                     {canFinishOnboarding ? `Começar ${firstGoal === 'image' ? 'carrossel' : 'vídeo'}` : 'Concluir configuração'}
@@ -588,7 +523,7 @@ export function Setup({
           {(!guideOpen || showAdvancedSetup) && (
             <>
               {/* Assistentes e Login Oficial */}
-              <section className="setup-section">
+              <section className="setup-section setup-group setup-group-assistants">
                 <div className="section-heading">
                   <div>
                     <h2>Assistentes e login oficial</h2>
@@ -672,13 +607,21 @@ export function Setup({
               </section>
 
               {/* Motores de Conteúdo */}
-              <section className="setup-section">
+              <section className="setup-section setup-group setup-group-engines">
                 <div className="section-heading">
                   <div>
                     <h2>Motores de conteúdo</h2>
                     <p className="field-help">Instale os motores quando quiser criar imagens ou vídeos. Você também pode vincular uma instalação existente.</p>
                   </div>
                 </div>
+                {(Object.values(accessDenied).some(Boolean) || (!githubReady && status.engines.some(engine => !engine.installed))) && (
+                  <div className="notice" role="status">
+                    <span><strong>Motores do curso.</strong> PostNow e VideoGo são liberados para alunos do curso Máquina de Conteúdo. Conecte uma conta GitHub com acesso aos motores ou adquira o curso para liberar a instalação.</span>
+                    <button type="button" className="button small secondary" onClick={() => { void run('engine-acquire', () => invoke('app.external', { url: 'https://www.fernandobolzan.com/maquina-de-conteudo' })); }}>
+                      <ExternalLink size={14} />Adquirir o curso
+                    </button>
+                  </div>
+                )}
                 <div className="engine-grid">
                   {status.engines.map(engine => {
                     const meta = engineLabels[engine.id];
@@ -692,6 +635,13 @@ export function Setup({
                         </div>
                         {engine.version && <span className="status-pill" aria-label={`Versão ${engine.version}`}>v{engine.version}</span>}
                         <p>{meta.role}</p>
+                        <p className="engine-dependency-status">
+                          {engine.dependencies.length === 0
+                            ? 'Sem dependências adicionais.'
+                            : engine.dependencies.every(dependency => dependency.installed)
+                              ? `Dependências prontas: ${engine.dependencies.map(dependency => dependency.name).join(', ')}.`
+                              : `Faltam dependências: ${engine.dependencies.filter(dependency => !dependency.installed).map(dependency => dependency.name).join(', ')}.`}
+                        </p>
                         <p className="field-help">{meta.access}</p>
                         <div className="card-actions">
                           {!engine.installed ? (
@@ -701,11 +651,6 @@ export function Setup({
                           ) : (
                             <button type="button" className="button small" disabled={busy.has(`engine-${engine.id}-update`)} onClick={() => { void manage(engine, 'update'); }}>
                               <RefreshCw size={14} />Atualizar
-                            </button>
-                          )}
-                          {accessDenied[engine.id] && (
-                            <button type="button" className="button small secondary" onClick={() => { void run('engine-acquire', () => invoke('app.external', { url: 'https://www.fernandobolzan.com/maquina-de-conteudo' })); }}>
-                              <ExternalLink size={14} />Adquirir agora
                             </button>
                           )}
                           {engine.installed && (
@@ -733,6 +678,18 @@ export function Setup({
                       </article>
                     );
                   })}
+                </div>
+              </section>
+
+              {/* Ferramentas do Computador */}
+              <section className="setup-section setup-group setup-group-system-tools">
+                <div className="section-heading">
+                  <div>
+                    <h2>Ferramentas necessárias no computador ({status.platform})</h2>
+                    <p className="field-help">Node.js, Python, FFmpeg, FFprobe e Git são dependências técnicas. O Studio avisa quando alguma faltar e pede confirmação antes de instalar.</p>
+                  </div>
+                </div>
+                <div className="setup-service-grid">
                   {(() => {
                     const tool = status.tools.find(t => t.id === 'cloudflared');
                     const mobile = snapshot.mobile;
@@ -751,7 +708,7 @@ export function Setup({
                         <div className="card-actions">
                           {!tool?.installed ? (
                             <button type="button" className="button small primary" disabled={busy.has('install-cloudflared')} onClick={() => { if (tool) void install(tool); }}>
-                              <PackagePlus size={14} />Instalar motor
+                              <PackagePlus size={14} />Instalar ferramenta
                             </button>
                           ) : !active ? (
                             <>
@@ -800,18 +757,8 @@ export function Setup({
                     );
                   })()}
                 </div>
-              </section>
-
-              {/* Ferramentas do Computador */}
-              <section className="setup-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>Ferramentas necessárias no computador ({status.platform})</h2>
-                    <p className="field-help">Node.js, Python, FFmpeg, FFprobe e Git são dependências técnicas. O Studio avisa quando alguma faltar e pede confirmação antes de instalar.</p>
-                  </div>
-                </div>
                 <div className="tool-list">
-                  {status.tools.filter(tool => tool.id !== 'codex' && tool.id !== 'claude').map(tool => (
+                  {status.tools.filter(tool => tool.id !== 'codex' && tool.id !== 'claude' && tool.id !== 'cloudflared').map(tool => (
                     <div className="tool-row" key={tool.id}>
                       <div className="tool-main">
                         {tool.installed ? <CheckCircle2 size={18} className="icon-ok" /> : <ShieldAlert size={18} className="icon-warn" />}
@@ -825,11 +772,6 @@ export function Setup({
                         {!tool.installed && (
                           <button type="button" className="button small" disabled={busy.has(`install-${tool.id}`)} onClick={() => { void install(tool); }}>
                             <PackagePlus size={14} />Instalar
-                          </button>
-                        )}
-                        {tool.id === 'cloudflared' && tool.installed && (
-                          <button type="button" className="button small primary" onClick={() => setMobileModalOpen(true)}>
-                            <Smartphone size={14} />{snapshot.mobile?.active ? 'Ver QR Code' : 'Iniciar Painel Mobile'}
                           </button>
                         )}
                       </div>

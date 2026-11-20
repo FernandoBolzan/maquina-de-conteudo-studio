@@ -221,3 +221,4 @@ Read `DEV/HANDOFF.md` and the retained `DEV/WORKLOG.md` entries before opening t
 - Verified: `npm test` 157/157 (inclui `tests/postnow-round-format.test.ts`, `tests/postnow-round-delivery.test.ts` e `tests/postnow-render-round.test.ts`, 14/14 nos três); mutações descartáveis detectadas pelos testes (predicado de entrega: 3 falhas; guarda de status ilegível: 2 falhas); FormatoVerify, item 5: PASS nos dois casos, com `.status.json` byte a byte inalterado (`DEV/VERIFY.md`). Gates: typecheck, lint, smoke `"ok": true`, build ok.
 - Limits: nenhuma geração paga; projeto real da Patricia (`carousel-4x5`) não tocado, segue bloqueado até a escolha de formato (pendência 13); UI de troca de formato não exercitada em Electron.
 - Next context: decidir pendências 1 e 13 em `DEV/DECISIONS.md`; regerar rodada com o formato escolhido quando a usuária autorizar.
+

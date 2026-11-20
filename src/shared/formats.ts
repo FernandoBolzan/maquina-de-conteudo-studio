@@ -36,8 +36,8 @@ export const POSTNOW_FORMATS: Record<PostNowFormatId, PostNowFormatSpec> = {
   'carousel-1x1': spec('Carrossel quadrado 1:1', 'carousel', 1080, 1080, '1:1'),
   'post-4x5': spec('Post vertical 4:5', 'post', 1080, 1350, '4:5'),
   'carousel-4x5': spec('Carrossel vertical 4:5', 'carousel', 1080, 1350, '4:5'),
-  'post-4x3': spec('Post vertical 4:5', 'post', 1080, 1350, '4:5'),
-  'carousel-4x3': spec('Carrossel vertical 4:5', 'carousel', 1080, 1350, '4:5'),
+  'post-4x3': spec('Post horizontal 4:3', 'post', 1440, 1080, '4:3'),
+  'carousel-4x3': spec('Carrossel horizontal 4:3', 'carousel', 1440, 1080, '4:3'),
 };
 
 export function isPostNowFormat(value: unknown): value is PostNowFormatId {
@@ -59,12 +59,12 @@ export function formatCanvas(format: PostNowFormatId): { width: number; height: 
   return { width, height };
 }
 
-const IMAGE_ASPECTS: readonly ImageAspect[] = ['9:16', '1:1', '4:5'];
+const IMAGE_ASPECTS: readonly ImageAspect[] = ['9:16', '1:1', '4:5', '4:3'];
 const IMAGE_ASPECT_FORMATS: Record<ImageAspect, { label: string; single: PostNowFormatId; carousel?: PostNowFormatId }> = {
   '9:16': { label: 'Story 9:16', single: 'story-9x16' },
   '1:1': { label: 'Feed quadrado 1:1', single: 'post-1x1', carousel: 'carousel-1x1' },
   '4:5': { label: 'Feed vertical 4:5 · 1080×1350', single: 'post-4x5', carousel: 'carousel-4x5' },
-  '4:3': { label: 'Feed vertical 4:5 · 1080×1350', single: 'post-4x5', carousel: 'carousel-4x5' },
+  '4:3': { label: 'Feed horizontal 4:3 · 1440×1080', single: 'post-4x3', carousel: 'carousel-4x3' },
 };
 
 export interface ImageAspectOption {

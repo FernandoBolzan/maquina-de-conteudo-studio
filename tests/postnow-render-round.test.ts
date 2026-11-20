@@ -62,6 +62,7 @@ async function createCarousel(runtime: Runtime, root: string): Promise<Project> 
   const pages = (native.pages as Record<string, unknown>[]).map((page, index) => ({
     ...page,
     headline: `Título da página ${index + 1}`,
+    body: `Resumo curto da página ${index + 1}.`,
     copy: `Copy editorial da página ${index + 1}.`,
     visual_function: `Função visual da página ${index + 1}.`,
     depicted_person: 'none',
@@ -70,7 +71,7 @@ async function createCarousel(runtime: Runtime, root: string): Promise<Project> 
   native.editorial = { claims_reviewed: false, copy_approved: false };
   await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
   for (const page of pages) {
-    await writeFile(join(project.path, String(page.prompt_file)), `Copy aprovada: ${page.copy}\nFunção visual: ${page.visual_function}\nDireção visual editorial refinada.\n`);
+    await writeFile(join(project.path, String(page.prompt_file)), `## Texto na arte\nHeadline: ${page.headline}\nBody: ${page.body}\n\n## Composição\n${page.visual_function}\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\n${page.copy}\n`);
   }
   await writeFile(join(project.path, 'research', 'claims.json'), `${JSON.stringify({ reviewed: false, claims: [{ id: 'claim-1', claim: 'Fato verificável.', source: 'Fonte oficial', source_url: 'https://example.org/fonte', status: 'approved' }] }, null, 2)}\n`);
   return project;
@@ -96,6 +97,20 @@ async function writeRound(projectPath: string, status: Record<string, unknown> |
   if (delivered) await writeFile(join(runDir, '.mapping.json'), '{}\n');
   return { statusPath, original };
 }
+test('projects.detail rejects a ready round recorded in a different format', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mdc-render-format-mismatch-'));
+  const runtime = openRuntime(root, () => undefined);
+  try {
+    const project = await createCarousel(runtime, root);
+    await writeRound(project.path, { state: 'ready', format: 'post-1x1' }, false);
+    const detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
+    assert.equal(detail.batches?.[0]?.status?.state, 'failed');
+    assert.match(detail.batches?.[0]?.status?.message ?? '', /formato post-1x1.*projeto está em carousel-1x1/i);
+  } finally {
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('render não rebaixa rodada legada pronta sem formato registrado', { timeout: 30_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'mdc-render-legacy-'));
@@ -105,7 +120,7 @@ test('render não rebaixa rodada legada pronta sem formato registrado', { timeou
     const project = await createCarousel(runtime, root);
     await approveVisualReview(runtime, project);
     const round = await writeRound(project.path, { state: 'ready' }, false);
-    const started = await runtime.invoke('projects.render', { id: project.id, batchId: BATCH_ID, logoPolicy: 'all-pages' }) as Job;
+    const started = await runtime.invoke('projects.render', { id: project.id, batchId: BATCH_ID }) as Job;
     const finished = await jobs.wait(started.id);
     assert.equal(finished.status, 'failed');
     assert.match(finished.log, /Esta rodada não tem formato registrado/);
@@ -124,7 +139,7 @@ test('render não rebaixa rodada já entregue', { timeout: 30_000 }, async () =>
     const project = await createCarousel(runtime, root);
     await approveVisualReview(runtime, project);
     const round = await writeRound(project.path, { state: 'ready', format: 'carousel-1x1' }, true);
-    const started = await runtime.invoke('projects.render', { id: project.id, batchId: BATCH_ID, logoPolicy: 'all-pages' }) as Job;
+    const started = await runtime.invoke('projects.render', { id: project.id, batchId: BATCH_ID }) as Job;
     const finished = await jobs.wait(started.id);
     assert.equal(finished.status, 'failed');
     assert.match(finished.log, /Esta rodada já está pronta e não será sobrescrita\./);
@@ -143,7 +158,7 @@ test('render recusa status ilegível sem reescrevê-lo', { timeout: 30_000 }, as
     const project = await createCarousel(runtime, root);
     await approveVisualReview(runtime, project);
     const round = await writeRound(project.path, '{"state":"ready"}', false);
-    const started = await runtime.invoke('projects.render', { id: project.id, batchId: BATCH_ID, logoPolicy: 'all-pages' }) as Job;
+    const started = await runtime.invoke('projects.render', { id: project.id, batchId: BATCH_ID }) as Job;
     const finished = await jobs.wait(started.id);
     assert.equal(finished.status, 'failed');
     assert.match(finished.log, /O estado desta rodada está ilegível/);
@@ -162,7 +177,7 @@ test('render não reescreve rodada entregue com estado ilegível', { timeout: 30
     const project = await createCarousel(runtime, root);
     await approveVisualReview(runtime, project);
     const round = await writeRound(project.path, '{"state":"ready","format":"carousel-1x1"}', true);
-    const started = await runtime.invoke('projects.render', { id: project.id, batchId: BATCH_ID, logoPolicy: 'all-pages' }) as Job;
+    const started = await runtime.invoke('projects.render', { id: project.id, batchId: BATCH_ID }) as Job;
     const finished = await jobs.wait(started.id);
     assert.equal(finished.status, 'failed');
     assert.match(finished.log, /Esta rodada já está pronta e não será sobrescrita\./);

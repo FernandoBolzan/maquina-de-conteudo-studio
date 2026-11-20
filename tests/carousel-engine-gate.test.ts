@@ -27,12 +27,12 @@ async function openCarousel(root: string): Promise<{ runtime: Runtime; project: 
   return { runtime, project };
 }
 
-/** Writes headline, copy and visual function only on the 1-based pages listed in `filled`; the others stay empty placeholders. */
+/** Writes complete editorial fields only on listed pages; other pages stay empty placeholders. */
 async function writeFilledPages(project: Project, filled: number[]): Promise<void> {
   const projectJsonPath = join(project.path, 'project.json');
   const native = JSON.parse(await readFile(projectJsonPath, 'utf8')) as { pages: Record<string, unknown>[] };
   native.pages = native.pages.map((page, index) => (filled.includes(index + 1)
-    ? { ...page, headline: `Título da página ${index + 1}`, copy: `Copy da página ${index + 1}.`, visual_function: `Função da página ${index + 1}.` }
+    ? { ...page, headline: `Título da página ${index + 1}`, body: `Resumo da página ${index + 1}.`, copy: `Copy da página ${index + 1}.`, visual_function: `Função da página ${index + 1}.` }
     : page));
   await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
 }
@@ -46,21 +46,6 @@ async function entriesOf(path: string): Promise<string[]> {
   }
 }
 
-test('carousel generation requires an explicit logo policy before any round or engine call', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'mdc-carousel-policy-'));
-  const { runtime, project } = await openCarousel(root);
-  let engineCalls = 0;
-  runtime.services.run = async () => { engineCalls += 1; throw new Error('O motor não deve iniciar sem política de logo.'); };
-  try {
-    await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true }), /Escolha onde aplicar a logo/);
-    await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true, logoPolicy: 'sempre' }), /Escolha onde aplicar a logo/);
-    assert.equal(engineCalls, 0);
-    assert.deepEqual(await entriesOf(join(project.path, 'generated', 'runs')), []);
-  } finally {
-    await runtime.dispose();
-    await rm(root, { recursive: true, force: true });
-  }
-});
 
 test('carousel generation with empty pages stops before creating a round, context, or engine run', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mdc-carousel-empty-'));
@@ -68,7 +53,7 @@ test('carousel generation with empty pages stops before creating a round, contex
   let engineCalls = 0;
   runtime.services.run = async () => { engineCalls += 1; throw new Error('O motor não deve iniciar com páginas vazias.'); };
   try {
-    await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true, logoPolicy: 'cover-closing' }), /copy vazia/);
+    await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true }), /copy de publicação vazia/);
     assert.equal(engineCalls, 0);
     assert.deepEqual(await entriesOf(join(project.path, 'generated', 'runs')), []);
     assert.deepEqual(await entriesOf(join(project.path, '.studio-context')), []);
@@ -99,11 +84,11 @@ test('carousel engine context lists only written slides and never the whole-proj
     const contextFiles = (await entriesOf(contextDirectory)).filter(name => name.endsWith('.txt'));
     assert.equal(contextFiles.length, 1);
     const context = await readFile(join(contextDirectory, contextFiles[0]!), 'utf8');
-    assert.match(context, /## Carrossel \(ordem de leitura\)/);
-    assert.match(context, /Título: Título da página 1 ·/);
-    assert.match(context, /Título: Título da página 5 ·/);
+    assert.match(context, /## Publicação \(ordem de leitura\)/);
+    assert.match(context, /Headline na arte: Título da página 1 · Body na arte: Resumo da página 1\./);
+    assert.match(context, /Copy para legenda: Copy da página 5\./);
     assert.doesNotMatch(context, /Título da página 2/);
-    assert.doesNotMatch(context, /Título: —/);
+    assert.doesNotMatch(context, /Headline na arte: vazio/);
     assert.doesNotMatch(context, /Brief Maestro/);
   } finally {
     process.env.PATH = previousPath ?? '';

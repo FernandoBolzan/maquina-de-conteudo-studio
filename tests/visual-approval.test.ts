@@ -51,16 +51,17 @@ async function withReviewableProject(run: (fixture: ReviewableProject) => Promis
     native.cta = 'Salve para consultar depois.';
     const pages = (native.pages as Record<string, unknown>[]).map((page, index) => {
       const headline = `Título da página ${index + 1}`;
+      const body = `Resumo curto da página ${index + 1}.`;
       const copy = `Copy editorial da página ${index + 1}.`;
       const visualFunction = `Função visual da página ${index + 1}.`;
       const promptFile = String(page.prompt_file);
-      return { ...page, headline, copy, visual_function: visualFunction, depicted_person: 'none', prompt_file: promptFile };
+      return { ...page, headline, body, copy, visual_function: visualFunction, depicted_person: 'none', prompt_file: promptFile };
     });
     native.pages = pages;
     native.editorial = { claims_reviewed: false, copy_approved: false };
     await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
     for (const page of pages) {
-      await writeFile(join(project.path, String(page.prompt_file)), `Copy aprovada: ${page.copy}\nFunção visual: ${page.visual_function}\nDireção visual editorial refinada.\n`);
+      await writeFile(join(project.path, String(page.prompt_file)), `## Texto na arte\nHeadline: ${page.headline}\nBody: ${page.body}\n\n## Composição\n${page.visual_function}\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\n${page.copy}\n`);
     }
     const claimsPath = join(project.path, 'research', 'claims.json');
     await writeFile(claimsPath, `${JSON.stringify({ reviewed: false, claims: [CLAIM] }, null, 2)}\n`);
@@ -70,6 +71,17 @@ async function withReviewableProject(run: (fixture: ReviewableProject) => Promis
     await rm(root, { recursive: true, force: true });
   }
 }
+test('text review preserves the user-selected carousel page count against agent changes', () => withReviewableProject(async ({ runtime, project, pages, projectJsonPath }) => {
+  const native = JSON.parse(await readFile(projectJsonPath, 'utf8')) as Record<string, unknown>;
+  native.page_count = 3;
+  native.pages = pages.slice(0, 3);
+  await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
+  let detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
+  assert.equal(detail.visualReview?.ready, false);
+  assert.ok(detail.visualReview?.blocking.some(message => message.includes('criado com 5 páginas')), detail.visualReview?.blocking.join(' | '));
+  detail = await runtime.invoke('projects.imageFormat', { id: project.id, format: 'carousel-4x5' }) as ProjectDetail;
+  assert.equal(detail.formatAdaptation?.pageCount, 5, 'format adaptation keeps the selected page count instead of adopting agent-edited pages');
+}));
 test('format adaptation preserves the original snapshot, blocks approval and validates retries in both directions', () => withReviewableProject(async ({ runtime, project, pages, projectJsonPath }) => {
   const workspace = runtime.services.getSettings().workspace;
   const original = await readFile(projectJsonPath, 'utf8');
@@ -79,7 +91,7 @@ test('format adaptation preserves the original snapshot, blocks approval and val
   assert.equal((first.snapshot as { files: Record<string, string> }).files['project.json'], original);
   assert.match((first.snapshot as { files: Record<string, string> }).files[String(pages[4]!.prompt_file)]!, /Copy editorial da página 5/);
   await assert.rejects(runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }), /Adapte os textos/);
-  await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true, logoPolicy: 'all-pages' }), /Adapte os textos/);
+  await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true }), /Adapte os textos/);
   await assert.rejects(completeFormatAdaptation(workspace, project.id, first.adaptation, new AbortController().signal), /quantidade/);
   assert.deepEqual((await readFormatAdaptation(workspace, project.id)).snapshot, first.snapshot);
   const aborted = new AbortController();
@@ -113,7 +125,7 @@ test('PostNow image generation requires a hash-matching human review of copy, cl
   let detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
   assert.equal(detail.visualReview?.ready, true);
   assert.equal(detail.visualReview?.approved, false);
-  await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true, logoPolicy: 'all-pages' }), /aprov/i);
+  await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true }), /aprov/i);
   await assert.rejects(runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: '0'.repeat(64) }), /mudou depois da revisão/i);
 
   detail = await runtime.invoke('projects.visual.approve', {
@@ -122,10 +134,11 @@ test('PostNow image generation requires a hash-matching human review of copy, cl
   assert.equal(detail.visualReview?.approved, true);
 
   const promptPath = join(project.path, String(pages[0]!.prompt_file));
-  await writeFile(promptPath, `${await readFile(promptPath, 'utf8')}Alteração posterior.\n`);
+  const prompt = await readFile(promptPath, 'utf8');
+  await writeFile(promptPath, prompt.replace('## Composição\n', '## Composição\nAlteração posterior.\n'));
   detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
   assert.equal(detail.visualReview?.approved, false);
-  await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true, logoPolicy: 'all-pages' }), /aprov/i);
+  await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true }), /aprov/i);
 }));
 
 test('editorial flags set outside the Studio are cleared unless they match the approved content', () => withReviewableProject(async ({ runtime, project, pages, projectJsonPath, claimsPath }) => {
@@ -152,7 +165,8 @@ test('editorial flags set outside the Studio are cleared unless they match the a
   assert.equal(detail.visualReview?.approved, true);
 
   const promptPath = join(project.path, String(pages[0]!.prompt_file));
-  await writeFile(promptPath, `${await readFile(promptPath, 'utf8')}Alteração fora do Studio.\n`);
+  const prompt = await readFile(promptPath, 'utf8');
+  await writeFile(promptPath, prompt.replace('## Composição\n', '## Composição\nAlteração fora do Studio.\n'));
   await preMark();
   detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
   assert.equal(detail.visualReview?.approved, false);
@@ -176,4 +190,29 @@ test('a malformed claims.json blocks the visual review and the approval', () => 
   await assert.rejects(runtime.invoke('projects.visual.approve', {
     id: project.id, approved: true, contentHash: detail.visualReview!.contentHash,
   }), /Ainda não é seguro aprovar/);
+}));
+
+test('a dash in the headline or copy blocks the review and the approval until it is rewritten', () => withReviewableProject(async ({ runtime, project, pages, projectJsonPath }) => {
+  const dashed = `Copy ${'\u2014'} com travessão na página 1.`;
+  const native = JSON.parse(await readFile(projectJsonPath, 'utf8')) as { pages: { headline: string; body: string; copy: string; visual_function: string }[] };
+  native.pages[0]!.copy = dashed;
+  native.pages[0]!.headline = `Título ${'\u2013'} dois`;
+  await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
+  const promptPath = join(project.path, String(pages[0]!.prompt_file));
+  await writeFile(promptPath, `## Texto na arte\nHeadline: ${native.pages[0]!.headline}\nBody: ${native.pages[0]!.body}\n\n## Composição\n${native.pages[0]!.visual_function}\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\n${dashed}\n`);
+
+  let detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
+  assert.equal(detail.visualReview?.ready, false);
+  assert.ok(detail.visualReview?.blocking.includes('Página 1: a headline tem travessão. Reescreva sem travessão: use vírgula, ponto, dois-pontos ou parênteses.'));
+  assert.ok(detail.visualReview?.blocking.some(item => item.startsWith('Página 1: a copy tem travessão.')));
+  assert.equal(detail.visualReview?.blocking.some(item => item.startsWith('Página 2:')), false);
+  await assert.rejects(runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }), /Ainda não é seguro aprovar/);
+
+  native.pages[0]!.copy = 'Copy sem travessão na página 1.';
+  native.pages[0]!.headline = 'Título limpo';
+  await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
+  await writeFile(promptPath, `## Texto na arte\nHeadline: ${native.pages[0]!.headline}\nBody: ${native.pages[0]!.body}\n\n## Composição\n${native.pages[0]!.visual_function}\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\n${native.pages[0]!.copy}\n`);
+  detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
+  assert.equal(detail.visualReview?.ready, true);
+  assert.deepEqual(detail.visualReview?.blocking, []);
 }));

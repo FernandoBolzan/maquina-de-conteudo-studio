@@ -1,6 +1,6 @@
 {
   "name": "maquina-de-conteudo",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Estúdio local de criação de conteúdo com Codex e Claude Code",
@@ -30,7 +30,8 @@
     "node-pty": "^1.1.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "three": "0.128.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
@@ -89,12 +90,16 @@
         "zip"
       ],
       "category": "public.app-category.video",
+      "identity": "-",
+      "hardenedRuntime": false,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "A Máquina de Conteúdo usa o microfone para gravar a narração de cada cena no Modo Studio."
       }
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
+      "selectPerMachineByDefault": false,
       "allowToChangeInstallationDirectory": true
     },
     "npmRebuild": true

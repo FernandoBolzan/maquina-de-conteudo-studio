@@ -9,7 +9,7 @@ import type { AgentActivity, AppEvent, Job, JobInteractionRequest, Provider } fr
 import { ANSI_SEQUENCE } from '../shared/terminal-text.js';
 import { interpretAgentLine } from '../shared/agent-events.js';
 import type { CommandResult, RunSpec } from './context.js';
-import { executableArgs } from './executable.js';
+import { executableArgs, mergeEnvironment } from './executable.js';
 const MAX_LOG = 128 * 1024;
 function redact(text: string): string {
   return text.replace(/(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{16,}|(?:sk|xi)[_-][A-Za-z0-9_-]{16,})/g, '[credencial ocultada]');
@@ -27,7 +27,7 @@ function detectInteraction(log: string): JobInteractionRequest | undefined {
   if (/(?:enter|type|provide|paste|input|digite|informe)\s+[^:\n]{1,80}[:?]\s*$/im.test(recent)) return { kind: 'text', prompt: recent };
   return undefined;
 }
-interface Running { job: Job; child?: ChildProcess; pty?: IPty; pending: string; lineBuffer: string; agentStream?: Provider; timer?: NodeJS.Timeout; deadline?: NodeJS.Timeout; done: Promise<Job>; resolve: (job: Job) => void; cancelling: boolean; suppressOutput: boolean; finalizing: boolean; controller: AbortController; onSuccess?: (signal: AbortSignal) => Promise<string | void>; }
+interface Running { job: Job; child?: ChildProcess; pty?: IPty; pending: string; lineBuffer: string; agentStream?: Provider; timer?: NodeJS.Timeout; deadline?: NodeJS.Timeout; done: Promise<Job>; resolve: (job: Job) => void; cancelling: boolean; suppressOutput: boolean; finalizing: boolean; controller: AbortController; onSuccess?: (signal: AbortSignal) => Promise<string | void>; onFailure?: (signal: AbortSignal) => Promise<void>; }
 export class Supervisor {
   private records = new Map<string, Job>();
   private active = new Map<string, Running>();
@@ -126,6 +126,14 @@ export class Supervisor {
         error = failure instanceof Error ? failure.message : String(failure);
       }
     }
+    if ((code !== 0 || running.cancelling) && running.onFailure) {
+      try {
+        await running.onFailure(running.controller.signal);
+      } catch (failure) {
+        const message = failure instanceof Error ? failure.message : String(failure);
+        error = error ? `${error}\n${message}` : message;
+      }
+    }
     clearTimeout(running.deadline);
     if (error) this.output(running, `\r\n${error}\r\n`);
     this.flush(running);
@@ -143,10 +151,10 @@ export class Supervisor {
     if (spec.projectId && [...this.active.values()].some(r => r.job.projectId === spec.projectId)) throw new Error('Este projeto já possui uma tarefa ativa.');
     const job: Job = { id: randomUUID(), title: spec.title, projectId: spec.projectId, status: 'running', createdAt: new Date().toISOString(), log: '', interactive: !!spec.interactive, ...(spec.agentSession ? { agentSession: true } : {}) };
     const { promise: done, resolve } = Promise.withResolvers<Job>();
-    const running: Running = { job, pending: '', lineBuffer: '', agentStream: spec.agentStream, done, resolve, cancelling: false, suppressOutput: false, finalizing: false, controller: new AbortController(), onSuccess: spec.onSuccess };
+    const running: Running = { job, pending: '', lineBuffer: '', agentStream: spec.agentStream, done, resolve, cancelling: false, suppressOutput: false, finalizing: false, controller: new AbortController(), onSuccess: spec.onSuccess, onFailure: spec.onFailure };
     this.records.set(job.id, job); this.active.set(job.id, running);
     this.emit({ type: 'job', job: { ...job } }); this.persist();
-    const env = { ...process.env, ...spec.env };
+    const env = mergeEnvironment(process.env, spec.env);
     for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete env[key];
     try {
       const command = executableArgs(spec.executable, spec.args);
@@ -247,7 +255,7 @@ export class Supervisor {
 export async function capture(executable: string, args: string[], options: { input?: string; cwd?: string; env?: Record<string,string>; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<CommandResult> {
   const command = executableArgs(executable, args);
   const { promise, resolve } = Promise.withResolvers<CommandResult>();
-    const child = spawn(command.executable, command.args, { cwd: options.cwd, env: { ...process.env, ...options.env }, windowsHide: true, shell: false, detached: process.platform !== 'win32', stdio: [options.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+    const child = spawn(command.executable, command.args, { cwd: options.cwd, env: mergeEnvironment(process.env, options.env), windowsHide: true, shell: false, detached: process.platform !== 'win32', stdio: [options.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
     if (options.input !== undefined && child.stdin) {
       child.stdin.on('error', () => { /* Encerramento anterior pelo processo */ });
       child.stdin.end(options.input);

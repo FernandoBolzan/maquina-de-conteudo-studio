@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
-import { approvedPortraitAt, composeEnginePrompt, engineClientId } from '../src/main/content/postnow.js';
+import { approvedPortraitAt, composeEnginePrompt, engineClientId, postnowHome, preparePostNowGeneration } from '../src/main/content/postnow.js';
 import { Runtime } from '../src/main/runtime.js';
 import type { Brand, Project, ProjectDetail } from '../src/shared/contracts.js';
-import { portraitDiversityIssues, portraitPlanIssues, portraitRequiredPages } from '../src/shared/depicted-person.js';
+import { brandImageOptOutIssues, portraitDiversityIssues, portraitPlanIssues, portraitRequiredPages } from '../src/shared/depicted-person.js';
 
 const ONE_PIXEL_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p2sAAAAASUVORK5CYII=', 'base64');
 const ENGINE_MARKERS = [
@@ -47,7 +47,7 @@ test('composeEnginePrompt is idempotent and switching identity equals composing 
   assert.equal(composeEnginePrompt(once, 'other_person'), composeEnginePrompt(editorial, 'other_person'));
 });
 
-async function carouselWithIdentities(root: string, identity: (index: number) => string | undefined): Promise<{ runtime: Runtime; project: Project }> {
+async function carouselWithIdentities(root: string, identity: (index: number) => string | undefined, useBrandImages = true): Promise<{ runtime: Runtime; project: Project }> {
   const runtime = new Runtime(join(root, 'data'), {
     assetPrefix: 'media://asset/',
     secureStorageAvailable: () => false,
@@ -64,7 +64,7 @@ async function carouselWithIdentities(root: string, identity: (index: number) =>
   await writeFile(logo, ONE_PIXEL_PNG);
   const brand = await runtime.invoke('brands.save', { name: 'Marca de teste', tone: 'Claro e direto.', colors: ['#123456'], logo }) as Brand;
   const project = await runtime.invoke('projects.create', {
-    title: 'Carrossel de identidade', kind: 'image', format: 'carousel-1x1', brief: 'Explicar um tema com fontes.', brandId: brand.id,
+    title: 'Carrossel de identidade', kind: 'image', format: 'carousel-1x1', brief: 'Explicar um tema com fontes.', brandId: brand.id, useBrandImages,
   }) as Project;
   const projectJsonPath = join(project.path, 'project.json');
   const native = JSON.parse(await readFile(projectJsonPath, 'utf8')) as Record<string, unknown>;
@@ -77,6 +77,7 @@ async function carouselWithIdentities(root: string, identity: (index: number) =>
   const pages = (native.pages as Record<string, unknown>[]).map((page, index) => ({
     ...page,
     headline: `Título da página ${index + 1}`,
+    body: `Resumo curto da página ${index + 1}.`,
     copy: `Copy editorial da página ${index + 1}.`,
     visual_function: `Função visual da página ${index + 1}.`,
     depicted_person: identity(index),
@@ -84,7 +85,7 @@ async function carouselWithIdentities(root: string, identity: (index: number) =>
   native.pages = pages;
   await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
   for (const page of pages) {
-    await writeFile(join(project.path, String(page.prompt_file)), `Copy editorial: ${page.copy}\nFunção visual: ${page.visual_function}\nDireção visual editorial refinada.\n`);
+    await writeFile(join(project.path, String(page.prompt_file)), `## Texto na arte\nHeadline: ${page.headline}\nBody: ${page.body}\n\n## Composição\n${page.visual_function}\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\n${page.copy}\n`);
   }
   await writeFile(join(project.path, 'research', 'claims.json'), `${JSON.stringify({ reviewed: false, claims: [{ id: 'claim-1', claim: 'Fato verificável.', source: 'Fonte oficial', source_url: 'https://example.org/fonte', status: 'approved' }] }, null, 2)}\n`);
   return { runtime, project };
@@ -126,7 +127,7 @@ test('agents.generateImages stops before any PostNow round when a page has no de
   const { runtime, project } = await carouselWithIdentities(root, (index) => (index === 0 ? undefined : 'none'));
   try {
     await assert.rejects(
-      runtime.invoke('agents.generateImages', { id: project.id, confirm: true, logoPolicy: 'cover-closing' }),
+      runtime.invoke('agents.generateImages', { id: project.id, confirm: true }),
       /Página 1: defina quem aparece na arte/,
     );
     assert.deepEqual(await readdir(join(project.path, 'generated', 'runs')).catch(() => []), []);
@@ -146,6 +147,21 @@ test('composeEnginePrompt puts the approved portrait instruction on the page and
   assert.deepEqual(lines.filter((line) => line.startsWith('POSTNOW_DEPICTED_PERSON=')), ['POSTNOW_DEPICTED_PERSON=client_portrait']);
   assert.equal(composeEnginePrompt(cover, 'none'), composeEnginePrompt(editorial, 'none'));
   assert.throws(() => composeEnginePrompt(editorial, 'client_portrait'), /retrato aprovado/);
+});
+
+test('composeEnginePrompt injects the library visual direction once, before the policy, and replaces or drops it cleanly', () => {
+  const editorial = 'Copy: X\nFunção visual: Y\n';
+  const dark = { id: 'image-dark-mode-carousel', title: 'Modo Escuro', direction: 'Fundo escuro e acentos luminosos.' };
+  const collage = { id: 'collage-carousel', title: 'Colagem', direction: 'Recortes e blocos de cor.' };
+  const withDark = composeEnginePrompt(editorial, 'none', undefined, dark);
+  const lines = withDark.split('\n');
+  const styleLines = lines.filter((line) => line.startsWith('Direção visual da biblioteca ('));
+  assert.deepEqual(styleLines, ['Direção visual da biblioteca (Modo Escuro): Fundo escuro e acentos luminosos.']);
+  assert.ok(lines.indexOf(styleLines[0]!) < lines.indexOf('## Política de geração PostNow'));
+  for (const marker of ENGINE_MARKERS) assert.equal(lines.filter((line) => line === marker).length, 1, marker);
+  assert.equal(composeEnginePrompt(withDark, 'none', undefined, dark), withDark);
+  assert.equal(composeEnginePrompt(withDark, 'none', undefined, collage), composeEnginePrompt(editorial, 'none', undefined, collage));
+  assert.equal(composeEnginePrompt(withDark, 'none'), composeEnginePrompt(editorial, 'none'));
 });
 
 test('portraitRequiredPages covers the carousel cover and closing page, or the single page of a post or story', () => {
@@ -180,12 +196,92 @@ test('approvedPortraitAt reads brand.owner_portrait from the engine profile and 
   }
 });
 
+test('approvedPortraitAt repairs a legacy portrait profile without dropping its client identity', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'mdc-portrait-profile-repair-'));
+  const brand = { id: '5e90b759-01c1-41c2-874d-edf468c74020', name: 'Fernando Bolzan', colors: ['#15f919'] } as Brand;
+  const profileDir = join(home, 'clients', engineClientId(brand));
+  const profilePath = join(profileDir, 'profile.json');
+  try {
+    await mkdir(profileDir, { recursive: true });
+    await writeFile(profilePath, JSON.stringify({
+      client_id: engineClientId(brand),
+      name: 'Fernando Bolzan',
+      preserved_setting: 'keep',
+      brand: { owner_portrait: 'references/portrait.png', reference_images: ['references/portrait.png'] },
+    }));
+    assert.equal(await approvedPortraitAt(home, brand), 'references/portrait.png');
+    const repaired = JSON.parse(await readFile(profilePath, 'utf8')) as {
+      preserved_setting: string;
+      logo: { required: boolean; required_on: string[] };
+      formats: { carousel: { page_count: number }; post: { width: number }; story: { height: number } };
+      brand: { owner_portrait: string };
+    };
+    assert.equal(repaired.preserved_setting, 'keep');
+    assert.equal(repaired.logo.required, true);
+    assert.deepEqual(repaired.logo.required_on, ['cover', 'cta', 'single', 'story']);
+    assert.equal(repaired.formats.carousel.page_count, 10);
+    assert.equal(repaired.formats.post.width, 1080);
+    assert.equal(repaired.formats.story.height, 1920);
+    assert.equal(repaired.brand.owner_portrait, 'references/portrait.png');
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 async function approveClientPortrait(root: string, project: Project): Promise<void> {
   const brand = { id: project.brandId, name: 'Marca de teste' } as Brand;
   const profileDir = join(root, 'data', 'engine-data', 'postnow', 'clients', engineClientId(brand));
   await mkdir(profileDir, { recursive: true });
   await writeFile(join(profileDir, 'profile.json'), JSON.stringify({ brand: { owner_portrait: 'references/54f0e063-6ff3-494d-898e-7f125c3cd03c.jpeg' } }));
 }
+
+test('photo opt-out blocks client portraits before PostNow profile lookup or engine execution', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mdc-photo-opt-out-'));
+  const identities = ['client_portrait', 'none', 'none', 'none', 'none'];
+  const { runtime, project } = await carouselWithIdentities(root, index => identities[index], false);
+  let engineCalls = 0;
+  runtime.services.run = async () => { engineCalls += 1; throw new Error('Engine must not run.'); };
+  try {
+    assert.deepEqual(brandImageOptOutIssues(['none', 'other_person']), []);
+    assert.match(brandImageOptOutIssues(['client_portrait'])[0]!, /foto\/retrato da marca foi desativado/);
+    const detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
+    assert.equal(detail.visualReview?.ready, false);
+    assert.ok(detail.visualReview?.blocking.some(message => /foto\/retrato da marca foi desativado/.test(message)));
+    await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true }), /foto\/retrato da marca foi desativado/);
+    assert.equal(engineCalls, 0);
+    assert.deepEqual(await readdir(join(project.path, 'generated', 'runs')).catch(() => []), []);
+  } finally {
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('PostNow mirror keeps the visual subtitle local and strips it from the engine schema', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mdc-postnow-body-schema-'));
+  const { runtime, project } = await carouselWithIdentities(root, () => 'none', false);
+  const batchId = '1794112691702-c6c3b30e';
+  try {
+    const engine = join(root, 'PostNow');
+    const python = join(engine, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+    await mkdir(join(engine, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin'), { recursive: true });
+    await writeFile(python, '');
+    await runtime.services.saveSettings({ enginePaths: { postnow: engine } });
+    runtime.services.capture = async () => ({ code: 0, stdout: '', stderr: '' });
+    const brand = (await runtime.invoke('brands.list', {} ) as Brand[]).find(item => item.id === project.brandId)!;
+    await preparePostNowGeneration(project, brand, batchId, runtime.services);
+    const home = await postnowHome(runtime.services);
+    const projects = await readdir(join(home, 'clients', engineClientId(brand), 'projects'));
+    const external = JSON.parse(await readFile(join(home, 'clients', engineClientId(brand), 'projects', projects[0]!, 'project.json'), 'utf8')) as { pages: Record<string, unknown>[] };
+    const local = JSON.parse(await readFile(join(project.path, 'project.json'), 'utf8')) as { pages: Record<string, unknown>[] };
+    assert.equal(local.pages[0]!.body, 'Resumo curto da página 1.');
+    assert.equal(external.pages[0]!.body, undefined);
+    assert.equal(external.pages[0]!.headline, local.pages[0]!.headline);
+    assert.equal(external.pages[0]!.copy, local.pages[0]!.copy);
+  } finally {
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 
 test('client_portrait without an approved portrait in the engine profile blocks the visual review', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mdc-depicted-person-'));

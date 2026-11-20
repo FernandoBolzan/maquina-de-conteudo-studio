@@ -4,7 +4,7 @@ This file should stay small. Refresh it after substantive work or run `orquestra
 
 ## Snapshot
 
-- Updated: 2026-11-10T02:53:43.808Z
+- Updated: 2026-11-16T19:36:42.591Z
 - Read order: `INDEX.md` -> `HANDOFF.md` -> `CONTEXT.md` -> `SPECS/ACTIVE.md`
 - Active spec: `SPECS/ACTIVE.md`
 - Verification source: `VERIFY.md`
@@ -12,15 +12,17 @@ This file should stay small. Refresh it after substantive work or run `orquestra
 
 ## Latest Work
 
-- Entry: 2026-11-10 — Release 0.2.1: abas do submenu corrigidas
+- Entry: 2026-11-16 — Motores & Setup e workspace ElevenLabs
 - Spec: `DEV/SPECS/ACTIVE.md`
-- Changed: `src/renderer/shell-refined.css` — `.setup-subnav` com `flex-wrap: wrap` e sem `overflow-x: auto`; as abas "Motores & CLIs" e "ElevenLabs & Voz" quebram para outra linha em vez de cortar. `package.json` e `package-lock.json` em 0.2.1. README e `DEV/RUNBOOKS/RELEASES.md` atualizados ao estado publicado.
-- Verified: `npm run typecheck`, `npm run lint`, `npm test` 230/230, `npm run smoke` (`ok: true`); preview visual em 4178 mostrou as duas abas inteiras, sem barra de rolagem.
-- Risks: [list only active risks]
-- Next context: após publicar 0.2.1, testar a atualização de uma instalação 0.2.0 para 0.2.1; decidir licença e assinatura de macOS/Windows.
+- Plan: `.omx/plans/motores-setup-ux-20261116T185253Z.md` (RALPLAN Architect + Critic aprovados).
+- Changed: `Setup.tsx` agrupa agentes/CLIs, motores e ferramentas de sistema; `VideoGoVoiceSetup.tsx` organiza chave/cofre, biblioteca e clonagem opcional; CSS escolhe um único seletor por breakpoint, corrige breadcrumb; `App.tsx` nomeia ações icon-only.
+- Verified: typecheck, lint, `npm test` 296/296, build e smoke isolado (`ok: true`). Preview 320/390/768/1024/1440 sem overflow/truncamento; setas alternam tabs; fixture sintética exercitou busca/filtro/vazio/erro. Console sem erro; revisão independente sem findings.
+- Risks: sequência composta falhou uma vez na proteção POSTNOW_HOME sob `/tmp`; smoke standalone passou depois, sem causa isolada. Build avisa renderer JS 853,06 kB >500 kB. Sem Electron/keychain, chave real, reprodução de áudio, TTS ou clonagem.
+- Next context: reiniciar Electron para carregar os assets; validar chave, cofre e áudio real apenas com autorização explícita.
 
 ## Recent Entries
 
+- 2026-11-16 — Motores & Setup e workspace ElevenLabs
 - 2026-11-10 — Release 0.2.1: abas do submenu corrigidas
 - 2026-11-10 — Atualização automática do app por release por tag (v0.2.0)
 - 2026-11-09 — Fluxo simplificado: Avançar aprova a etapa; isolamento das contas Claude/Codex

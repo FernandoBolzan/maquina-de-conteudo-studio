@@ -1,12 +1,15 @@
 import type { CliId, SetupStatus } from '../shared/contracts.js';
 import { consent, text, type CommandResult, type Services } from './context.js';
 import { engineId, engineStatuses, linkEngine, manageEngine, testEngine } from './setup/engines.js';
-import { checkCliUpdates, installTool, manageCliTool, requireTool, toolEnvironment, toolStatus } from './setup/tools.js';
+import { captureTool, checkCliUpdates, installTool, manageCliTool, requireTool, toolEnvironment, toolStatus } from './setup/tools.js';
 export { resolveTool, toolEnvironment } from './setup/tools.js';
 
 const queues = new Map<string, Promise<void>>();
 const logins = new Set<string>();
 const toolIds = ['git', 'node', 'npm', 'python', 'ffmpeg', 'ffprobe', 'gh', 'codex', 'claude', 'maestro', 'hyperframes', 'cloudflared'];
+export function githubLoginFromAuthStatus(output: string): string | undefined {
+  return output.match(/Logged in to github\.com account ([A-Za-z0-9-]{1,39})(?=\s|\()/i)?.[1];
+}
 
 async function serialize<T>(services: Services, operation: () => Promise<T>): Promise<T> {
   const previous = queues.get(services.dataDir) ?? Promise.resolve();
@@ -31,6 +34,12 @@ async function status(services: Services): Promise<SetupStatus> {
 }
 
 export async function handleSetup(action: string, payload: Record<string, unknown>, services: Services): Promise<unknown> {
+  if (action === 'setup.githubLogin') {
+    try {
+      const result = await captureTool('gh', ['auth', 'status', '--hostname', 'github.com'], services, 10000);
+      return result.code === 0 ? githubLoginFromAuthStatus(result.stdout + '\n' + result.stderr) : undefined;
+    } catch { return undefined; }
+  }
   if (action === 'setup.status') return status(services);
   if (action === 'setup.cliUpdates') return checkCliUpdates(services);
   if (!['setup.install', 'setup.login', 'setup.logout', 'setup.engine', 'setup.link', 'setup.cli', 'setup.engineTest'].includes(action)) throw new Error('Ação de configuração desconhecida.');
@@ -102,7 +111,7 @@ export async function handleSetup(action: string, payload: Record<string, unknow
       const job = await installTool(tool, services);
       const completed = await services.waitJob(job.id);
       services.emit({ type: 'refresh' });
-      if (completed.status !== 'succeeded') throw new Error(`Instalação ${completed.status === 'cancelled' ? 'cancelada' : 'não concluída'}. Consulte o terminal do job ${job.id}. No Linux, autorize o diálogo administrativo; no Windows, instaladores sem escopo usuário exigem instalação manual pelo administrador. Nenhuma elevação automática é feita.`);
+      if (completed.status !== 'succeeded') throw new Error(`Instalação ${completed.status === 'cancelled' ? 'cancelada' : 'não concluída'}. Consulte o terminal do job ${job.id}. No Linux, autorize o diálogo administrativo; no Windows, confirme o aviso de administrador quando o instalador pedir (o Studio não eleva sozinho).`);
       return completed;
     }
     const engine = engineId(payload.engine);

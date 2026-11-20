@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type JSX, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Archive, ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight, Download, FolderOpen, Maximize2, RotateCcw, Send, Trash2, X } from 'lucide-react';
+import { Archive, ArrowLeft, ArrowRight, Check, CheckCheck, ChevronLeft, ChevronRight, Download, FolderOpen, Maximize2, Pencil, RotateCcw, Send, Trash2, X } from 'lucide-react';
 import type { AgentAnswer, AgentQuestion } from '../shared/agent-followup';
 import { Modal } from './components';
 
@@ -68,7 +68,7 @@ export function StepShell({ eyebrow, title, description, children, footer }: { e
   );
 }
 
-export function StepNav({ onBack, backLabel = 'Voltar', onNext, nextLabel, nextDisabled, hint, extra }: { onBack?: () => void; backLabel?: string; onNext?: () => void; nextLabel: string; nextDisabled?: boolean; hint?: ReactNode; extra?: ReactNode }): JSX.Element {
+export function StepNav({ onBack, backLabel = 'Voltar', onNext, nextLabel, nextDisabled, hint, extra }: { onBack?: () => void; backLabel?: string; onNext?: () => void; nextLabel?: string; nextDisabled?: boolean; hint?: ReactNode; extra?: ReactNode }): JSX.Element {
   return (
     <>
       {hint ? <p className="studio-step-hint" role="status">{hint}</p> : null}
@@ -82,8 +82,8 @@ export function StepNav({ onBack, backLabel = 'Voltar', onNext, nextLabel, nextD
           ) : null}
           {extra}
         </div>
-        {onNext ? (
-          <button type="button" className="button primary" disabled={nextDisabled} onClick={onNext}>
+        {nextLabel ? (
+          <button type="button" className="button primary" disabled={nextDisabled || !onNext} onClick={onNext}>
             {nextLabel}
             <ArrowRight size={16} aria-hidden="true" />
           </button>
@@ -93,17 +93,40 @@ export function StepNav({ onBack, backLabel = 'Voltar', onNext, nextLabel, nextD
   );
 }
 
+export interface DecisionToggleProps {
+  kind: 'approve' | 'revision';
+  active: boolean;
+  label: string;
+  ariaLabel: string;
+  onClick: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+  title?: string;
+}
+
+export function DecisionToggle({ kind, active, label, ariaLabel, onClick, disabled, busy, title }: DecisionToggleProps): JSX.Element {
+  const Icon = kind === 'approve' ? (active ? CheckCheck : Check) : active ? RotateCcw : Pencil;
+  const className = ['button', 'small', 'decision-btn', active ? (kind === 'approve' ? 'is-approved' : 'is-revision') : ''].filter(Boolean).join(' ');
+  return (
+    <button type="button" className={className} aria-pressed={active} aria-label={ariaLabel} aria-busy={busy} disabled={disabled} title={title} onClick={onClick}>
+      <Icon size={14} aria-hidden="true" />
+      {label}
+    </button>
+  );
+}
+
 export interface ImageReviewItem {
   path: string;
   name: string;
   url: string;
   decision: 'kept' | 'redo' | 'pending';
   note: string;
+  busy?: boolean;
 }
 
 const DECISION_CHIP: Record<ImageReviewItem['decision'], { label: string; className: string }> = {
-  kept: { label: 'Mantida', className: 'decision-chip is-kept' },
-  redo: { label: 'Refazer', className: 'decision-chip is-redo' },
+  kept: { label: 'Aprovada', className: 'decision-chip is-kept' },
+  redo: { label: 'Revisão solicitada', className: 'decision-chip is-redo' },
   pending: { label: 'Pendente', className: 'decision-chip is-pending' },
 };
 
@@ -112,52 +135,64 @@ const FOCUSABLE_SELECTOR = 'button:not(:disabled), textarea:not(:disabled), inpu
 interface DecisionControlsProps {
   item: ImageReviewItem;
   disabled: boolean;
-  onKeep: (path: string) => void;
-  onRedo: (path: string, note: string) => void;
+  onApprove: (path: string) => void;
+  onRevise: (path: string, note: string) => void;
   onClear: (path: string) => void;
 }
 
-export type ImageDecisionHandlers = Pick<DecisionControlsProps, 'onKeep' | 'onRedo' | 'onClear'>;
+export type ImageDecisionHandlers = Pick<DecisionControlsProps, 'onApprove' | 'onRevise' | 'onClear'>;
 
-function DecisionControls({ item, disabled, onKeep, onRedo, onClear }: DecisionControlsProps): JSX.Element {
-  const [redoOpen, setRedoOpen] = useState(false);
+function DecisionControls({ item, disabled, onApprove, onRevise, onClear }: DecisionControlsProps): JSX.Element {
   const [note, setNote] = useState(item.note);
   const noteId = useId();
-  const hasNote = note.trim().length > 0;
+  const approved = item.decision === 'kept';
+  const revision = item.decision === 'redo';
 
-  const openRedo = () => {
+  // Última nota conhecida pelo servidor; evita reenviar o mesmo texto e permite o flush ao desmontar.
+  const latest = useRef({ note, saved: item.note, decision: item.decision, path: item.path, onRevise });
+  latest.current = { note, saved: item.note, decision: item.decision, path: item.path, onRevise };
+
+  useEffect(() => {
     setNote(item.note);
-    setRedoOpen(true);
-  };
-  const confirmRedo = () => {
-    onRedo(item.path, note.trim());
-    setRedoOpen(false);
-  };
-  const keep = () => {
-    setRedoOpen(false);
-    onKeep(item.path);
-  };
-  const clear = () => {
-    setRedoOpen(false);
-    onClear(item.path);
+  }, [item.note]);
+
+  useEffect(
+    () => () => {
+      const current = latest.current;
+      if (current.decision === 'redo' && current.note.trim() !== current.saved.trim()) current.onRevise(current.path, current.note.trim());
+    },
+    [],
+  );
+
+  const flushNote = () => {
+    if (note.trim() !== item.note.trim()) onRevise(item.path, note.trim());
   };
 
   return (
     <div className="image-review-decisions">
       <div className="image-review-decision-buttons">
-        <button type="button" className="button small" aria-pressed={item.decision === 'kept'} disabled={disabled} onClick={keep}>
-          <Check size={14} aria-hidden="true" />
-          Manter
-        </button>
-        <button type="button" className="button small" aria-pressed={item.decision === 'redo'} disabled={disabled} onClick={openRedo}>
-          <RotateCcw size={14} aria-hidden="true" />
-          Refazer
-        </button>
-        <button type="button" className="button small" disabled={disabled} onClick={clear}>
-          Limpar decisão
-        </button>
+        <DecisionToggle
+          kind="approve"
+          active={approved}
+          label={approved ? 'Aprovada' : 'Aprovar'}
+          ariaLabel={`Aprovar imagem ${item.name}`}
+          title={approved ? 'Clique para desfazer' : undefined}
+          disabled={disabled}
+          busy={item.busy}
+          onClick={() => (approved ? onClear(item.path) : onApprove(item.path))}
+        />
+        <DecisionToggle
+          kind="revision"
+          active={revision}
+          label={revision ? 'Revisão solicitada' : 'Pedir revisão'}
+          ariaLabel={`Pedir revisão da imagem ${item.name}`}
+          title={revision ? 'Clique para desfazer' : undefined}
+          disabled={disabled}
+          busy={item.busy}
+          onClick={() => (revision ? onClear(item.path) : onRevise(item.path, ''))}
+        />
       </div>
-      {redoOpen ? (
+      {revision ? (
         <div className="image-review-redo">
           <label htmlFor={noteId}>O que deve mudar nesta imagem?</label>
           <textarea
@@ -166,15 +201,10 @@ function DecisionControls({ item, disabled, onKeep, onRedo, onClear }: DecisionC
             rows={3}
             value={note}
             disabled={disabled}
-            placeholder="Ex.: texto cortado no topo; trocar o fundo por algo mais neutro"
+            placeholder="Ex.: texto cortado no topo; trocar o fundo por algo mais neutro (opcional)"
             onChange={(event) => setNote(event.target.value)}
+            onBlur={flushNote}
           />
-          {hasNote ? null : <p className="field-help">Descreva o ajuste para o próximo Codex.</p>}
-          <div className="image-review-redo-actions">
-            <button type="button" className="button small primary" disabled={disabled} onClick={confirmRedo}>
-              Confirmar refazer
-            </button>
-          </div>
         </div>
       ) : null}
     </div>
@@ -203,11 +233,52 @@ interface LightboxProps {
 function Lightbox({ items, index, disabled, onMove, onClose, decisions, onDelete }: LightboxProps): JSX.Element | null {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const slideRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const indexRef = useRef(index);
+  const onMoveRef = useRef(onMove);
+  const positionedRef = useRef(false);
   const item = items[index];
   const total = items.length;
+  indexRef.current = index;
+  onMoveRef.current = onMove;
+
+  const centerSlide = (target: number, behavior: ScrollBehavior) => {
+    const track = trackRef.current;
+    const slide = slideRefs.current[target];
+    if (!track || !slide) return;
+    track.scrollTo({ left: slide.offsetLeft + slide.offsetWidth / 2 - track.clientWidth / 2, behavior });
+  };
 
   useEffect(() => {
     closeRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    centerSlide(index, positionedRef.current && !reduceMotion ? 'smooth' : 'instant');
+    positionedRef.current = true;
+  }, [index]);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const onScrollEnd = () => {
+      const center = track.scrollLeft + track.clientWidth / 2;
+      let nearest = indexRef.current;
+      let best = Number.POSITIVE_INFINITY;
+      slideRefs.current.forEach((slide, position) => {
+        if (!slide) return;
+        const distance = Math.abs(slide.offsetLeft + slide.offsetWidth / 2 - center);
+        if (distance < best) {
+          best = distance;
+          nearest = position;
+        }
+      });
+      if (nearest !== indexRef.current) onMoveRef.current(nearest);
+    };
+    track.addEventListener('scrollend', onScrollEnd);
+    return () => track.removeEventListener('scrollend', onScrollEnd);
   }, []);
 
   useEffect(() => {
@@ -253,22 +324,52 @@ function Lightbox({ items, index, disabled, onMove, onClose, decisions, onDelete
     >
       <div className="lightbox" role="dialog" aria-modal="true" aria-label={item.name} ref={dialogRef}>
         <div className="lightbox-toolbar">
-          <div className="lightbox-nav">
-            <button type="button" className="icon-button" aria-label="Anterior" onClick={() => onMove((index - 1 + total) % total)}>
-              <ChevronLeft size={18} aria-hidden="true" />
-            </button>
-            <span className="lightbox-counter" aria-live="polite">{`${index + 1} / ${total}`}</span>
-            <button type="button" className="icon-button" aria-label="Próxima" onClick={() => onMove((index + 1) % total)}>
-              <ChevronRight size={18} aria-hidden="true" />
-            </button>
-          </div>
+          <span className="lightbox-counter" aria-live="polite">{`${index + 1} / ${total}`}</span>
           <button type="button" className="icon-button" aria-label="Fechar ampliado" ref={closeRef} onClick={onClose}>
             <X size={18} aria-hidden="true" />
           </button>
         </div>
         <div className="lightbox-stage">
-          <img className="lightbox-image" src={item.url} alt="" />
+          <div className="lightbox-track" ref={trackRef}>
+            {items.map((slide, position) => (
+              <div
+                key={slide.path}
+                className={position === index ? 'lightbox-slide is-active' : 'lightbox-slide'}
+                aria-hidden={position === index ? undefined : true}
+                ref={(element) => {
+                  slideRefs.current[position] = element;
+                }}
+                onClick={position === index ? undefined : () => onMove(position)}
+              >
+                <img className="lightbox-image" src={slide.url} alt="" draggable={false} onLoad={() => centerSlide(indexRef.current, 'instant')} />
+              </div>
+            ))}
+          </div>
+          {total > 1 ? (
+            <>
+              <button type="button" className="lightbox-arrow is-prev" aria-label="Anterior" onClick={() => onMove((index - 1 + total) % total)}>
+                <ChevronLeft size={22} aria-hidden="true" />
+              </button>
+              <button type="button" className="lightbox-arrow is-next" aria-label="Próxima" onClick={() => onMove((index + 1) % total)}>
+                <ChevronRight size={22} aria-hidden="true" />
+              </button>
+            </>
+          ) : null}
         </div>
+        {total > 1 ? (
+          <div className="lightbox-dots">
+            {items.map((slide, position) => (
+              <button
+                key={slide.path}
+                type="button"
+                className={position === index ? 'lightbox-dot is-active' : 'lightbox-dot'}
+                aria-label={`Ir para imagem ${position + 1}`}
+                aria-current={position === index ? 'true' : undefined}
+                onClick={() => onMove(position)}
+              />
+            ))}
+          </div>
+        ) : null}
         <div className="lightbox-footer">
           <div className="lightbox-footer-head">
             <span className="lightbox-name" title={item.name}>{item.name}</span>
@@ -308,7 +409,7 @@ export function ImageReviewGrid({ items, disabled, decisions, onDelete }: { item
     <>
       <div className="image-review-grid">
         {items.map((item, index) => (
-          <article key={item.path} className="image-review-card">
+          <article key={item.path} className="image-review-card" aria-busy={item.busy}>
             <button
               type="button"
               className="image-review-thumb"

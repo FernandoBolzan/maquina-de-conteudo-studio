@@ -6,10 +6,11 @@ import type { EngineDependency, EngineId, EngineStatus, Settings } from '../../s
 import type { RunSpec, Services } from '../context.js';
 import { postnowRuntimeStatus } from '../content/postnow.js';
 import { environmentWithExecutables, installTool, requireTool, requireVersion, resolveTool, toolEnvironment, toolStatus } from './tools.js';
+import { ensureManagedLinuxNode } from './managed-node.js';
 
 export const repositories: Record<EngineId, string> = {
-  videogo: 'FernandoBolzan/VideoGo',
-  postnow: 'FernandoBolzan/PostNow',
+  videogo: 'IAPro-Community/VideoGo',
+  postnow: 'IAPro-Community/PostNow',
   maestro: 'IAPro-Community/Orquestrador-Maestro',
 };
 const packageNames = { videogo: 'videogo', maestro: '@iapro/orquestrador-maestro-cli' };
@@ -81,7 +82,7 @@ async function engineDependencies(engine: EngineId, services: Services): Promise
     let installed = status.installed;
     if (spec.id === 'node' || spec.id === 'python') installed &&= versionAtLeast(status.version, spec.major, spec.minor);
     return { id: spec.id, name: spec.name, required: spec.required, installed, version: status.version,
-      guidance: installed ? `${spec.name} pronto.` : spec.id === 'ffprobe' ? 'Instale o pacote FFmpeg da sua distribuição, que inclui ffprobe.' : status.installed ? `Atualize para ${spec.required} ou mais recente e reabra o Studio.` : `Instale ${spec.name} e execute o diagnóstico novamente.` };
+      guidance: installed ? `${spec.name} pronto.` : spec.id === 'ffprobe' ? (process.platform === 'win32' ? 'O FFprobe vem junto com o FFmpeg: instale o FFmpeg e execute o diagnóstico novamente.' : 'Instale o pacote FFmpeg da sua distribuição, que inclui ffprobe.') : status.installed ? `Atualize para ${spec.required} ou mais recente e reabra o Studio.` : `Instale ${spec.name} e execute o diagnóstico novamente.` };
   }));
   if (engine === 'postnow') {
     const runtime = await postnowRuntimeStatus(services);
@@ -131,7 +132,12 @@ async function prepareTools(engine: EngineId, services: Services): Promise<void>
     await ensureTool('python', services);
     await requireVersion('python', 3, 11, services);
   } else {
-    await ensureTool('node', services);
+    if (engine === 'videogo' && process.platform === 'linux') {
+      const node = await toolStatus('node', services);
+      if (!node.installed || !versionAtLeast(node.version, 22, 0)) await ensureManagedLinuxNode(22, 0, services);
+    } else {
+      await ensureTool('node', services);
+    }
     await requireVersion('node', engine === 'videogo' ? 22 : 20, engine === 'videogo' ? 0 : 19, services);
     await ensureTool('npm', services);
     await requireTool('npm', services);
@@ -191,7 +197,10 @@ async function githubJson(endpoint: string, services: Services, privateRepositor
     if (status === '403') throw new Error('GitHub recusou a consulta sem comprovar falta de acesso ao repositório. Verifique autenticação, políticas de organização e limites da API.');
     if (status === '404') throw new Error('GitHub não encontrou o repositório ou a versão; não foi possível confirmar uma sessão autenticada com acesso.');
     if (status && Number(status) >= 500) throw new Error('O GitHub informou uma falha no servidor. Tente novamente mais tarde.');
-    if (!status) throw new Error('Não foi possível obter uma resposta do GitHub. Verifique a conexão e a autenticação do GitHub CLI.');
+    if (!status) {
+      if (privateRepository && (await services.capture(gh, ['auth', 'status', '--hostname', 'github.com'], options)).code !== 0) throw new Error('ENGINE_ACCESS_DENIED: Conecte uma conta GitHub com acesso a este motor ou adquira o curso para liberá-lo.');
+      throw new Error('Não foi possível obter uma resposta do GitHub. Verifique a conexão e a autenticação do GitHub CLI.');
+    }
     throw new Error(`GitHub recusou a consulta (HTTP ${status}). Verifique a conexão e o login; permissão de download e licença comercial são verificações distintas.`);
   }
   const body: unknown = JSON.parse(result.stdout.split(/\r?\n\r?\n/).slice(1).join('\n\n'));
@@ -421,7 +430,8 @@ export async function manageEngine(engine: EngineId, operation: string, services
     const env = await environmentWithExecutables(services, gh ? [gh] : []);
     env.GIT_TERMINAL_PROMPT = '0';
     env.GH_PROMPT_DISABLED = '1';
-    const credentials = source.private ? ['-c', 'credential.helper=', '-c', 'credential.https://github.com.helper=!gh auth git-credential'] : [];
+    // Caminho maior que 260 caracteres é comum em node_modules dentro de %APPDATA%; o Git do Windows recusa sem isto.
+    const credentials = [...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []), ...(source.private ? ['-c', 'credential.helper=', '-c', 'credential.https://github.com.helper=!gh auth git-credential'] : [])];
     await stage(services, { title: `${engine}: baixar repositório autorizado (acesso não equivale a licença)`, executable: git,
       args: [...credentials, 'clone', '--no-checkout', '--filter=blob:none', '--', `https://github.com/${repositories[engine]}.git`, root], env });
     await stage(services, { title: `${engine}: fixar commit ${source.sha.slice(0, 12)}`, executable: git,

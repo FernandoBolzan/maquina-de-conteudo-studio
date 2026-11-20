@@ -345,9 +345,9 @@ html, body, #root {
 }
 
 /* ==================== SETUP SUBNAV & TABS ==================== */
+/* Sidebar owns setup navigation on wide layouts; in-page tabs replace it on narrow layouts. */
 .setup-subnav {
-  display: inline-flex;
-  flex-wrap: wrap;
+  display: none;
   align-items: center;
   gap: 6px;
   padding: 4px;
@@ -391,84 +391,124 @@ html, body, #root {
   color: var(--accent-strong);
 }
 
-.setup-tab-badge {
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--surface-3);
-  color: var(--fg-soft);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-/* ==================== EXECUTIVE OVERVIEW BANNER ==================== */
-.setup-overview-banner {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.setup-stat-card {
-  display: flex;
-  align-items: center;
+.setup-engine-workspace {
   gap: 14px;
-  padding: 14px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  transition: border-color 0.15s ease, transform 0.15s ease;
 }
 
-.setup-stat-card:hover {
-  border-color: var(--border-strong);
+.setup-onboarding-workspace {
+  gap: 12px;
+  padding: 16px;
 }
 
-.setup-stat-card.clickable {
-  cursor: pointer;
+.setup-group {
+  gap: 14px;
+  padding: 16px;
 }
 
-.setup-stat-card.clickable:hover {
-  border-color: var(--accent);
-  transform: translateY(-1px);
+.setup-group .section-heading {
+  align-items: flex-start;
 }
 
-.setup-stat-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--accent-strong);
-  flex-shrink: 0;
-}
-
-.setup-stat-info {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.setup-group .section-heading > div {
   min-width: 0;
 }
 
-.setup-stat-label {
-  font-size: 11px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
+.setup-group-engines .engine-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 12px;
 }
 
-.setup-stat-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg);
-  display: flex;
-  align-items: center;
+.engine-dependency-status {
+  color: var(--fg-soft) !important;
+  font-size: 12px !important;
+  line-height: 1.45;
+}
+
+.setup-service-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+}
+
+.setup-group-system-tools .tool-list {
   gap: 8px;
-  flex-wrap: wrap;
+}
+
+.elevenlabs-intro {
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.elevenlabs-intro p {
+  margin: 0;
+  color: var(--fg-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.elevenlabs-intro strong {
+  color: var(--fg);
+}
+
+.elevenlabs-vault-warning {
+  align-items: flex-start;
+}
+
+.elevenlabs-prerequisite {
+  margin: 0;
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.elevenlabs-count {
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.elevenlabs-loading {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.elevenlabs-library-error {
+  align-items: flex-start;
+}
+
+.elevenlabs-empty {
+  min-height: 120px;
+  align-content: center;
+}
+
+.elevenlabs-empty h4 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.elevenlabs-empty p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.voice-preview-unavailable {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.elevenlabs-cloning .clone-form-block {
+  display: grid;
+  gap: 12px;
+}
+
+.elevenlabs-cloning .clone-form-block .field-help {
+  margin: 0;
 }
 
 .status-pill.mini {
@@ -477,59 +517,13 @@ html, body, #root {
   line-height: 1.2;
 }
 
-/* ==================== ELEVENLABS DASHBOARD & TRUST RIBBON ==================== */
+/* ==================== VOICE SETUP LAYOUT ==================== */
 .elevenlabs-dashboard {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.elevenlabs-trust-ribbon {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  padding: 14px 16px;
-  background: linear-gradient(135deg, rgba(249, 115, 22, 0.08), rgba(18, 17, 16, 0.95));
-  border: 1px solid rgba(249, 115, 22, 0.25);
-  border-radius: var(--radius);
-}
-
-.trust-pillar {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.trust-pillar-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: rgba(249, 115, 22, 0.15);
-  border: 1px solid rgba(249, 115, 22, 0.3);
-  color: var(--accent-strong);
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.trust-pillar-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.trust-pillar-text strong {
-  font-size: 13px;
-  color: var(--fg);
-}
-
-.trust-pillar-text span {
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.4;
-}
 
 /* API Key Input & Password Toggle */
 .api-key-input-block {
@@ -907,9 +901,17 @@ html, body, #root {
   }
 
   .app-shell .main-nav {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .app-shell .main-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .app-shell .main-nav .nav-caption {
@@ -917,14 +919,33 @@ html, body, #root {
   }
 
   .app-shell .main-nav button {
-    width: 100%;
+    flex: 0 0 auto;
+    width: auto;
     min-width: 0;
+    white-space: nowrap;
   }
+
+  .app-shell .main-nav button span:not(.nav-count) {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+
   .app-shell .main-nav .nav-group {
-    width: 100%;
+    flex: 0 0 auto;
+    width: auto;
   }
+
+  .app-shell .main-nav .nav-group > button {
+    width: auto;
+  }
+
   .app-shell .main-nav .nav-group .nav-submenu {
     display: none;
+  }
+
+  .setup-subnav {
+    display: inline-flex;
+    flex-wrap: wrap;
   }
 
   .app-shell .topbar {
@@ -942,17 +963,9 @@ html, body, #root {
 }
 
 @media (max-width: 600px) {
-  .app-shell .main-nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .app-shell .main-nav button {
-    font-size: 13px;
-  }
-
-  .app-shell .main-nav button span:not(.nav-count) {
-    white-space: normal;
-    overflow-wrap: anywhere;
+  .app-shell .sidebar {
+    gap: 10px;
+    padding: 10px 12px;
   }
 
   .app-shell .topbar {
@@ -967,6 +980,9 @@ html, body, #root {
   .app-shell .topbar-breadcrumb > svg {
     display: none;
   }
+  .app-shell .topbar-breadcrumb .breadcrumb-btn {
+    display: none;
+  }
 
   .app-shell .topbar-actions {
     gap: 4px;
@@ -974,5 +990,49 @@ html, body, #root {
 
   .app-shell .app-footer span:last-child {
     overflow-wrap: anywhere;
+  }
+
+  .setup-subnav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .setup-tab-btn {
+    min-width: 0;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 6px;
+    white-space: normal;
+  }
+
+  .setup-tab-btn .status-pill {
+    white-space: nowrap;
+  }
+}
+
+@media (min-width: 921px) and (max-width: 1100px) {
+  .app-shell .topbar-actions .local-badge {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .app-shell .topbar-breadcrumb {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .app-shell .topbar-breadcrumb strong {
+    white-space: nowrap;
+    overflow: visible;
+  }
+
+  .app-shell .topbar-actions .button.small {
+    padding-inline: 8px;
+  }
+
+  .app-shell .topbar-actions .button.small > span:first-of-type {
+    display: none;
   }
 }

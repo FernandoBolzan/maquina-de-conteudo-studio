@@ -9,8 +9,10 @@ import { getMobileHtml } from './client.js';
 import { MobileAuthManager } from './token.js';
 import { generateSvgQR } from './qr.js';
 import { getProjectJourney } from '../../shared/project-journey.js';
+import { classifyBatch, isBatchStale, journeyOutputAssets } from '../../shared/video-state.js';
+import { imageFooterAction, type FooterAction, type ImageStepId } from '../../shared/step-action.js';
 import { PROMPT_RECIPES, suggestProjectTitle } from '../../shared/prompt-library.js';
-import { DEFAULT_POSTNOW_FORMAT, isPostNowFormat } from '../../shared/formats.js';
+import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, isPostNowFormat } from '../../shared/formats.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -333,6 +335,7 @@ export class MobileServer {
         format?: string;
         brief?: string;
         pageCount?: number;
+        useBrandImages?: boolean;
         autoStartAgent?: boolean;
         prompt?: string;
         provider?: string;
@@ -355,6 +358,7 @@ export class MobileServer {
         format,
         brief,
         ...(body.brandId ? { brandId: body.brandId } : {}),
+        ...(body.useBrandImages !== undefined ? { useBrandImages: body.useBrandImages } : {}),
         ...(kind === 'image' && format.startsWith('carousel-') ? { pageCount } : {}),
       })) as Project;
       let jobId: string | undefined;
@@ -394,12 +398,13 @@ export class MobileServer {
         action: string;
         prompt?: string;
         provider?: string;
-        logoPolicy?: string;
-        pages?: Array<{ page: number; headline: string; copy: string; depictedPerson?: string }>;
+        pages?: Array<{ page: number; headline: string; body: string; copy: string; depictedPerson?: string }>;
         contentHash?: string;
         path?: string;
         redo?: boolean;
         note?: string;
+        approved?: boolean;
+        batchId?: string;
         brief?: string;
         notes?: string;
       }>(req);
@@ -451,7 +456,7 @@ export class MobileServer {
         }
 
         if (body.action === 'approve-storyboard') {
-          const updated = await this.runtime.invoke('projects.storyboard.approve', { id, approved: true });
+          const updated = await this.runtime.invoke('projects.storyboard.approve', { id, approved: true, confirm: true });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true, detail: updated }));
           return;
@@ -460,8 +465,6 @@ export class MobileServer {
         if (body.action === 'generate-images') {
           const job = await this.runtime.invoke('agents.generateImages', {
             id,
-            logoPolicy: body.logoPolicy || 'corner',
-            confirm: true,
           });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true, job }));
@@ -471,8 +474,6 @@ export class MobileServer {
         if (body.action === 'revise-images') {
           const job = await this.runtime.invoke('agents.reviseImages', {
             id,
-            logoPolicy: body.logoPolicy || 'corner',
-            confirm: true,
           });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true, job }));
@@ -484,7 +485,7 @@ export class MobileServer {
           const updated = await this.runtime.invoke('projects.approve', {
             id,
             path: body.path,
-            approved: true,
+            approved: body.approved ?? true,
           });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true, detail: updated }));
@@ -507,8 +508,7 @@ export class MobileServer {
         if (body.action === 'render') {
           const job = await this.runtime.invoke('projects.render', {
             id,
-            logoPolicy: body.logoPolicy || 'corner',
-            confirm: true,
+            ...(body.batchId ? { batchId: body.batchId } : {}),
           });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true, job }));
@@ -578,14 +578,79 @@ export class MobileServer {
       const isRunning = this.services.jobs().some(j => j.projectId === id && j.status === 'running');
       const hasBrief = Boolean(detail.brief && detail.brief.trim().length > 0);
       let journey;
+      let footerActions: Partial<Record<ImageStepId, FooterAction | undefined>> | undefined;
       if (detail.kind === 'image') {
-        const latestBatch = detail.batches?.[0];
-        const batchAssets = latestBatch?.assets || [];
-        const outputs = batchAssets.map(a => ({ approved: Boolean(a.approved) }));
+        const detailBatches = detail.batches ?? [];
+        const latestBatch = detailBatches[0];
+        const legacyAssets = detail.assets.filter(a => a.kind === 'image' && /^generated\/slide-\d+\.png$/i.test(a.name));
+        const outputs = journeyOutputAssets({ kind: 'image', batches: detailBatches, legacyAssets, reviewVideos: [] }).map(a => ({ approved: Boolean(a.approved) }));
+        const review = detail.visualReview;
+        const expected = review?.pages.length ?? 0;
+        const batchState = classifyBatch(latestBatch, legacyAssets.length > 0);
+        const formatSpec = isPostNowFormat(detail.format) ? POSTNOW_FORMATS[detail.format] : POSTNOW_FORMATS[DEFAULT_POSTNOW_FORMAT];
+        const textsApproved = Boolean(review?.ready && review.approved);
+        const adapting = Boolean(detail.formatAdaptation);
+        const reviewAssets = latestBatch?.assets ?? [];
+        const decisions = {
+          kept: reviewAssets.filter(a => a.approved).length,
+          redo: reviewAssets.filter(a => !a.approved && a.redo).length,
+          pending: reviewAssets.filter(a => !a.approved && !a.redo).length,
+        };
+        const imagesReady = Boolean(
+          !adapting && (latestBatch
+            ? latestBatch.status?.state === 'ready'
+              && latestBatch.format === detail.format
+              && latestBatch.sourceCount === expected
+              && latestBatch.assets.length === expected
+            : detailBatches.length === 0 && expected > 0 && legacyAssets.length === expected),
+        );
+        const canPreparePostnow = Boolean(latestBatch && expected > 0 && latestBatch.sourceCount === expected && textsApproved && latestBatch.assets.length === 0);
+        const blockMessage = latestBatch?.status?.state === 'failed' ? latestBatch.status.message
+          : !textsApproved ? 'Aprove os textos na etapa anterior para liberar a geração.'
+          : latestBatch && !latestBatch.status ? 'Esta versão antiga não tem comprovação de processamento completo. Gere as imagens novamente para prepará-la.'
+          : latestBatch && expected > 0 && latestBatch.sourceCount !== expected ? `Esta rodada tem ${latestBatch.sourceCount} imagem(ns)-fonte; o roteiro exige ${expected}.`
+          : undefined;
+        const footerFor = (step: ImageStepId) => imageFooterAction({
+          step,
+          brief: { dirty: false, empty: !hasBrief },
+          texts: {
+            present: expected > 0,
+            ready: Boolean(review?.ready),
+            approved: Boolean(review?.approved),
+            dirty: false,
+            invalid: false,
+            blockingCount: review?.blocking.length ?? 0,
+            unsupportedFormat: Boolean(detail.unsupportedFormat),
+            adapting,
+          },
+          images: {
+            expected,
+            batchState,
+            stale: isBatchStale(latestBatch, detail.format),
+            formatLabel: formatSpec.label,
+            canGenerate: !isRunning && !adapting && textsApproved,
+            canPreparePostnow: !isRunning && canPreparePostnow,
+            ...(blockMessage ? { blockMessage } : {}),
+          },
+          review: decisions,
+          busy: { imageGeneration: false, imageRevision: false },
+          anyJobRunning: isRunning,
+          textAgentRunning: false,
+          agentBlocked: false,
+        });
+        const reviewFooter = ((): FooterAction | undefined => {
+          if (batchState === 'none' || batchState === 'legacyFlat' || batchState === 'failed' || batchState === 'legacyNoStatus' || batchState === 'importedPending') {
+            return { kind: 'wait', label: 'Gere as imagens antes de revisar', enabled: false };
+          }
+          const action = footerFor('review');
+          return action?.kind === 'revise' && isRunning ? { kind: 'wait', label: 'Aguarde o processo terminar', enabled: false } : action;
+        })();
+        footerActions = { brief: footerFor('brief'), texts: footerFor('texts'), images: footerFor('images'), review: reviewFooter };
         journey = getProjectJourney({
           kind: 'image',
           hasBrief,
           hasScript: false,
+          imagesReady,
           hasRender: false,
           outputs,
           textsApproved: Boolean(detail.visualReview?.approved),
@@ -614,7 +679,7 @@ export class MobileServer {
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ...detail, assets, batches, journey, isRunning, ...(scenes ? { scenes } : {}) }));
+      res.end(JSON.stringify({ ...detail, assets, batches, journey, isRunning, ...(footerActions ? { footerActions } : {}), ...(scenes ? { scenes } : {}) }));
       return;
     }
 

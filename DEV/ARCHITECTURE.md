@@ -43,12 +43,12 @@ graph TD
 
 ### Os Três Contêineres / Motores
 
-1. **PostNow Engine (`github.com/FernandoBolzan/PostNow`)** [Acesso Controlado]:
+1. **PostNow Engine (`github.com/IAPro-Community/PostNow`)** [Acesso Controlado]:
    - **Papel**: Criação assistida de posts de imagem, carrosséis estruturados (10 páginas), stories, gestão de marcas/clientes (logos oficiais, fontes, paletas), pesquisa de claims e contact-sheet para QA humano.
    - **Ambiente**: Python 3.11+, Pillow, CLI `postnow`.
    - **Interface**: Execução de comandos CLI via PTY/JSON stream + API HTTP interna local (porta `4120`).
 
-2. **VideoGo Engine (`github.com/FernandoBolzan/VideoGo`)** [Acesso Controlado]:
+2. **VideoGo Engine (`github.com/IAPro-Community/VideoGo`)** [Acesso Controlado]:
    - **Papel**: Planejamento, roteirização, animação 2D (HTML/GSAP/HyperFrames), cenas 3D procedurais (Three.js), transcrição de footage (Whisper local), cortes e renderização determinística de vídeo em MP4 (1080x1920 Reels, 1920x1080 YouTube, 1080x1080).
    - **Ambiente**: Node 22+, Three.js, GSAP, FFmpeg, Python 3.11 (Motion / faster-whisper), CLI `videogo`.
    - **Interface**: Execução CLI + API HTTP interna local (porta `4121`).
@@ -72,8 +72,8 @@ Para evitar expor `client_secret` no binário desktop ou exigir que o usuário c
 ### Verificação de Acesso (Entitlement Gate)
 Com o token do usuário:
 - **Repositório Aberto**: `IAPro-Community/Orquestrador-Maestro` -> Sempre acessível e clonável/puxável.
-- **Repositórios de Acesso Controlado**: `FernandoBolzan/PostNow` e `FernandoBolzan/VideoGo`:
-  - O app consulta `GET /repos/FernandoBolzan/PostNow` e `GET /repos/FernandoBolzan/VideoGo`.
+- **Repositórios de Acesso Controlado**: `IAPro-Community/PostNow` e `IAPro-Community/VideoGo`:
+  - O app consulta `GET /repos/IAPro-Community/PostNow` e `GET /repos/IAPro-Community/VideoGo`. Nomes antigos em `FernandoBolzan/` redirecionam na API, mas o app rejeita o `full_name` divergente do fixado.
   - Se `permissions.pull == true`: o usuário possui acesso válido e o app libera o download/atualização do motor correspondente.
   - Se `status == 404` ou sem permissão: o app exibe status "Sem licença/acesso liberado neste repositório" com link para solicitar permissão ao mantenedor.
 

@@ -1,5 +1,5 @@
 import type { AppEvent, Job, Settings } from '../shared/contracts.js';
-export interface RunSpec { title: string; executable: string; args: string[]; cwd?: string; env?: Record<string, string>; projectId?: string; interactive?: boolean; agentSession?: boolean; agentStream?: 'codex' | 'claude'; timeoutMs?: number; onSuccess?: (signal: AbortSignal) => Promise<string | void>; }
+export interface RunSpec { title: string; executable: string; args: string[]; cwd?: string; env?: Record<string, string>; projectId?: string; interactive?: boolean; agentSession?: boolean; agentStream?: 'codex' | 'claude'; timeoutMs?: number; onSuccess?: (signal: AbortSignal) => Promise<string | void>; onFailure?: (signal: AbortSignal) => Promise<void>; }
 export interface CommandResult { code: number; stdout: string; stderr: string; }
 export interface Services {
   dataDir: string;

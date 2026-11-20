@@ -16,6 +16,26 @@ export function isDepictedPerson(value: unknown): value is DepictedPerson {
   return typeof value === 'string' && (DEPICTED_PERSON_VALUES as readonly string[]).includes(value);
 }
 
+/** Preferência de projeto (etapa Pauta). `auto` deixa o agente decidir pela pauta; os demais valem para todas as páginas. */
+export const DEPICTED_PERSON_POLICY_VALUES = ['auto', ...DEPICTED_PERSON_VALUES] as const;
+export type DepictedPersonPolicy = (typeof DEPICTED_PERSON_POLICY_VALUES)[number];
+export const DEPICTED_PERSON_POLICY_LABELS: Record<DepictedPersonPolicy, string> = {
+  auto: 'Automático (o agente decide pela pauta)',
+  none: DEPICTED_PERSON_LABELS.none,
+  other_person: DEPICTED_PERSON_LABELS.other_person,
+  client_portrait: DEPICTED_PERSON_LABELS.client_portrait,
+};
+export function isDepictedPersonPolicy(value: unknown): value is DepictedPersonPolicy {
+  return typeof value === 'string' && (DEPICTED_PERSON_POLICY_VALUES as readonly string[]).includes(value);
+}
+
+/** Blocks portrait identities before any PostNow profile/reference lookup when brand photos are opted out. */
+export function brandImageOptOutIssues(identities: readonly unknown[]): string[] {
+  return identities.some(identity => identity === 'client_portrait')
+    ? ['A foto/retrato da marca foi desativado; altere a página para `none` ou `other_person`, salve/aprove novamente o conteúdo e tente novamente.']
+    : [];
+}
+
 /** Páginas que mostram a cliente quando há retrato aprovado: capa e última página do carrossel; a única página de post ou Story. Números começam em 1. */
 export function portraitRequiredPages(kind: PostNowKind, pageCount: number): number[] {
   if (pageCount < 1) return [];
@@ -46,4 +66,24 @@ export function portraitDiversityIssues(kind: PostNowKind, pages: readonly { vis
     return ['A capa e o fechamento não podem ter a mesma descrição visual ou pose da cliente. Varie a composição entre o começo e o final do carrossel.'];
   }
   return [];
+}
+
+/**
+ * Bloqueios da preferência de projeto ao salvar. Com retrato aprovado, capa e fechamento precisam mostrar a cliente,
+ * então `none` e `other_person` ficam indisponíveis; `client_portrait` exige o retrato.
+ */
+export function depictedPersonPolicyIssues(policy: DepictedPersonPolicy, portraitApproved: boolean): string[] {
+  if (policy === 'client_portrait' && !portraitApproved) {
+    return ['Cliente (retrato aprovado) exige um retrato aprovado no perfil PostNow da marca. Cadastre-o com `postnow client set-portrait` ou escolha outra opção.'];
+  }
+  if (portraitApproved && (policy === 'none' || policy === 'other_person')) {
+    return ['Com retrato aprovado, a capa e o fechamento precisam mostrar a cliente. Escolha Automático ou Cliente (retrato aprovado).'];
+  }
+  return [];
+}
+
+/** Política usada no prompt: se a preferência salva não couber no estado atual do retrato, vale `auto` (o agente decide pela pauta). */
+export function effectiveDepictedPersonPolicy(policy: DepictedPersonPolicy | undefined, portraitApproved: boolean): DepictedPersonPolicy {
+  const value = policy ?? 'auto';
+  return depictedPersonPolicyIssues(value, portraitApproved).length ? 'auto' : value;
 }

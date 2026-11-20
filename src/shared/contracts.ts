@@ -1,3 +1,7 @@
+import type { ImageBackgroundMode } from './image-background.js';
+import type { LogoPolicy } from './logo-policy.js';
+import type { DepictedPersonPolicy } from './depicted-person.js';
+
 export type Provider = 'codex' | 'claude';
 /** Projetos de vídeo sempre rodam neste modelo fixo; o alias `opus` do Claude Code muda sozinho quando sai outro Opus. */
 export const VIDEO_AGENT_MODEL = 'claude-opus-5-5';
@@ -21,17 +25,20 @@ export interface Job { id: string; title: string; status: JobStatus; createdAt: 
 export interface MobileTunnelStatus { active: boolean; url?: string; token?: string; port?: number; connectedClients?: number; error?: string; startedAt?: string; }
 export type AppUpdateState = 'idle' | 'checking' | 'downloading' | 'downloaded' | 'current' | 'unsupported' | 'error';
 export interface AppUpdateStatus { state: AppUpdateState; version?: string; message: string; }
-export interface AppEvent { type: 'job' | 'output' | 'refresh' | 'activity' | 'mobile' | 'update'; job?: Job; jobId?: string; data?: string; activity?: AgentActivity; mobile?: MobileTunnelStatus; update?: AppUpdateStatus; }
+export interface LocalVoiceOperationEvent { operationId: string; voiceId: string; kind: 'install' | 'audition'; phase: 'preparing' | 'downloading' | 'verifying' | 'synthesizing' | 'ready' | 'cancelled' | 'failed'; progress?: number; message: string; }
+export interface AppEvent { type: 'job' | 'output' | 'refresh' | 'activity' | 'mobile' | 'update' | 'local-voice'; job?: Job; jobId?: string; data?: string; activity?: AgentActivity; mobile?: MobileTunnelStatus; update?: AppUpdateStatus; localVoiceOperation?: LocalVoiceOperationEvent; }
 export interface BrandReference { id: string; name: string; path: string; kind: 'image' | 'pdf' | 'document'; url: string; }
 export interface Brand { id: string; name: string; tone: string; colors: string[]; logo?: string; logoUrl?: string; references: BrandReference[]; }
 export interface Asset { name: string; path: string; kind: 'image' | 'video' | 'audio' | 'file'; url: string; approved: boolean; hasAudio?: boolean; redo?: { note: string }; }
 export interface GenerationBatch { id: string; assets: Asset[]; sourceCount: number; format?: PostNowFormatId; status?: { state: 'generating' | 'processing' | 'ready' | 'failed'; stage?: string; message?: string; updatedAt: string }; revision?: { of: string; keptPages: number[]; redonePages: number[] }; }
-export interface Project { id: string; title: string; kind: 'image' | 'video'; format?: ProjectFormatId; unsupportedFormat?: string; brandId?: string; createdAt: string; path: string; brief: string; sourceProjectId?: string; voiceId?: string; coverUrl?: string; }
-export interface GenerationPageReview { page: number; headline: string; copy: string; depictedPerson: string; }
+/** Direção visual escolhida na biblioteca de prompts; snapshot gravado no projeto e injetado direto na geração e no prompt do PostNow. */
+export interface VisualStyle { id: string; title: string; direction: string; }
+export interface Project { id: string; title: string; kind: 'image' | 'video'; format?: ProjectFormatId; unsupportedFormat?: string; brandId?: string; createdAt: string; path: string; brief: string; sourceProjectId?: string; voiceId?: string; coverUrl?: string; visualStyle?: VisualStyle; imageBackgroundMode?: ImageBackgroundMode; useBrandImages?: boolean; logoPolicy?: LogoPolicy; depictedPersonPolicy?: DepictedPersonPolicy; }
+export interface GenerationPageReview { page: number; headline: string; body: string; copy: string; depictedPerson: string; }
 export interface GenerationClaimReview { id: string; claim: string; source: string; sourceUrl: string; qualification: string; }
 export interface VisualGenerationReview { ready: boolean; approved: boolean; approvedAt?: string; contentHash: string; blocking: string[]; format: PostNowFormatId; width: number; height: number; pages: GenerationPageReview[]; claims: GenerationClaimReview[]; }
 export interface FormatAdaptation { sourceFormat: PostNowFormatId; targetFormat: PostNowFormatId; pageCount: number; }
-export interface ProjectDetail extends Project { assets: Asset[]; notes: string; batches?: GenerationBatch[]; visualReview?: VisualGenerationReview; formatAdaptation?: FormatAdaptation; storyboardAvailable?: boolean; storyboardReady?: boolean; storyboardIssues?: string[]; }
+export interface ProjectDetail extends Project { assets: Asset[]; notes: string; batches?: GenerationBatch[]; visualReview?: VisualGenerationReview; formatAdaptation?: FormatAdaptation; storyboardAvailable?: boolean; storyboardReady?: boolean; storyboardCompositionReady?: boolean; storyboardIssues?: string[]; }
 export interface ToolStatus { id: string; name: string; installed: boolean; version?: string; authenticated?: boolean; account?: string; detail?: string; source?: 'managed' | 'external'; }
 export type CliId = 'codex' | 'claude';
 export interface CliUpdateStatus { id: CliId; currentVersion?: string; latestVersion?: string; source?: 'managed' | 'external'; state: 'missing' | 'current' | 'update-available' | 'external-update-available' | 'unavailable' | 'unverified'; detail: string; canRollback?: boolean; }
@@ -41,11 +48,16 @@ export interface EngineStatus { id: EngineId; installed: boolean; path?: string;
 export interface SetupStatus { tools: ToolStatus[]; engines: EngineStatus[]; github?: { authenticated: boolean; login?: string }; platform: string; }
 export interface ElevenLabsVoice { id: string; name: string; category: string; language?: string; previewUrl?: string; isClone: boolean; }
 export interface ElevenLabsStatus { configured: boolean; secureStorageAvailable: boolean; error?: string; warning?: string; }
-export type NarrationAudioSource = 'upload' | 'recording' | 'elevenlabs' | 'local';
+export type NarrationProvider = 'local' | 'elevenlabs';
+export type LocalVoiceEngine = 'piper' | 'kokoro';
+export interface LocalVoiceSelection { engine: LocalVoiceEngine; modelId: string; voiceId: string; }
+export interface LocalVoiceOption { id: string; engine: LocalVoiceEngine; modelId: string; voiceId: string; name: string; language: string; quality: string; license: string; licenseEvidence: string; sizeBytes: number; runtimeSizeBytes: number; supported: boolean; unsupportedReason?: string; attribution?: string; }
+export interface LocalVoiceCatalogState { voices: LocalVoiceOption[]; exclusions: { source: string; reason: string }[]; python311Available: boolean; installedIds: string[]; platformSupported: boolean; unsupportedReason?: string; error?: string; }
+export type NarrationAudioSource = 'upload' | 'recording' | 'elevenlabs' | 'local' | 'legacy-unknown';
 export const NARRATION_RECORDING_MAX_BYTES = 64 * 1024 * 1024;
-export interface NarrationScene { id: string; title: string; narration: string; spokenText: string; audioAttached: boolean; audioPath?: string; audioSource?: NarrationAudioSource; stray: boolean; }
+export interface NarrationScene { id: string; title: string; narration: string; spokenText: string; audioAttached: boolean; audioPath?: string; audioSource?: NarrationAudioSource; audioCurrent?: boolean; audioModelId?: string; audioVoiceId?: string; stray: boolean; }
 export type NarrationMode = 'silent' | 'narrated';
-export interface NarrationState { mode: NarrationMode; active: boolean; ready: boolean; voiceId?: string; modelId: 'eleven_v4'; scenes: NarrationScene[]; approved: boolean; audioReady: boolean; audioApproved: boolean; }
+export interface NarrationState { mode: NarrationMode; provider: NarrationProvider; active: boolean; ready: boolean; voiceId?: string; localVoice?: LocalVoiceSelection; modelId: string; scenes: NarrationScene[]; approved: boolean; audioReady: boolean; audioApproved: boolean; }
 export interface Settings { workspace: string; provider: Provider; enginePaths: Partial<Record<EngineId, string>>; onboardingCompleted: boolean; }
 export interface Snapshot { settings: Settings; projects: Project[]; brands: Brand[]; jobs: Job[]; integrations: { elevenLabs: ElevenLabsStatus }; version: string; mobile?: MobileTunnelStatus; }
 export interface DesktopAPI { invoke<T = unknown>(action: string, payload?: Record<string, unknown>): Promise<T>; onEvent(listener: (event: AppEvent) => void): () => void; }

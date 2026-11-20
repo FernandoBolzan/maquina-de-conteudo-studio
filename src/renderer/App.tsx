@@ -312,14 +312,14 @@ export function App() {
             <button type="button" className="icon-button" aria-label="Recarregar dados do estúdio" disabled={busy.has('reload')} onClick={() => { void run('reload', refresh, 'Estúdio atualizado.'); }}>
               <RefreshCw size={15} className={busy.has('reload') ? 'spin' : ''} />
             </button>
-            <button type="button" className={`button small ${snapshot?.mobile?.active ? 'primary' : 'secondary'}`} onClick={() => setMobileModalOpen(true)} title="Acesso Mobile Remoto via Cloudflare Tunnel">
+            <button type="button" className={`button small ${snapshot?.mobile?.active ? 'primary' : 'secondary'}`} onClick={() => setMobileModalOpen(true)} title="Acesso Mobile Remoto via Cloudflare Tunnel" aria-label="Abrir acesso mobile remoto">
               <Smartphone size={15} />
               <span>Mobile</span>
               {snapshot?.mobile?.active && (
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 6px #10b981', marginLeft: 2 }} />
               )}
             </button>
-            <button type="button" className={`button small console-toggle ${consoleOpen ? 'primary' : 'secondary'}`} onClick={() => setConsoleOpen(value => !value)} aria-expanded={consoleOpen}>
+            <button type="button" className={`button small console-toggle ${consoleOpen ? 'primary' : 'secondary'}`} onClick={() => setConsoleOpen(value => !value)} aria-expanded={consoleOpen} aria-label={consoleOpen ? 'Fechar terminal' : 'Abrir terminal'}>
               <TerminalSquare size={15} />
               <span>Terminal</span>
               {activeJobs > 0 && <span className="button-count">{activeJobs}</span>}

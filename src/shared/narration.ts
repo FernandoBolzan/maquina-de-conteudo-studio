@@ -105,20 +105,22 @@ export function narrationProbeIssue(probe: unknown): string | undefined {
  * cena com texto exige áudio aprovado, e áudio ElevenLabs exige aprovação do texto+voz.
  * Sem modo explícito, mantém a regra legada para os demais chamadores.
  */
-export function narrationGate(input: { voiceId?: string; scenes: NarrationSceneFacts[]; elevenLabsAttached: boolean; voiceApproved: boolean; elevenLabsReady: boolean; mode?: 'silent' | 'narrated' }): { active: boolean; issues: string[] } {
+export function narrationGate(input: { voiceId?: string; localVoice?: { engine: 'piper' | 'kokoro'; modelId: string; voiceId: string }; provider?: 'local' | 'elevenlabs'; scenes: NarrationSceneFacts[]; elevenLabsAttached: boolean; voiceApproved: boolean; elevenLabsReady: boolean; mode?: 'silent' | 'narrated' }): { active: boolean; issues: string[] } {
   if (input.mode === 'silent') return { active: false, issues: [] };
-  const active = (input.mode === 'narrated' && input.scenes.some(scene => scene.narrates)) || Boolean(input.voiceId) || input.scenes.some(scene => scene.attached || scene.stray);
+  const provider = input.provider ?? 'elevenlabs';
+  const selectedVoice = provider === 'local' ? Boolean(input.localVoice) : Boolean(input.voiceId);
+  const active = (input.mode === 'narrated' && input.scenes.some(scene => scene.narrates)) || selectedVoice || input.scenes.some(scene => scene.attached || scene.stray);
   if (!active) return { active, issues: [] };
   const issues: string[] = [];
-  const options = input.elevenLabsReady ? 'Envie, grave ou gere' : 'Envie ou grave';
+  const options = provider === 'local' ? 'Instale a voz local e gere, envie ou grave' : provider === 'elevenlabs' && input.elevenLabsReady ? 'Envie, grave ou gere' : 'Envie ou grave';
   for (const scene of input.scenes) {
     if (scene.stray) {
       issues.push(`Cena "${scene.title}": o áudio associado está ausente, desatualizado ou não registrado. ${options} o áudio da cena novamente.`);
     } else if (scene.narrates && !scene.attached) {
-      issues.push(`Cena "${scene.title}" sem áudio de narração. ${options} o áudio dela antes do render.${input.elevenLabsReady ? '' : ' Sem a chave ElevenLabs, só envio ou gravação.'}`);
+      issues.push(`Cena "${scene.title}" sem áudio de narração. ${options} o áudio dela antes do render.${provider === 'elevenlabs' && !input.elevenLabsReady ? ' Sem a chave ElevenLabs, só envio ou gravação.' : ''}`);
     }
     if (scene.attached && !scene.approved) issues.push(`Aprove o áudio da cena "${scene.title}" na prévia antes do render.`);
   }
-  if (input.elevenLabsAttached && !input.voiceApproved) issues.push(input.elevenLabsReady ? 'A narração ElevenLabs não está aprovada na versão atual (texto e voz). Revise-a e aprove antes do render.' : 'A narração ElevenLabs não está aprovada na versão atual (texto e voz). Configure a chave ElevenLabs para revisá-la antes do render.');
+  if (provider === 'elevenlabs' && input.elevenLabsAttached && !input.voiceApproved) issues.push(input.elevenLabsReady ? 'A narração ElevenLabs não está aprovada na versão atual (texto e voz). Revise-a e aprove antes do render.' : 'A narração ElevenLabs não está aprovada na versão atual (texto e voz). Configure a chave ElevenLabs para revisá-la antes do render.');
   return { active, issues };
 }

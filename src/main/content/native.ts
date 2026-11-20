@@ -426,6 +426,7 @@ export async function initializeNative(project: Project, brand?: Brand, requeste
       page: index + 1,
       role: kind === 'story' ? 'story' : kind !== 'carousel' ? 'single' : index === 0 ? 'cover' : index === pageCount - 1 ? 'cta' : 'body',
       headline: '',
+      body: '',
       copy: '',
       visual_function: '',
       depicted_person: '',
@@ -440,8 +441,8 @@ export async function initializeNative(project: Project, brand?: Brand, requeste
       pages,
     });
     await atomicJson(join(project.path, 'research/claims.json'), { reviewed: false, claims: [] });
-    await atomicText(join(project.path, 'storyboard.md'), `# ${project.title}\n\n${project.brief}\n\nDesenvolva a copy e a função visual em project.json antes de gerar imagens.\n`);
-    for (const page of pages) await atomicText(join(project.path, page.prompt_file), `# Direção da arte — página ${page.page}\n\nAguardando briefing, copy e função visual aprovados. A geração depende de uma ferramenta real disponível; este arquivo não é uma imagem.\n`);
+    await atomicText(join(project.path, 'storyboard.md'), `# ${project.title}\n\n${project.brief}\n\nDesenvolva headline e body concisos para a arte, copy completa apenas para publicação e função visual como composição em project.json.\n`);
+    for (const page of pages) await atomicText(join(project.path, page.prompt_file), `# Direção da arte, página ${page.page}\n\n## Texto na arte\nHeadline:\nBody:\n\n## Composição\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\n\nAguardando briefing e copy aprovados. A geração depende de uma ferramenta real disponível; este arquivo não é uma imagem.\n`);
   }
 }
 /** Rebase known asset refs safely; missing files can be tolerated for editorial reads, never for rendering/import. */

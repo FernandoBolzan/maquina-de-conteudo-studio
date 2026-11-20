@@ -11,8 +11,8 @@ test('PostNow canvas sizes match the contract', () => {
   assert.deepEqual(formatCanvas('carousel-1x1'), { width: 1080, height: 1080 });
   assert.deepEqual(formatCanvas('post-4x5'), { width: 1080, height: 1350 });
   assert.deepEqual(formatCanvas('carousel-4x5'), { width: 1080, height: 1350 });
-  assert.deepEqual(formatCanvas('post-4x3'), { width: 1080, height: 1350 });
-  assert.deepEqual(formatCanvas('carousel-4x3'), { width: 1080, height: 1350 });
+  assert.deepEqual(formatCanvas('post-4x3'), { width: 1440, height: 1080 });
+  assert.deepEqual(formatCanvas('carousel-4x3'), { width: 1440, height: 1080 });
 });
 
 test('Page ranges are one page for story and post, three to ten for carousel', () => {
@@ -42,11 +42,13 @@ test('Missing format uses the 1:1 default; removed or unknown ids are rejected',
 });
 
 test('Image options map aspect and quantity to PostNow ids', () => {
-  assert.deepEqual(imageAspectOptions().map(option => option.aspect), ['9:16', '1:1', '4:5']);
+  assert.deepEqual(imageAspectOptions().map(option => option.aspect), ['9:16', '1:1', '4:5', '4:3']);
   assert.equal(postNowFormatFor('4:5', false), 'post-4x5');
   assert.equal(postNowFormatFor('4:5', true), 'carousel-4x5');
   assert.equal(postNowFormatFor('1:1', true), 'carousel-1x1');
   assert.equal(postNowFormatFor('9:16', true), undefined);
+  assert.equal(postNowFormatFor('4:3', false), 'post-4x3');
+  assert.equal(postNowFormatFor('4:3', true), 'carousel-4x3');
 });
 
 test('Video options disable 4:3 with a visible reason', () => {

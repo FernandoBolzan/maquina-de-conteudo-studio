@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { capture, Supervisor } from '../src/main/supervisor.js';
@@ -143,6 +143,31 @@ test('a zero-exit process remains active until output validation and fails if va
     assert.match(result.log, /Faltam páginas/);
   } finally {
     release.resolve();
+    await supervisor.dispose();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('a failed output commit runs rollback before the job reports failure', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'studio-job-rollback-'));
+  const supervisor = new Supervisor(dataDir, () => undefined);
+  const audioPath = join(dataDir, 'scene.wav');
+  try {
+    await supervisor.init();
+    await writeFile(audioPath, 'previous audio');
+    const job = await supervisor.run({
+      title: 'Restaurar áudio anterior', executable: process.execPath, args: ['-e', 'process.exit(0)'],
+      onSuccess: async () => {
+        await writeFile(audioPath, 'partial replacement');
+        throw new Error('Falha ao registrar a nova narração');
+      },
+      onFailure: async () => { await writeFile(audioPath, 'previous audio'); },
+    });
+    const result = await supervisor.wait(job.id);
+    assert.equal(result.status, 'failed');
+    assert.match(result.log, /Falha ao registrar/);
+    assert.equal(await readFile(audioPath, 'utf8'), 'previous audio');
+  } finally {
     await supervisor.dispose();
     await rm(dataDir, { recursive: true, force: true });
   }

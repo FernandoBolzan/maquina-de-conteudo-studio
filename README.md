@@ -35,7 +35,7 @@ Um estúdio de conteúdo que roda no seu computador. Você escreve o assunto; o 
 
 - **Carrossel, post e Story** com o motor **PostNow**: textos revisados, imagens geradas pelo Codex, logo oficial aplicada e formato fechado.
 - **Vídeo** com o motor **VideoGo**: storyboard, narração por cena, composição animada e render 1080×1920 local.
-- **Voz**: narração com ElevenLabs (com a sua chave), áudio próprio por cena ou gravação no Modo Studio.
+- **Voz**: ElevenLabs com sua chave, catálogo local de vozes, áudio próprio por cena ou gravação no Modo Studio.
 - **Assistentes**: Claude Code e Codex, sempre pelo CLI oficial de cada um. O Studio não guarda suas senhas.
 
 ## Como funciona
@@ -43,6 +43,8 @@ Um estúdio de conteúdo que roda no seu computador. Você escreve o assunto; o 
 1. **Crie um projeto** em *Projetos → Criar conteúdo*, escolha PostNow ou VideoGo e informe o assunto.
 2. **Revise cada etapa**: textos, roteiro e narração. O botão **Avançar** aprova a etapa e abre a próxima.
 3. **Gere** imagens, capas, áudio e vídeo. Cada ação mostra o progresso ao vivo.
+   Nas artes PostNow, a composição deve ocupar todo o quadro, inclusive as margens de segurança; textos e elementos importantes ficam protegidos dentro delas. A instrução também substitui pedidos antigos de faixa inferior vazia. A geração por IA pode não obedecer perfeitamente: revise cada arte antes de aprovar.
+   Quando a marca tem retrato aprovado, a foto de referência fixa só o rosto e a identidade. A pose, a roupa e o cenário de cada arte são criados no prompt conforme o assunto, e cada projeto começa de uma cena diferente (olhando para a câmera, no celular, no notebook, explicando com gestos e outras), para que posts diferentes não saiam iguais. Capa e fechamento nunca repetem a pose.
 4. **Entregue**: os arquivos finais ficam dentro do projeto, com aprovações vinculadas ao conteúdo.
 
 ```mermaid
@@ -67,6 +69,8 @@ flowchart LR
 
 **Atualização automática:** o app baixa novas versões sozinho no Windows e no AppImage, e aplica ao reiniciar (**Preferências → Reiniciar e atualizar**). O `.deb` e os builds de macOS (sem assinatura Apple) são atualizados manualmente.
 
+No macOS, o app não tem assinatura de desenvolvedor Apple. Se o sistema disser que ele está "danificado" (builds até a 0.2.2), rode no Terminal `xattr -cr "/Applications/Máquina de Conteúdo (Studio).app"` e abra de novo. Os builds seguintes são assinados ad hoc e usam o fluxo **Abrir mesmo assim**. Git, Node, Python e FFmpeg podem ser instalados pelo próprio app se o Homebrew (brew.sh) estiver presente.
+
 Não há build para Linux ARM64 nem para Macs Intel nesta versão.
 
 ## Motores
@@ -80,6 +84,12 @@ Não há build para Linux ARM64 nem para Macs Intel nesta versão.
 | **ElevenLabs** (opcional) | Vozes e clonagem consentida | API key com permissões de voz e Text to Speech |
 
 Em **Motores & Setup** você instala, vincula ou testa cada motor. Instalações e logins pedem confirmação.
+
+## Vozes locais
+
+- A escolha é pela **voz**; motor e modelo ficam associados a ela. O catálogo fixo lista 54 vozes Kokoro em nove idiomas, com busca, filtros e metadados. Vozes Piper não aparecem como disponíveis porque não foi possível verificar licenças dos pesos ONNX individuais.
+- **A síntese local está desativada em todas as plataformas neste momento.** O candidato Kokoro requer CPython 3.11, cerca de 48 MB de wheels e aproximadamente 354 MB de modelo e bundle de vozes; o Studio não instala Python automaticamente. O wheel que inclui eSpeak-NG ainda não tem termos/notices verificados e nenhum teste nativo de síntese passou. A interface mostra esses bloqueios; navegar ou selecionar não baixa nem sintetiza.
+- Quando houver uma plataforma verificada, a audição de escolha será sintetizada no dispositivo, em ação separada, e ficará em cache local; ela não vira áudio final da cena. ElevenLabs permanece um provedor separado: é possível trocar para ele e gerar novamente; versões anteriores ficam preservadas e cada novo áudio exige revisão/aprovação. Uploads e gravações só são substituídos após confirmação explícita.
 
 ## Privacidade
 

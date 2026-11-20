@@ -47,7 +47,8 @@ export const statusLabels: Record<Job['status'], string> = {
 export type Run = <T>(key: string, operation: () => Promise<T>, success?: string) => Promise<T | undefined>;
 export type Confirm = (title: string, description: string, action?: string) => Promise<boolean>;
 export interface ChoiceOption { value: string; label: string; description: string; }
-export interface ChoiceRequest { title: string; description: string; groupLabel: string; action: string; options: readonly ChoiceOption[]; initial: string; }
+export interface ChoiceGroup { id: string; groupLabel: string; options: readonly ChoiceOption[]; initial: string; }
+export interface ChoiceRequest { title: string; description: string; groupLabel: string; action: string; options: readonly ChoiceOption[]; initial: string; additionalGroups?: readonly ChoiceGroup[]; }
 export type Choose = (request: ChoiceRequest) => Promise<string | undefined>;
 export interface ScreenProps {
   snapshot: Snapshot;

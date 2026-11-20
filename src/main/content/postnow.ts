@@ -2,15 +2,25 @@ import type { RevisionSource } from '../../shared/image-revision.js';
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
-import type { Brand, PostNowFormatId, Project } from '../../shared/contracts.js';
+import type { Brand, PostNowFormatId, Project, VisualStyle } from '../../shared/contracts.js';
 import { POSTNOW_FORMATS, formatCanvas, isPostNowFormat } from '../../shared/formats.js';
-import { isLogoPolicy, logoPagesFor, type LogoPolicy } from '../../shared/logo-policy.js';
-import { isDepictedPerson, portraitPlanIssues, type DepictedPerson } from '../../shared/depicted-person.js';
+import { logoPagesFor, logoVariantForBackground, type LogoPolicy } from '../../shared/logo-policy.js';
+import { isDepictedPerson, portraitPlanIssues, brandImageOptOutIssues, type DepictedPerson } from '../../shared/depicted-person.js';
 import type { Services } from '../context.js';
 import { resolveTool, toolEnvironment } from '../setup/tools.js';
 import { atomicJson, atomicText, copyLocal, directory, fingerprint, localPath, missing, object, readJson, reserveProject } from './storage.js';
-import { CONFORM_SCRIPT, FIND_FREE_AREA_SCRIPT, MAX_CROP_PERCENT_PER_SIDE, PROBE_SCRIPT, parseImageSize, planCenterCrop } from './conform.js';
+import { CONFORM_SCRIPT, MAX_CROP_PERCENT_PER_SIDE, PROBE_SCRIPT, parseImageSize, planCenterCrop, officialLogoPosition } from './conform.js';
 
+const LOGO_AREA_LUMINANCE_SCRIPT = [
+  'import sys',
+  'from PIL import Image, ImageStat',
+  'image = Image.open(sys.argv[1]).convert("RGB")',
+  'x, y, width, height = map(int, sys.argv[2:6])',
+  'left, top = x + width // 5, y + height // 5',
+  'right, bottom = x + width * 4 // 5, y + height * 4 // 5',
+  'crop = image.crop((left, top, right, bottom))',
+  'print(sum(ImageStat.Stat(crop).mean) / 3)',
+].join('\n');
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 export async function nextImageBatchId(projectPath: string): Promise<string> {
   const runsPath = await directory(projectPath, 'generated/runs');
@@ -87,15 +97,20 @@ function requireDepictedPerson(value: unknown, index: number): DepictedPerson {
   if (!isDepictedPerson(value)) throw new Error(`Página ${index + 1}: defina quem aparece na arte (Ninguém, Outra pessoa ou Cliente (retrato aprovado)) antes de gerar imagens.`);
   return value;
 }
-/** Texto que o motor lê: o prompt do Studio sem linhas de política anteriores, seguido do bloco canônico. Idempotente. */
-export function composeEnginePrompt(prompt: string, depictedPerson: DepictedPerson, ownerPortrait?: string): string {
+const STYLE_PREFIX = 'Direção visual da biblioteca (';
+/** Linha da direção visual escolhida na biblioteca; é a única que o Studio acrescenta ao texto do prompt além da política. */
+function styleLine(style: VisualStyle): string {
+  return `${STYLE_PREFIX}${style.title}): ${style.direction}`;
+}
+/** Texto que o motor lê: o prompt do Studio sem linhas de política anteriores, seguido da direção visual (quando o projeto tem) e do bloco canônico. Idempotente. */
+export function composeEnginePrompt(prompt: string, depictedPerson: DepictedPerson, ownerPortrait?: string, visualStyle?: VisualStyle): string {
   const managedPrefixes = [...ENGINE_POLICY_MARKERS.map(marker => marker.slice(0, marker.indexOf('=') + 1)), IDENTITY_KEY];
   const kept = prompt.split(/\r?\n/).filter(line => {
     const text = line.trim();
-    return text !== POLICY_HEADING && !isIdentityInstruction(text) && !managedPrefixes.some(prefix => text.startsWith(prefix));
+    return text !== POLICY_HEADING && !isIdentityInstruction(text) && !text.startsWith(STYLE_PREFIX) && !managedPrefixes.some(prefix => text.startsWith(prefix));
   });
   while (kept.length && !kept[kept.length - 1]!.trim()) kept.pop();
-  return [...kept, ...(kept.length ? [''] : []), POLICY_HEADING, ...ENGINE_POLICY_MARKERS, `${IDENTITY_KEY}${depictedPerson}`, identityInstruction(depictedPerson, ownerPortrait), ''].join('\n');
+  return [...kept, ...(kept.length ? [''] : []), ...(visualStyle ? [styleLine(visualStyle), ''] : []), POLICY_HEADING, ...ENGINE_POLICY_MARKERS, `${IDENTITY_KEY}${depictedPerson}`, identityInstruction(depictedPerson, ownerPortrait), ''].join('\n');
 }
 /** Nome do perfil da marca no motor. */
 function engineClientName(brand: Brand): string {
@@ -116,37 +131,75 @@ export async function postnowHome(services: Services): Promise<string> {
 export async function approvedPortraitAt(home: string, brand: Brand): Promise<string | undefined> {
   const profileDir = join(home, 'clients', engineClientId(brand));
   const profilePath = join(profileDir, 'profile.json');
+  const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  let profile: Record<string, unknown> = {};
+  let brandProfile: Record<string, unknown> = {};
+  let portrait: string | undefined;
   if ((await lstat(profilePath).catch(() => undefined))?.isFile()) {
     try {
-      const profile = object(await readJson(profilePath), 'Perfil PostNow');
-      const portrait = object(profile.brand ?? {}, 'Marca do perfil PostNow').owner_portrait;
-      if (typeof portrait === 'string' && portrait.trim()) return portrait;
+      profile = object(await readJson(profilePath), 'Perfil PostNow');
+      brandProfile = record(profile.brand);
+      if (typeof brandProfile.owner_portrait === 'string' && brandProfile.owner_portrait.trim()) portrait = brandProfile.owner_portrait;
     } catch { /* Fallback para fotos cadastradas da marca */ }
   }
-  const portraitRef = brand.references?.find(r => r.kind === 'image' && /portrait|rosto|perfil|foto|whatsapp/i.test(r.name));
+  const portraitRef = portrait ? undefined : brand.references?.find(r => r.kind === 'image' && /portrait|rosto|perfil|foto|whatsapp/i.test(r.name));
   if (portraitRef) {
     try {
-      const refDir = join(profileDir, 'references');
-      await mkdir(refDir, { recursive: true });
       const relPath = `references/${basename(portraitRef.path)}`;
       const target = join(profileDir, relPath);
-      if (!(await lstat(target).catch(() => undefined))) {
-        await copyLocal(portraitRef.path, target).catch(() => undefined);
-      }
-      const profile = {
-        client_id: engineClientId(brand),
-        name: brand.name,
-        brand: {
-          colors: brand.colors,
-          owner_portrait: relPath,
-          reference_images: [relPath],
-        },
-      };
-      await atomicJson(profilePath, profile);
-      return relPath;
-    } catch { /* Ignora se houver erro de IO */ }
+      await mkdir(join(profileDir, 'references'), { recursive: true });
+      if (!(await lstat(target).catch(() => undefined))) await copyLocal(portraitRef.path, target);
+      portrait = relPath;
+    } catch { return undefined; }
   }
-  return undefined;
+  if (!portrait) return undefined;
+
+  const logo = record(profile.logo);
+  const requiredOn = logo.required_on;
+  const validPlacements = ['cover', 'body', 'cta', 'single', 'story'];
+  const placements = Array.isArray(requiredOn) && requiredOn.length > 0 && requiredOn.every((item): item is string => typeof item === 'string' && validPlacements.includes(item)) && new Set(requiredOn).size === requiredOn.length
+    ? requiredOn
+    : ['cover', 'cta', 'single', 'story'];
+  const formats = record(profile.formats);
+  const carousel = record(formats.carousel);
+  const post = record(formats.post);
+  const story = record(formats.story);
+  const positiveInteger = (value: unknown, fallback: number): number => Number.isInteger(value) && Number(value) > 0 ? Number(value) : fallback;
+  const referenceImages = Array.isArray(brandProfile.reference_images) && brandProfile.reference_images.every(item => typeof item === 'string')
+    ? brandProfile.reference_images as string[]
+    : [];
+  const normalizedProfile = {
+    ...profile,
+    schema_version: profile.schema_version ?? 1,
+    client_id: profile.client_id ?? engineClientId(brand),
+    name: typeof profile.name === 'string' && profile.name.trim() ? profile.name : brand.name,
+    brand: {
+      ...brandProfile,
+      locale: typeof brandProfile.locale === 'string' ? brandProfile.locale : 'pt-BR',
+      audience: typeof brandProfile.audience === 'string' ? brandProfile.audience : '',
+      voice: typeof brandProfile.voice === 'string' ? brandProfile.voice : '',
+      visual_style: typeof brandProfile.visual_style === 'string' ? brandProfile.visual_style : '',
+      colors: brandProfile.colors ?? brand.colors,
+      palette: Array.isArray(brandProfile.palette) ? brandProfile.palette : brand.colors,
+      fonts: Array.isArray(brandProfile.fonts) ? brandProfile.fonts : [],
+      reference_images: referenceImages.includes(portrait) ? referenceImages : [...referenceImages, portrait],
+      owner_portrait: portrait,
+    },
+    logo: {
+      ...logo,
+      required: true,
+      required_on: placements,
+      variants: record(logo.variants),
+    },
+    formats: {
+      ...formats,
+      carousel: { ...carousel, page_count: Math.max(3, positiveInteger(carousel.page_count, 10)), story_required: typeof carousel.story_required === 'boolean' ? carousel.story_required : false },
+      post: { ...post, width: positiveInteger(post.width, 1080), height: positiveInteger(post.height, 1350) },
+      story: { ...story, width: positiveInteger(story.width, 1080), height: positiveInteger(story.height, 1920) },
+    },
+  };
+  await atomicJson(profilePath, normalizedProfile);
+  return portrait;
 }
 
 async function ensureClient(services: Services, python: string, engineRoot: string, env: Record<string, string>, brand: Brand, pageCount: number, signal?: AbortSignal): Promise<string> {
@@ -171,12 +224,18 @@ async function synchronizeNativeProject(project: Project, format: PostNowFormatI
   const sourcePages = Array.isArray(native.pages) ? native.pages : [];
   if (sourcePages.length !== pageCount) throw new Error('A quantidade de imagens deve corresponder ao roteiro aprovado.');
   const identities = sourcePages.map((source, index) => requireDepictedPerson(object(source, 'Página PostNow').depicted_person, index));
-  const ownerPortrait = await approvedPortraitAt(home, brand);
+  if (project.useBrandImages === false) {
+    const issues = brandImageOptOutIssues(identities);
+    if (issues.length) throw new Error(issues.join(' '));
+  }
+  const ownerPortrait = project.useBrandImages === false ? undefined : await approvedPortraitAt(home, brand);
   const portraitIssues = portraitPlanIssues(type, identities, ownerPortrait !== undefined);
   if (portraitIssues.length) throw new Error(portraitIssues.join(' '));
   const pages: Record<string, unknown>[] = sourcePages.map((source, index) => {
     const page = object(source, 'Página PostNow');
-    return { ...page, page: index + 1, role: type === 'story' ? 'story' : type === 'post' ? 'single' : index === 0 ? 'cover' : index === pageCount - 1 ? 'cta' : 'body', depicted_person: identities[index] };
+    const externalPage = { ...page };
+    delete externalPage.body;
+    return { ...externalPage, page: index + 1, role: type === 'story' ? 'story' : type === 'post' ? 'single' : index === 0 ? 'cover' : index === pageCount - 1 ? 'cta' : 'body', depicted_person: identities[index] };
   });
   const projectData = { ...native, type, format, page_count: pageCount, page_count_approved: true, generation_policy: ENGINE_GENERATION_POLICY, pages };
   const clientId = await ensureClient(services, python, engineRoot, env, brand, pageCount, signal);
@@ -201,7 +260,7 @@ async function synchronizeNativeProject(project: Project, format: PostNowFormatI
     signal?.throwIfAborted();
     const promptPath = await localPath(project.path, String(page.prompt_file));
     if (!(await lstat(promptPath).catch(() => undefined))?.isFile()) throw new Error(`Prompt PostNow ausente: ${page.prompt_file}`);
-    await atomicText(join(nativeProject, String(page.prompt_file)), composeEnginePrompt(await readFile(promptPath, 'utf8'), identities[index]!, ownerPortrait));
+    await atomicText(join(nativeProject, String(page.prompt_file)), composeEnginePrompt(await readFile(promptPath, 'utf8'), identities[index]!, ownerPortrait, project.visualStyle));
   }
   const storyboardPath = await localPath(project.path, 'storyboard.md');
   if ((await lstat(storyboardPath).catch(() => undefined))?.isFile()) await atomicText(join(nativeProject, 'storyboard.md'), await readFile(storyboardPath, 'utf8'));
@@ -274,11 +333,6 @@ export async function preparePostNowGeneration(project: Project, brand: Brand | 
   await synchronizeNativeProject(project, project.format, brand, batchId, pageCount, engineRoot, python, env, home, services);
 }
 
-/** A round must name its logo policy; the Studio asks the person before any engine or paid call. */
-export function requireLogoPolicy(value: unknown): LogoPolicy {
-  if (!isLogoPolicy(value)) throw new Error('Escolha onde aplicar a logo: capa e fechamento, todas as páginas ou nenhuma.');
-  return value;
-}
 /** Slides in reading order, as stored. Empty slides are included; callers decide what reaches the engine. */
 export async function readCarouselSlides(projectPath: string): Promise<CarouselSlide[]> {
   const native = object(await readJson(await localPath(projectPath, 'project.json')), 'Projeto PostNow');
@@ -286,7 +340,7 @@ export async function readCarouselSlides(projectPath: string): Promise<CarouselS
   const field = (value: unknown): string => (typeof value === 'string' ? value : '');
   return pages.map((raw: unknown, index: number): CarouselSlide => {
     const page = object(raw, `Página ${index + 1}`);
-    return { page: index + 1, role: field(page.role), headline: field(page.headline), copy: field(page.copy), visualFunction: field(page.visual_function), promptFile: field(page.prompt_file) };
+    return { page: index + 1, role: field(page.role), headline: field(page.headline), body: field(page.body), copy: field(page.copy), visualFunction: field(page.visual_function), promptFile: field(page.prompt_file) };
   });
 }
 function nativeImageName(type: string, index: number, count: number): string {
@@ -295,7 +349,7 @@ function nativeImageName(type: string, index: number, count: number): string {
   return index === 1 ? '1-capa.png' : index === count ? `${count}-cta.png` : `${index}-pagina.png`;
 }
 
-export interface CarouselSlide { page: number; role: string; headline: string; copy: string; visualFunction: string; promptFile: string; }
+export interface CarouselSlide { page: number; role: string; headline: string; body: string; copy: string; visualFunction: string; promptFile: string; }
 export interface FinalizeResult { pages: number; adjusted: number[]; logoPages: number[]; }
 
 /**
@@ -389,13 +443,16 @@ async function runFinalize(project: Project, brand: Brand, batchId: string, serv
   try {
   const withLogo = logoPagesFor(logoPolicy, count).filter(page => !keptPages.includes(page));
   const logoPng = await readFile(brand.logo!);
-  if (logoPng.length < 24 || logoPng.readUInt32BE(0) !== 0x89504e47) throw new Error('A logo oficial não é um PNG válido.');
   const aspect = logoPng.readUInt32BE(16) / Math.max(1, logoPng.readUInt32BE(20));
   const box = Math.round(width * 0.18);
   const logoWidth = aspect >= 1 ? box : Math.max(1, Math.round(box * aspect));
   const logoHeight = aspect >= 1 ? Math.max(1, Math.round(box / aspect)) : box;
-  const x = width - Math.round(width * 0.07) - logoWidth;
-  const y = height - Math.round(height * 0.12) - logoHeight;
+  const { x, y } = officialLogoPosition({ width, height }, { width: logoWidth, height: logoHeight });
+  const profileValue = await readJson(join(home, 'clients', clientId, 'profile.json')).catch(() => undefined);
+  const profile = profileValue && typeof profileValue === 'object' && !Array.isArray(profileValue) ? profileValue as Record<string, unknown> : {};
+  const logoConfig = profile.logo && typeof profile.logo === 'object' && !Array.isArray(profile.logo) ? profile.logo as Record<string, unknown> : {};
+  const logoVariants = logoConfig.variants && typeof logoConfig.variants === 'object' && !Array.isArray(logoConfig.variants) ? logoConfig.variants as Record<string, unknown> : {};
+  const hasDarkLogoVariant = typeof logoVariants.dark === 'string';
 
   const mirrorGenerated = await directory(nativeProject, 'generated');
   for (let page = 1; page <= count; page++) {
@@ -408,23 +465,13 @@ async function runFinalize(project: Project, brand: Brand, batchId: string, serv
     const output = join(stagingPath, `slide-${String(page).padStart(2, '0')}.png`);
     if (await lstat(join(mirrorGenerated, nativeImageName(type, page, count))).catch(() => undefined)) throw new Error('A rodada nativa já possui imagens; nenhuma saída existente será sobrescrita.');
     if (withLogo.includes(page)) {
-      await writeBatchStatus(project.path, batchId, { state: 'processing', stage: 'logo', message: `Aplicando a logo oficial na página ${page} em área livre com máxima visibilidade.` });
-      let posX = x;
-      let posY = y;
-      try {
-        const probe = await services.capture(python, ['-c', FIND_FREE_AREA_SCRIPT, input, brand.logo!, String(logoWidth), String(logoHeight)], { cwd: engineRoot, env, timeoutMs: 30000, signal });
-        if (probe.code === 0 && probe.stdout.trim()) {
-          const parsed: unknown = JSON.parse(probe.stdout.trim());
-          if (typeof parsed === 'object' && parsed !== null && 'x' in parsed && 'y' in parsed) {
-            const { x: px, y: py } = parsed as { x: number; y: number };
-            if (typeof px === 'number' && typeof py === 'number' && px >= 0 && py >= 0) {
-              posX = px;
-              posY = py;
-            }
-          }
-        }
-      } catch { /* Mantém coordenadas padrão */ }
-      const result = await services.capture(python, ['-m', 'postnow', 'logo', 'apply', '--client', clientId, '--input', input, '--output', output, '--x', String(posX), '--y', String(posY), '--width', String(logoWidth)], { cwd: engineRoot, env, timeoutMs: 60_000, signal });
+      const luminance = hasDarkLogoVariant
+        ? await services.capture(python, ['-c', LOGO_AREA_LUMINANCE_SCRIPT, input, String(x), String(y), String(logoWidth), String(logoHeight)], { cwd: engineRoot, env, timeoutMs: 60_000, signal })
+        : undefined;
+      const variant = logoVariantForBackground(luminance?.code === 0 ? Number.parseFloat(luminance.stdout) : undefined, hasDarkLogoVariant);
+      const variantArgs = variant ? ['--variant', variant] : [];
+      await writeBatchStatus(project.path, batchId, { state: 'processing', stage: 'logo', message: `Aplicando a ${variant ? 'logo branca' : 'logo oficial'} na página ${page}, com margem fixa inferior direita.` });
+      const result = await services.capture(python, ['-m', 'postnow', 'logo', 'apply', '--client', clientId, ...variantArgs, '--input', input, '--output', output, '--x', String(x), '--y', String(y), '--width', String(logoWidth)], { cwd: engineRoot, env, timeoutMs: 60_000, signal });
       if (result.code !== 0) throw new Error(`O PostNow não aplicou a logo na página ${page}: ${result.stderr.trim() || result.stdout.trim()}`);
     } else await copyLocal(input, output);
     await copyLocal(output, join(mirrorGenerated, nativeImageName(type, page, count)));

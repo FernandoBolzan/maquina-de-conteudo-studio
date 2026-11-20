@@ -52,6 +52,26 @@
 
 ## Latest Verification
 
+- Escopo: composição e responsividade do renderer; plano RALPLAN `.omx/plans/motores-setup-ux-20261116T185253Z.md`. Revisão estática independente: nenhum finding.
+- Gates: `npm run typecheck` passou; `npm run lint` passou; `npm test` 296/296 passou; `npm run build` passou (renderer JS 853,06 kB; aviso Vite >500 kB); `npm run smoke` isolado passou com `ok: true`, 3 projetos, 1 marca e PTY cancelado.
+- A primeira sequência composta falhou em `npm run smoke` com a proteção `POSTNOW_HOME` reportando `/tmp` como repositório; execução isolada seguinte passou. A causa da diferença não foi identificada; nenhum código de backend foi alterado.
+- Preview Chromium, Motores e ElevenLabs: 320×568, 390×844, 768×1024, 1024×768 e 1440×900 sem overflow horizontal nem truncamento do título do breadcrumb. Sidebar substitui tabs em desktop; tabs substituem subnav em telas ≤920 px. Setas do teclado trocaram para ElevenLabs.
+- Estado real do preview sem chave/cofre: mensagem de cofre indisponível, campo de key e ação de clonagem desabilitados, biblioteca bloqueada; sem TTS, clonagem, instalação ou login. Fixture somente em memória simulou catálogo de duas vozes, busca, filtro, ausência de resultados e erro/retry sem enviar requests ElevenLabs. Voz fixture sem `previewUrl` apresentou “Amostra indisponível”; nenhum áudio real foi tocado.
+- Console e erros do renderer: zero. Capturas: `.frontend-excellence/visual-qa/setup-final-320.png`, `setup-final-390.png`, `setup-final-1440.png`, `elevenlabs-final-390.png` e `elevenlabs-final-1024.png`.
+- Limites: preview browser não valida Electron nativo, cofre real, API/conta ElevenLabs nem reprodução de áudio real; a origem da falha única de smoke permanece não identificada.
+
+## 2026-11-16 — Revisão de integridade e E2E controlado
+
+- Correções: revisão de imagem agora permite salvar a nota no `blur` e aprovar em seguida, sem a chave `review-image` descartar a aprovação. A aprovação PostNow compara a rodada com a quantidade de páginas persistida no projeto e continua exigindo status `ready`, formato correspondente e conjunto completo.
+- Fixtures de rodada atualizadas para registrar o formato em `.status.json`; o teste de mobile usa projeto 1:1 com uma imagem e o lifecycle confere que uma rodada incompleta não pode ser aprovada.
+- Gates finais: `npm test` 303/303; `npm run typecheck`, `npm run lint`, `npm run build` e `PYTHONDONTWRITEBYTECODE=1 npm run smoke` passaram. O build reporta chunk JS 856,83 kB (>500 kB).
+- Smoke isolado: 3 projetos, 1 marca, PostNow e VideoGo locais, render/derivação em workspace temporário, PTY cancelado; sem chamadas pagas de IA.
+- E2E no preview isolado: criou e abriu projeto PostNow de teste, revisou rodada sintética pronta, editou nota, mudou o foco clicando em “Aprovar”, e verificou chamadas `projects.review` e `projects.approve` com HTTP 200. Estado final: arte aprovada, revisão pendente removida, etapa Entregar. Sem geração de IA.
+- Responsividade no preview Chromium: 320, 390, 768 e 1440 px sem overflow horizontal; zero erros de console/renderer. Dados do preview foram removidos ao encerrar o servidor.
+- Limites: preview e smoke não exercitam instalação Electron nativa, Windows/macOS, ElevenLabs nem geração paga. O bundle do renderer continua acima do limite de aviso do Vite.
+
+## Previous Verification — 2026-11-06
+
 - Date/scope: 2026-11-06 — verificação real do Studio em Electron isolado (`MDC_DATA_DIR=/tmp/mdc-e2e/data`, `--user-data-dir=/tmp/mdc-e2e/electron-user`, workspace `/tmp/mdc-e2e/workspace`). Projetos: carrossel `teste-e2e-carrossel`, vídeo de 1 imagem `teste-e2e-video`, vídeo VideoGo `teste-e2e-video-video`, skeleton `teste-e2e-skeleton`. Horários locais (UTC-3); nomes de ZIP e MP4 usam UTC.
 - Gates (`src/`, `tests/`, `scripts/` sem mudança após 19:27 local): `npm run typecheck` exit 0; `npm run lint` exit 0; `npm test` 69/69, `# fail 0`; `npm run smoke` `ok: true`; `npm run build` exit 0 (`index-B_hcCSVp.js` 692.20 kB, gzip 191.16 kB; aviso >500 kB pré-existente). Logs em `/tmp/mdc-gate-*.log`.
 - Carrossel Codex v1: job `6b9d53d5-…` `succeeded` (≈3,3 min; lote `1794001502221-a545bf9e`). 3 PNG 1080×1350 RGBA; logo nas páginas 1 e 3; copy literal; sem pessoas.

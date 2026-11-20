@@ -14,6 +14,7 @@ export interface ProjectJourneyInput {
   hasScript: boolean;
   hasRender: boolean;
   outputs: { approved: boolean }[];
+  imagesReady?: boolean;
   textsApproved?: boolean;
   isRunning?: boolean;
   voice?: JourneyVoiceState;
@@ -57,7 +58,7 @@ export function getProjectJourney(input: ProjectJourneyInput): ProjectJourney {
   const completion: Record<JourneyStepId, boolean> = {
     brief: input.hasBrief,
     texts: input.textsApproved === true,
-    images: outputCount > 0,
+    images: input.kind === 'image' ? (input.imagesReady ?? outputCount > 0) : outputCount > 0,
     script: scriptReady,
     voice: voiceReady,
     render: input.hasRender,

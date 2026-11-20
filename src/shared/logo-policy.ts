@@ -19,3 +19,8 @@ export function logoPagesFor(policy: LogoPolicy, count: number): number[] {
   if (policy === 'all-pages') return every;
   return count > 1 ? [1, count] : every;
 }
+
+/** Uses the registered white-on-dark logo only when the reserved area is dark. */
+export function logoVariantForBackground(luminance: number | undefined, hasDarkVariant: boolean): 'dark' | undefined {
+  return hasDarkVariant && luminance !== undefined && Number.isFinite(luminance) && luminance < 128 ? 'dark' : undefined;
+}

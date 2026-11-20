@@ -25,17 +25,21 @@ export function Modal({ title, children, onClose, wide = false, className = '' }
 }
 
 export function ChoiceDialog({ request, onResolve }: { request: ChoiceRequest; onResolve: (value: string | undefined) => void }) {
-  const [selected, setSelected] = useState(request.initial);
+  const groups = [{ id: 'primary', groupLabel: request.groupLabel, options: request.options, initial: request.initial }, ...(request.additionalGroups ?? [])];
+  const [selected, setSelected] = useState(() => Object.fromEntries(groups.map(group => [group.id, group.initial])));
   return <Modal title={request.title} onClose={() => onResolve(undefined)}>
     <p className="consent-description">{request.description}</p>
-    <form onSubmit={event => { event.preventDefault(); onResolve(selected); }}>
-      <fieldset className="choice-group">
-        <legend>{request.groupLabel}</legend>
-        {request.options.map(option => <label key={option.value} className="choice-option">
-          <input type="radio" name="choice" value={option.value} checked={selected === option.value} onChange={() => setSelected(option.value)} />
+    <form onSubmit={event => {
+      event.preventDefault();
+      onResolve(groups.length === 1 ? selected.primary : JSON.stringify(selected));
+    }}>
+      {groups.map(group => <fieldset className="choice-group" key={group.id}>
+        <legend>{group.groupLabel}</legend>
+        {group.options.map(option => <label key={option.value} className="choice-option">
+          <input type="radio" name={`choice-${group.id}`} value={option.value} checked={selected[group.id] === option.value} onChange={() => setSelected(current => ({ ...current, [group.id]: option.value }))} />
           <span><strong>{option.label}</strong><small>{option.description}</small></span>
         </label>)}
-      </fieldset>
+      </fieldset>)}
       <div className="consent-note">A ação só começa depois da sua confirmação.</div>
       <div className="modal-actions">
         <button className="button secondary" type="button" onClick={() => onResolve(undefined)}>Cancelar</button>

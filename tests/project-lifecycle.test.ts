@@ -136,7 +136,7 @@ test('imported PostNow rounds bridge only complete approved batches and mapped d
         pages.push({ page: index + 1, input: inputNames[index], output, native: nativeName });
       }
       await writeFile(join(run, '.mapping.json'), JSON.stringify({ pages }));
-      await writeFile(join(run, '.status.json'), JSON.stringify({ state: 'ready', updatedAt: new Date().toISOString() }));
+      await writeFile(join(run, '.status.json'), JSON.stringify({ state: 'ready', format: 'carousel-4x5', updatedAt: new Date().toISOString() }));
       rounds.push({ id: batch.id, sources, outputs, nativeProject });
     }
     const [older, latest] = rounds as [typeof rounds[number], typeof rounds[number]];
@@ -156,6 +156,7 @@ test('imported PostNow rounds bridge only complete approved batches and mapped d
     await writeFile(latestMapping, validLatestMapping);
     await rm(latest.outputs[4]!);
     await assert.rejects(runtime.invoke('projects.bridge', { id: project.id, kind: 'video', batchId: latest.id }), /conclusão verificada/i);
+    await assert.rejects(runtime.invoke('projects.approve', { id: project.id, path: latest.outputs[0]!.slice(project.path.length + 1), approved: true }), /rodada precisa estar completa e verificada/i);
     const incompleteLatest = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
     assert.equal(incompleteLatest.batches?.find(batch => batch.id === latest.id)?.status?.state, 'failed');
     assert.equal((await readdir(join(root, 'workspace', 'projects'))).length, 1);
@@ -331,6 +332,55 @@ test('deletion recovery removes partial session and PostNow mirror using journal
     await assert.rejects(readdir(sessionDirectory), { code: 'ENOENT' });
     await assert.rejects(readdir(nativeCopy), { code: 'ENOENT' });
     await assert.rejects(readFile(tombstone), { code: 'ENOENT' });
+  } finally {
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('visual preferences persist at creation, save without jobs, and clone with the same engine', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'studio-visual-preferences-'));
+  const runtime = new Runtime(join(root, 'data'), {
+    assetPrefix: 'media://asset/', secureStorageAvailable: () => false,
+    encryptSecret: () => { throw new Error('unavailable'); }, decryptSecret: () => { throw new Error('unavailable'); },
+    pickFile: async () => undefined, openPath: async () => undefined, openExternal: async () => undefined,
+    update: async () => ({ available: false, message: '' }),
+  }, () => undefined);
+  try {
+    await runtime.init();
+    await runtime.saveSettings({ workspace: join(root, 'workspace') });
+    const image = await runtime.invoke('projects.create', {
+      title: 'Post preferências', kind: 'image', format: 'post-1x1', brief: 'Dica útil.',
+      imageBackgroundMode: 'dark', useBrandImages: false, logoPolicy: 'none',
+    }) as Project;
+    assert.deepEqual(
+      (({ imageBackgroundMode, useBrandImages, logoPolicy }) => ({ imageBackgroundMode, useBrandImages, logoPolicy }))(image),
+      { imageBackgroundMode: 'dark', useBrandImages: false, logoPolicy: 'none' },
+    );
+    assert.deepEqual(runtime.services.jobs(), []);
+    const saved = await runtime.invoke('projects.visualPreferences', {
+      id: image.id, imageBackgroundMode: 'light', useBrandImages: true, logoPolicy: 'all-pages',
+    }) as ProjectDetail;
+    assert.deepEqual(
+      (({ imageBackgroundMode, useBrandImages, logoPolicy }) => ({ imageBackgroundMode, useBrandImages, logoPolicy }))(saved),
+      { imageBackgroundMode: 'light', useBrandImages: true, logoPolicy: 'all-pages' },
+    );
+    assert.deepEqual(runtime.services.jobs(), []);
+    const clone = await runtime.invoke('projects.clone', { id: image.id, title: 'Post clone' }) as Project;
+    assert.equal(clone.imageBackgroundMode, 'light');
+    assert.equal(clone.useBrandImages, true);
+    assert.equal(clone.logoPolicy, 'all-pages');
+
+    const video = await runtime.invoke('projects.create', {
+      title: 'Vídeo preferências', kind: 'video', format: 'reels', brief: 'Explicador.',
+      useBrandImages: false,
+    }) as Project;
+    assert.equal(video.useBrandImages, false);
+    const savedVideo = await runtime.invoke('projects.visualPreferences', { id: video.id, useBrandImages: true }) as ProjectDetail;
+    assert.equal(savedVideo.useBrandImages, true);
+    const videoClone = await runtime.invoke('projects.clone', { id: video.id, title: 'Vídeo clone' }) as Project;
+    assert.equal(videoClone.useBrandImages, true);
+    await assert.rejects(runtime.invoke('projects.visualPreferences', { id: video.id, imageBackgroundMode: 'dark' }), /Fundo e logo/);
+    assert.deepEqual(runtime.services.jobs(), []);
   } finally {
     await runtime.dispose();
     await rm(root, { recursive: true, force: true });

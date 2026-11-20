@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowRight, Film, FolderInput, Image, Layers, Monitor, Plus, Search, Shapes, Smartphone, Square } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Film, FolderInput, Image, Layers, Moon, Monitor, Plus, Search, Shapes, Smartphone, Square, Sun } from 'lucide-react';
 import type { Project, ProjectFormatId } from '../shared/contracts';
 import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, imageAspectOptions, isPostNowFormat, postNowFormatFor, videoAspectOptions, type ImageAspect } from '../shared/formats';
+import { IMAGE_BACKGROUND_OPTIONS, defaultImageBackgroundMode, type ImageBackgroundMode } from '../shared/image-background';
+import { LOGO_POLICY_OPTIONS, isLogoPolicy, type LogoPolicy } from '../shared/logo-policy';
 import { Empty, Modal, PageHeading } from './components';
 import { invoke, shortDate, useJobs, type ScreenProps } from './state';
 import { ActivityCard } from './Console';
@@ -29,6 +31,7 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
   const [createStep, setCreateStep] = useState<CreateStep>(initialKind ? 'briefing' : 'engine');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
+  const [brandFilter, setBrandFilter] = useState('all');
   const [kind, setKind] = useState<Project['kind']>(initialKind ?? 'image');
   const [format, setFormat] = useState<ProjectFormatId>(defaultFormat(initialKind ?? 'image'));
   const [pageCount, setPageCount] = useState(5);
@@ -36,12 +39,18 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
   const [title, setTitle] = useState('');
   const [titleEdited, setTitleEdited] = useState(false);
   const [audience, setAudience] = useState('Público geral');
-  const [tone, setTone] = useState('Claro e curioso');
+  const [tone, setTone] = useState('Claro e direto');
   const [callToAction, setCallToAction] = useState('Salve e compartilhe');
   const [additionalNotes, setAdditionalNotes] = useState('');
   const [brandId, setBrandId] = useState('');
   const [promptChoice, setPromptChoice] = useState(firstPrompt(initialKind ?? 'image'));
   const [promptText, setPromptText] = useState('');
+  const [backgroundMode, setBackgroundMode] = useState<ImageBackgroundMode>('light');
+  const [backgroundModeTouched, setBackgroundModeTouched] = useState(false);
+  const [useBrandImages, setUseBrandImages] = useState(false);
+  const [logoPolicy, setLogoPolicy] = useState<LogoPolicy>('none');
+  const [logoPolicyTouched, setLogoPolicyTouched] = useState(false);
+  const [styleId, setStyleId] = useState('');
   const [deletion, setDeletion] = useState<DeletionPreview | null>(null);
   const [confirmTitle, setConfirmTitle] = useState('');
   const [baseProject, setBaseProject] = useState<Project | null>(null);
@@ -50,45 +59,77 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
   const titleSuggestion = useRef('');
   const promptLibrary = useMemo(() => loadPromptLibrary(window.localStorage), []);
   const jobs = useJobs();
+  const selectedBrand = snapshot.brands.find(brand => brand.id === brandId);
+  const selectedBrandColors = selectedBrand?.colors;
 
   const isCarousel = format.startsWith('carousel-');
-  const promptInputs: PromptInputs = { topic, audience, tone, callToAction, format, ...(kind === 'image' && isCarousel ? { pageCount } : {}) };
-  const recipes = promptRecipesFor(kind, isCarousel);
+  const promptInputs: PromptInputs = { topic, audience, tone, callToAction, format, useBrandImages, ...(kind === 'image' && isCarousel ? { pageCount } : {}) };
+  const recipes = promptRecipesFor(kind);
   const matchingRecipe = recipes.find(recipe => recipe.id === promptChoice);
   const matchingPersonalPrompt = promptLibrary.personal.find(prompt => prompt.id === promptChoice && prompt.kind === kind);
   const promptSelectValue = promptChoice === 'custom' || matchingRecipe || matchingPersonalPrompt ? promptChoice : 'custom';
   const personalPrompts = promptLibrary.personal.filter(prompt => prompt.kind === kind);
-  const projects = snapshot.projects.filter(project => (filter === 'all' || project.kind === filter) && project.title.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')));
+  const normalizedSearch = search.trim().toLocaleLowerCase('pt-BR');
+  const projects = snapshot.projects.filter(project => {
+    const brand = snapshot.brands.find(item => item.id === project.brandId);
+    const matchesKind = filter === 'all' || project.kind === filter;
+    const matchesBrand = brandFilter === 'all' || (brandFilter === 'unbranded' ? !project.brandId : project.brandId === brandFilter);
+    const matchesSearch = !normalizedSearch || [project.title, project.brief, brand?.name ?? 'Sem marca']
+      .some(value => value.toLocaleLowerCase('pt-BR').includes(normalizedSearch));
+    return matchesKind && matchesBrand && matchesSearch;
+  });
 
   useEffect(() => {
     if (!initialKind) return;
     setKind(initialKind);
     setFormat(defaultFormat(initialKind));
     setPromptChoice(firstPrompt(initialKind));
+    setUseBrandImages(initialKind === 'video');
     setCreateStep('briefing');
     setCreate(true);
     onInitialKindConsumed();
   }, [initialKind, onInitialKindConsumed]);
+  useEffect(() => {
+    if (kind === 'image' && !backgroundModeTouched) {
+      setBackgroundMode(defaultImageBackgroundMode(selectedBrandColors ?? []));
+    }
+  }, [backgroundModeTouched, kind, selectedBrandColors]);
+  useEffect(() => {
+    if (kind === 'image' && !logoPolicyTouched) {
+      setLogoPolicy(selectedBrand?.logo?.toLowerCase().endsWith('.png') ? 'cover-closing' : 'none');
+    }
+  }, [kind, logoPolicyTouched, selectedBrand?.logo]);
 
   useEffect(() => {
     if (createStep !== 'briefing' || promptChoice === 'custom') return;
-    if (matchingRecipe) setPromptText(composePrompt(matchingRecipe, promptInputs));
-    else if (matchingPersonalPrompt) setPromptText(interpolatePrompt(matchingPersonalPrompt.prompt, promptInputs));
+    let nextPrompt = '';
+    if (matchingRecipe) nextPrompt = composePrompt(matchingRecipe, promptInputs);
+    else if (matchingPersonalPrompt) nextPrompt = interpolatePrompt(matchingPersonalPrompt.prompt, promptInputs);
     else if (PROMPT_RECIPES.some(recipe => recipe.id === promptChoice)) {
-      // A recipe that is no longer offered (e.g. single-image mode) falls back to custom.
+      // A recipe of another kind is not offered here; fall back to custom.
       setPromptChoice('custom');
-      setPromptText('');
     }
-    else setPromptText('');
-  }, [createStep, kind, matchingPersonalPrompt, matchingRecipe, promptChoice, topic, audience, tone, callToAction, format, pageCount, isCarousel]);
+    setPromptText(current => current === nextPrompt ? current : nextPrompt);
+  }, [createStep, kind, matchingPersonalPrompt, matchingRecipe, promptChoice, topic, audience, tone, callToAction, format, pageCount, isCarousel, useBrandImages]);
+
+  // O estilo da receita acompanha a escolha e sobrevive à edição do texto; só "Escrever meu próprio prompt" ou um modelo pessoal o removem.
+  useEffect(() => {
+    if (matchingRecipe) setStyleId(current => current === matchingRecipe.id ? current : matchingRecipe.id);
+    else if (matchingPersonalPrompt) setStyleId(current => current === '' ? current : '');
+  }, [matchingRecipe, matchingPersonalPrompt]);
 
   function chooseKind(next: Project['kind']) {
+    const nextFormat = defaultFormat(next);
     setKind(next);
-    setFormat(defaultFormat(next));
+    setFormat(nextFormat);
     setPromptChoice(firstPrompt(next));
     setPromptText('');
+    setBackgroundModeTouched(false);
+    setUseBrandImages(next === 'video');
+    setLogoPolicy('none');
+    setLogoPolicyTouched(false);
     if (!titleEdited) {
-      const suggested = suggestProjectTitle(next, topic);
+      const suggested = suggestProjectTitle(next, topic, nextFormat);
       titleSuggestion.current = suggested;
       setTitle(suggested);
     }
@@ -108,7 +149,7 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
     setTitleEdited(false);
     titleSuggestion.current = '';
     setAudience('Público geral');
-    setTone('Claro e curioso');
+    setTone('Claro e direto');
     setCallToAction('Salve e compartilhe');
     setAdditionalNotes('');
     setFormat(defaultFormat(kind));
@@ -116,12 +157,17 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
     setBrandId('');
     setPromptText('');
     setPromptChoice(firstPrompt(kind));
+    setBackgroundMode('light');
+    setBackgroundModeTouched(false);
+    setUseBrandImages(false);
+    setLogoPolicy('none');
+    setLogoPolicyTouched(false);
   }
 
   function changeTopic(value: string) {
     setTopic(value);
     if (!titleEdited) {
-      const suggested = suggestProjectTitle(kind, value);
+      const suggested = suggestProjectTitle(kind, value, format);
       titleSuggestion.current = suggested;
       setTitle(suggested);
     }
@@ -129,13 +175,20 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
 
   function selectPrompt(value: string) {
     setPromptChoice(value);
-    if (value === 'custom') setPromptText('');
+    if (value === 'custom') { setPromptText(''); setStyleId(''); }
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     const brief = composeProjectBrief(promptInputs, additionalNotes);
-    const result = await run('create', () => invoke<Project>('projects.create', { title, kind, format, brandId: brandId || undefined, brief, ...(kind === 'image' && isCarousel ? { pageCount } : {}) }));
+    const styleRecipe = kind === 'image' ? recipes.find(recipe => recipe.id === styleId && recipe.visualDirection) : undefined;
+    const result = await run('create', () => invoke<Project>('projects.create', {
+      title, kind, format, brandId: brandId || undefined, brief,
+      ...(styleRecipe ? { visualStyleId: styleRecipe.id } : {}),
+      ...(kind === 'image' ? { imageBackgroundMode: backgroundMode, logoPolicy } : {}),
+      useBrandImages,
+      ...(kind === 'image' && isCarousel ? { pageCount } : {}),
+    }));
     if (result) {
       const initialPrompt = promptText.trim();
       resetCreate();
@@ -197,13 +250,21 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
   const imageOptions = imageAspectOptions();
   const imageAspect: ImageAspect = isPostNowFormat(format) ? POSTNOW_FORMATS[format].aspect : POSTNOW_FORMATS[DEFAULT_POSTNOW_FORMAT].aspect;
   const imageOption = imageOptions.find(option => option.aspect === imageAspect)!;
+  function selectFormat(next: ProjectFormatId) {
+    setFormat(next);
+    if (!titleEdited) {
+      const suggested = suggestProjectTitle(kind, topic, next);
+      titleSuggestion.current = suggested;
+      setTitle(suggested);
+    }
+  }
   function selectImageAspect(aspect: ImageAspect) {
     const option = imageOptions.find(item => item.aspect === aspect)!;
-    setFormat(isCarousel && option.carousel ? option.carousel : option.single);
+    selectFormat(isCarousel && option.carousel ? option.carousel : option.single);
   }
   function selectImageMode(carousel: boolean) {
     const next = postNowFormatFor(imageAspect, carousel);
-    if (next) setFormat(next);
+    if (next) selectFormat(next);
   }
   return (
     <>
@@ -254,27 +315,39 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
       <section className="projects-library" aria-labelledby="projects-library-title">
       <div className="projects-library-heading">
         <div><span className="projects-kicker">SEU WORKSPACE</span><h2 id="projects-library-title">Biblioteca de projetos</h2></div>
-        <span className="projects-result-count" aria-live="polite">{projects.length} {projects.length === 1 ? 'projeto' : 'projetos'}</span>
+        <span className="projects-result-count" aria-live="polite">{projects.length === snapshot.projects.length ? `${projects.length} ${projects.length === 1 ? 'projeto' : 'projetos'}` : `${projects.length} de ${snapshot.projects.length} projetos`}</span>
       </div>
 
       <div className="library-toolbar projects-toolbar">
-        <div className="studio-styles projects-filters" role="group" aria-label="Filtrar projetos">
-          {[['all', 'Todos'], ['image', 'Imagens · PostNow'], ['video', 'Vídeos · VideoGo']].map(([value, label]) => (
-            <button key={value} type="button" aria-pressed={filter === value} className={`studio-chip ${filter === value ? 'active' : ''}`} onClick={() => setFilter(value)}>
-              {label}
-            </button>
-          ))}
+        <div className="projects-filter-row">
+          <div className="studio-styles projects-filters" role="group" aria-label="Filtrar projetos por tipo">
+            {[['all', 'Todos'], ['image', 'Imagens · PostNow'], ['video', 'Vídeos · VideoGo']].map(([value, label]) => (
+              <button key={value} type="button" aria-pressed={filter === value} className={`studio-chip ${filter === value ? 'active' : ''}`} onClick={() => setFilter(value)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <label className="projects-brand-filter">
+            <span>Marca</span>
+            <select value={brandFilter} onChange={event => setBrandFilter(event.target.value)} aria-label="Filtrar projetos por marca">
+              <option value="all">Todas as marcas</option>
+              <option value="unbranded">Sem marca</option>
+              {snapshot.brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+            </select>
+          </label>
         </div>
         <label className="search-field projects-search">
           <Search size={15} />
-          <span className="sr-only">Buscar projetos</span>
-          <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Filtrar projetos por nome…" />
+          <span className="sr-only">Buscar projetos por nome, briefing ou marca</span>
+          <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar nome, briefing ou marca…" />
         </label>
       </div>
 
       {projects.length === 0 ? (
         snapshot.projects.length ? (
-          <Empty icon={<Shapes />} title="Nenhum projeto encontrado para este filtro">Experimente outro nome ou filtro.</Empty>
+          <Empty icon={<Shapes />} title="Nenhum projeto encontrado para este filtro" action={
+            <button type="button" className="button secondary" onClick={() => { setFilter('all'); setBrandFilter('all'); setSearch(''); }}>Limpar filtros</button>
+          }>Experimente outros filtros ou termos de busca.</Empty>
         ) : (
           <Empty icon={<Shapes />} title="Nenhum projeto no workspace" action={
             <span className="empty-project-actions">
@@ -451,6 +524,56 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
 
                   {kind === 'image' ? (
                     <div className="format-selection-section">
+                      <div className="field-group background-mode-field">
+                        <div>
+                          <span className="field-title">Fundo das artes</span>
+                          <p className="field-help">A sugestão acompanha a paleta da marca vinculada. Você pode escolher outra opção.</p>
+                        </div>
+                        <div className="format-cards-grid background-mode-cards" role="group" aria-label="Fundo das artes">
+                          {IMAGE_BACKGROUND_OPTIONS.map(option => {
+                            const selected = backgroundMode === option.value;
+                            const Icon = option.value === 'dark' ? Moon : Sun;
+                            return (
+                              <button
+                                key={option.value}
+                                type="button"
+                                className={`format-card ${selected ? 'is-selected' : ''}`}
+                                aria-pressed={selected}
+                                onClick={() => { setBackgroundMode(option.value); setBackgroundModeTouched(true); }}
+                              >
+                                <div className="format-card-top">
+                                  <span className="ratio-box"><Icon size={15} /></span>
+                                  <span className={`radio-dot ${selected ? 'is-checked' : ''}`} />
+                                </div>
+                                <div className="format-card-info">
+                                  <span className="format-card-title">{option.label}</span>
+                                  <small>{option.description}</small>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="form-row-2col">
+                        <label className="field-group">
+                          <span className="field-title">Usar fotos da marca</span>
+                          <select value={useBrandImages ? 'yes' : 'no'} onChange={event => setUseBrandImages(event.target.value === 'yes')}>
+                            <option value="no">Não usar fotos de referência</option>
+                            <option value="yes">Usar fotos e referências da marca</option>
+                          </select>
+                        </label>
+                        <label className="field-group">
+                          <span className="field-title">Logo oficial nas artes</span>
+                          <select value={logoPolicy} onChange={event => { if (isLogoPolicy(event.target.value)) { setLogoPolicy(event.target.value); setLogoPolicyTouched(true); } }}>
+                            {LOGO_POLICY_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          </select>
+                        </label>
+                      </div>
+                      <p className="field-help">
+                        {selectedBrand?.logo?.toLowerCase().endsWith('.png')
+                          ? 'Essas escolhas ficam salvas no projeto e não serão perguntadas a cada geração. Fotos da marca desligadas bloqueiam páginas configuradas para usar o retrato do cliente.'
+                          : 'Essas escolhas ficam salvas no projeto. O PostNow ainda exige uma logo oficial PNG cadastrada na marca para sincronizar e finalizar as imagens.'}
+                      </p>
                       <div className="format-section-label">
                         <span>Proporção da imagem</span>
                         <small>Selecione a proporção das artes para a sua rede social principal</small>
@@ -598,6 +721,16 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
                       <p className="field-help" style={{ marginTop: '8px' }}>
                         Dica: Vídeos em 9:16 vertical enquadram perfeitamente na área segura 4:5 do feed do Instagram.
                       </p>
+                      <div className="form-row-2col" style={{ marginTop: '14px' }}>
+                        <label className="field-group">
+                          <span className="field-title">Fotos e referências da marca</span>
+                          <select value={useBrandImages ? 'yes' : 'no'} onChange={event => setUseBrandImages(event.target.value === 'yes')}>
+                            <option value="yes">Usar quando pertinentes</option>
+                            <option value="no">Não usar fotos</option>
+                          </select>
+                        </label>
+                        <p className="field-help">A escolha é salva no projeto e vale para o roteiro e as cenas do vídeo.</p>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -630,7 +763,7 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
                       }}
                       required
                       maxLength={200}
-                      placeholder={kind === 'image' ? 'Carrossel — assunto' : 'Vídeo — assunto'}
+                      placeholder={kind === 'image' ? 'Carrossel: assunto' : 'Vídeo: assunto'}
                     />
                   </label>
                 </div>
@@ -647,7 +780,7 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
                     </label>
                     <label className="field-group">
                       <span className="field-title">Tom de voz</span>
-                      <input value={tone} onChange={event => setTone(event.target.value)} maxLength={300} placeholder="Ex.: Claro e curioso, acolhedor, assertivo" />
+                      <input value={tone} onChange={event => setTone(event.target.value)} maxLength={300} placeholder="Ex.: Claro e direto, acolhedor, assertivo" />
                     </label>
                   </div>
                   <div className="form-row-2col">
@@ -680,6 +813,9 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
                       <option value="custom">Escrever meu próprio prompt</option>
                     </select>
                   </label>
+                  {kind === 'image' && recipes.find(recipe => recipe.id === styleId && recipe.visualDirection) && (
+                    <p className="field-help">A direção visual “{recipes.find(recipe => recipe.id === styleId)?.title}” é enviada direto à geração das imagens e ao PostNow, sem depender da reescrita do agente.</p>
+                  )}
                   <label className="field-group">
                     <span className="field-title">Prompt preparado para o assistente</span>
                     <textarea rows={5} value={promptText} onChange={event => { setPromptChoice('custom'); setPromptText(event.target.value); }} required maxLength={20000} placeholder="O pedido completo aparece aqui para você revisar antes de iniciar o agente." />

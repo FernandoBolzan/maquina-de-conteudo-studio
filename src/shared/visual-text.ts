@@ -1,18 +1,20 @@
 import { isDepictedPerson, type DepictedPerson } from './depicted-person.js';
+import { DASH_ERROR, hasDash } from './writing-style.js';
 
 /** Limites de texto editável. Medidos após remover espaços das bordas. */
-export const VISUAL_TEXT_LIMITS = { headline: 80, copy: 2000, onScreen: 300 } as const;
+export const VISUAL_TEXT_LIMITS = { headline: 80, body: 180, copy: 2000, onScreen: 300 } as const;
 /** Faixa de palavras recomendada para a headline; fora dela o texto é salvo com aviso. */
 export const HEADLINE_WORD_RANGE = { min: 2, max: 6 } as const;
 
 export interface VisualTextEditPage {
   page: number;
   headline: string;
+  body: string;
   copy: string;
   depictedPerson: DepictedPerson;
 }
 export interface VisualTextEditScene { id: string; onScreen: string; }
-export type VisualTextField = 'headline' | 'copy' | 'depictedPerson';
+export type VisualTextField = 'headline' | 'body' | 'copy' | 'depictedPerson';
 export interface VisualTextIssue { field: VisualTextField; message: string; }
 export interface VisualTextPageIssues { errors: VisualTextIssue[]; warnings: VisualTextIssue[]; }
 export interface VisualTextValidation { errors: string[]; warnings: string[]; }
@@ -29,15 +31,87 @@ export function visualTextPageIssues(page: Partial<Record<VisualTextField, unkno
   if (!headline) errors.push({ field: 'headline', message: 'Informe a headline.' });
   else if (headline.length > VISUAL_TEXT_LIMITS.headline) errors.push({ field: 'headline', message: `A headline tem no máximo ${VISUAL_TEXT_LIMITS.headline} caracteres.` });
   else {
+    if (hasDash(headline)) errors.push({ field: 'headline', message: DASH_ERROR });
     const words = headlineWordCount(headline);
     if (words < HEADLINE_WORD_RANGE.min || words > HEADLINE_WORD_RANGE.max) warnings.push({ field: 'headline', message: `A headline tem ${words} palavras; o recomendado é de ${HEADLINE_WORD_RANGE.min} a ${HEADLINE_WORD_RANGE.max}.` });
   }
+  const body = typeof page.body === 'string' ? page.body.trim() : '';
+  if (!body) errors.push({ field: 'body', message: 'Informe o subtítulo da arte.' });
+  else if (body.length > VISUAL_TEXT_LIMITS.body) errors.push({ field: 'body', message: `O subtítulo tem no máximo ${VISUAL_TEXT_LIMITS.body} caracteres.` });
+  if (hasDash(body)) errors.push({ field: 'body', message: DASH_ERROR });
   const copy = typeof page.copy === 'string' ? page.copy.trim() : '';
   if (!copy) errors.push({ field: 'copy', message: 'Informe a copy.' });
   else if (copy.length > VISUAL_TEXT_LIMITS.copy) errors.push({ field: 'copy', message: `A copy tem no máximo ${VISUAL_TEXT_LIMITS.copy} caracteres.` });
+  if (hasDash(copy)) errors.push({ field: 'copy', message: DASH_ERROR });
   if (!isDepictedPerson(page.depictedPerson)) errors.push({ field: 'depictedPerson', message: 'Escolha quem aparece na arte.' });
   return { errors, warnings };
 }
+
+/**
+ * Editorial caption mirror marker used in local art prompts. Caption remains publication copy,
+ * never a renderable art field.
+ */
+export const CAPTION_MIRROR_LABEL = 'Copy para publicação/legenda, NÃO imprimir na arte:';
+export function captionMirror(prompt: string): string | undefined {
+  const label = new RegExp(`^## ${escapeRegExp(CAPTION_MIRROR_LABEL)}\\s*\\r?\\n`, 'm');
+  const match = label.exec(prompt);
+  if (!match) return undefined;
+  const start = match.index + match[0].length;
+  const nextSection = prompt.slice(start).search(/^(?:## |POSTNOW_[A-Z_]+=)/m);
+  const section = prompt.slice(start, nextSection < 0 ? undefined : start + nextSection);
+  return section.trim();
+}
+
+/** Texts on a single art; publication copy lives only in the caption section. */
+export interface ArtText { headline: string; body: string; copy: string; }
+export interface ArtTextSync { text: string; missing: ('headline' | 'body' | 'copy')[]; }
+
+/** Replaces art fields and the exact caption-only mirror. */
+export function applyArtText(artFile: string, previous: ArtText, next: ArtText): ArtTextSync {
+  let text = artFile;
+  const missing: ArtTextSync['missing'] = [];
+  const copyFrom = previous.copy.trim();
+  const copyTo = next.copy.trim();
+  if (copyFrom !== copyTo) {
+    const replaced = replaceCaptionMirror(text, copyFrom, copyTo);
+    if (replaced === undefined) missing.push('copy');
+    else text = replaced;
+  }
+  for (const field of ['headline', 'body'] as const) {
+    const from = previous[field].trim();
+    const to = next[field].trim();
+    if (from === to) continue;
+    const replaced = from ? replaceOutside(text, copyTo, from, to) : replaceBlankArtField(text, field, to);
+    if (replaced === undefined || (from && replaced === text)) missing.push(field);
+    else text = replaced;
+  }
+  return missing.length ? { text: artFile, missing } : { text, missing };
+}
+
+function replaceCaptionMirror(text: string, from: string, to: string): string | undefined {
+  const label = new RegExp(`^## ${escapeRegExp(CAPTION_MIRROR_LABEL)}\\s*\\r?\\n`, 'm');
+  const match = label.exec(text);
+  if (!match) return undefined;
+  const start = match.index + match[0].length;
+  const nextSection = text.slice(start).search(/^## /m);
+  const end = nextSection < 0 ? text.length : start + nextSection;
+  const content = text.slice(start, end);
+  if (!from) {
+    if (content.trim()) return content.trim() === to ? text : undefined;
+    return `${text.slice(0, start)}${to}${content.endsWith('\n') ? '' : '\n'}${text.slice(end)}`;
+  }
+  const updated = replaceAll(content, from, to);
+  if (updated === content) return undefined;
+  return `${text.slice(0, start)}${updated}${text.slice(end)}`;
+}
+function replaceBlankArtField(text: string, field: 'headline' | 'body', value: string): string | undefined {
+  const label = field === 'headline' ? 'Headline' : 'Body';
+  const line = new RegExp(`^(${label}:[ \\t]*)$`, 'mi');
+  const match = line.exec(text);
+  if (!match) return undefined;
+  return `${text.slice(0, match.index)}${match[1]}${value}${text.slice(match.index + match[0].length)}`;
+}
+function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 /**
  * Valida o lote enviado pelo editor. Exige o mesmo número de páginas do projeto, na mesma ordem (page = posição + 1).
@@ -60,34 +134,6 @@ export function validateVisualTextPages(pages: unknown, expectedCount: number): 
   return { errors, warnings };
 }
 
-/** Textos da arte de uma página: a headline e a copy editadas no app. */
-export interface ArtText { headline: string; copy: string; }
-export interface ArtTextSync { text: string; missing: ('headline' | 'copy')[]; }
-
-/**
- * Troca no arquivo de arte o texto anterior pelo novo, para a arte acompanhar o editor.
- * A copy é trocada primeiro; a headline não é trocada dentro da copy nova.
- * Se um texto anterior não está no arquivo, nada é aplicado e o campo vai para `missing`.
- */
-export function applyArtText(artFile: string, previous: ArtText, next: ArtText): ArtTextSync {
-  let text = artFile;
-  const missing: ArtTextSync['missing'] = [];
-  const copyFrom = previous.copy.trim();
-  const copyTo = next.copy.trim();
-  if (copyFrom !== copyTo) {
-    const replaced = replaceAll(text, copyFrom, copyTo);
-    if (replaced === text) missing.push('copy');
-    else text = replaced;
-  }
-  const headlineFrom = previous.headline.trim();
-  const headlineTo = next.headline.trim();
-  if (headlineFrom !== headlineTo) {
-    const replaced = replaceOutside(text, copyTo, headlineFrom, headlineTo);
-    if (replaced === text) missing.push('headline');
-    else text = replaced;
-  }
-  return missing.length ? { text: artFile, missing } : { text, missing };
-}
 
 function replaceAll(text: string, from: string, to: string): string {
   return from ? text.split(from).join(to) : text;
@@ -109,6 +155,7 @@ export function onScreenText(value: unknown): string {
   return value.filter((item): item is string => typeof item === 'string').join('\n');
 }
 export function onScreenError(text: string): string | undefined {
+  if (hasDash(text)) return DASH_ERROR;
   return text.length > VISUAL_TEXT_LIMITS.onScreen ? `O texto na tela tem no máximo ${VISUAL_TEXT_LIMITS.onScreen} caracteres.` : undefined;
 }
 

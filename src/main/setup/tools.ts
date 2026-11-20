@@ -6,6 +6,9 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { CliId, CliOperationResult, CliUpdateStatus, Job, ToolStatus } from '../../shared/contracts.js';
 import type { Services } from '../context.js';
+import { gitBashCandidates, isWindowsStorePythonStub, windowsInstallDirectories } from './windows-paths.js';
+import { executableArgs, mergeEnvironment } from '../executable.js';
+import { isMacDeveloperToolsShim, MACOS_TOOL_DIRECTORIES } from './macos-paths.js';
 
 const names: Record<string, string> = {
   git: 'Git', node: 'Node.js', npm: 'npm', python: 'Python', ffmpeg: 'FFmpeg', ffprobe: 'FFprobe',
@@ -20,6 +23,11 @@ const binaries: Record<string, string[]> = {
   maestro: ['orquestrador-maestro'],
   cloudflared: ['cloudflared'],
 };
+const OFFICIAL_DOWNLOADS: Record<string, string> = {
+  git: 'git-scm.com/downloads', node: 'nodejs.org', npm: 'nodejs.org', python: 'python.org/downloads',
+  ffmpeg: 'ffmpeg.org/download.html', ffprobe: 'ffmpeg.org/download.html', gh: 'cli.github.com',
+};
+const HOMEBREW_FORMULAE: Record<string, string> = { git: 'git', node: 'node', npm: 'node', python: 'python', ffmpeg: 'ffmpeg', ffprobe: 'ffmpeg', gh: 'gh', cloudflared: 'cloudflared' };
 
 export function normalizeTool(tool: string): string {
   return tool === 'orquestrador-maestro' ? 'maestro' : tool === 'python3' ? 'python' : tool;
@@ -105,6 +113,7 @@ async function executable(path: string): Promise<boolean> {
 
 function searchDirectories(services: Services): string[] {
   const local = [
+    ...(process.platform === 'linux' ? [join(services.dataDir, 'runtime', 'tools', 'node', 'managed', 'bin')] : []),
     ...Object.keys(packages).map(tool => join(toolPrefix(services, tool), 'node_modules', '.bin')),
     toolPrefix(services, 'cloudflared'),
   ];
@@ -112,11 +121,11 @@ function searchDirectories(services: Services): string[] {
     .split(delimiter)
     .map(path => path.replace(/^"|"$/g, ''))
     .filter(path => isAbsolute(path) && !path.replace(/\\/g, '/').endsWith('/node_modules/.bin'));
-  const user = [join(homedir(), '.local', 'bin'), ...(process.platform === 'win32' ? [] : ['/usr/local/bin'])];
+  const user = [join(homedir(), '.local', 'bin'), ...(process.platform === 'win32' ? [] : process.platform === 'darwin' ? MACOS_TOOL_DIRECTORIES : ['/usr/local/bin'])];
   if (process.platform === 'win32') {
     if (process.env.APPDATA) user.push(join(process.env.APPDATA, 'npm'));
     if (process.env.LOCALAPPDATA) user.push(join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links'));
-    if (process.env.ProgramFiles) user.push(join(process.env.ProgramFiles, 'nodejs'), join(process.env.ProgramFiles, 'Git', 'cmd'));
+    user.push(...windowsInstallDirectories());
   }
   return [...new Set([...local, ...user, ...system])];
 }
@@ -138,7 +147,7 @@ export async function resolveTool(tool: string, services: Services): Promise<str
     for (const name of candidates) {
       for (const extension of extensions) {
         const path = join(directory, name + extension);
-        if (await executable(path)) return path;
+        if (await executable(path) && !isWindowsStorePythonStub(path) && !isMacDeveloperToolsShim(path)) return path;
       }
     }
   }
@@ -163,6 +172,12 @@ export async function toolEnvironment(services: Services): Promise<Record<string
   const videogoPython = join(homedir(), '.local', 'share', 'videogo-venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
   if (await executable(videogoPython)) {
     env.PYTHON = videogoPython;
+  }
+  // Claude Code no Windows precisa do bash do Git for Windows; sem o git no PATH do processo ele não o encontra.
+  if (process.platform === 'win32' && !process.env.CLAUDE_CODE_GIT_BASH_PATH) {
+    for (const candidate of gitBashCandidates(await resolveTool('git', services))) {
+      if (await executable(candidate)) { env.CLAUDE_CODE_GIT_BASH_PATH = candidate; break; }
+    }
   }
   return env;
 }
@@ -252,7 +267,9 @@ const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
  */
 function codexAccount(executable: string, env: Record<string, string>): Promise<{ email: string; plan?: string } | undefined> {
   const { promise, resolve: resolvePromise } = Promise.withResolvers<{ email: string; plan?: string } | undefined>();
-  const child = spawn(executable, ['app-server'], { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: process.platform === 'win32' });
+  let command: { executable: string; args: string[] };
+  try { command = executableArgs(executable, ['app-server']); } catch { return Promise.resolve(undefined); }
+  const child = spawn(command.executable, command.args, { env: mergeEnvironment(process.env, env), stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, shell: false });
   let buffer = '';
   const finish = (value: { email: string; plan?: string } | undefined) => { clearTimeout(timer); child.kill(); resolvePromise(value); };
   const timer = setTimeout(() => finish(undefined), 10_000);
@@ -397,7 +414,7 @@ export async function installTool(tool: string, services: Services): Promise<Job
       args: ['install', '--prefix', prefix, '--save-exact', '--package-lock=true', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org', packages[tool]!],
       cwd: prefix, env, interactive: false, timeoutMs: 15 * 60 * 1000 });
   }
-  if (tool === 'cloudflared') {
+  if (tool === 'cloudflared' && process.platform !== 'darwin') {
     let nodeExecutable = await resolveTool('node', services);
     const executionEnv = { ...env };
     if (!nodeExecutable && process.versions.electron) {
@@ -439,19 +456,27 @@ export async function installTool(tool: string, services: Services): Promise<Job
   }
   if (process.platform === 'win32') {
     const winget = await resolveTool('winget', services);
-    if (!winget) throw new Error('Instale o App Installer da Microsoft Store para disponibilizar winget. Depois reinicie o aplicativo. Nenhum instalador foi executado.');
+    if (!winget) throw new Error(`O WinGet não está disponível neste Windows. Instale ${names[tool]} pelo site oficial (${OFFICIAL_DOWNLOADS[tool] ?? 'site do fabricante'}) e reabra o aplicativo: ele encontra a instalação sozinho.`);
     const ids: Record<string, string> = { git: 'Git.Git', node: 'OpenJS.NodeJS.LTS', npm: 'OpenJS.NodeJS.LTS', python: 'Python.Python.3.12', ffmpeg: 'Gyan.FFmpeg', ffprobe: 'Gyan.FFmpeg', gh: 'GitHub.cli', cloudflared: 'Cloudflare.cloudflared' };
     const id = ids[tool];
     if (!id) throw new Error('Não existe receita Windows verificada para esta ferramenta.');
-    return services.run({ title: `Instalar ${names[tool]} — WinGet, escopo usuário, instalação silenciosa`, executable: winget,
-      args: ['install', '--id', id, '--exact', '--source', 'winget', '--scope', 'user', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--no-upgrade'], env, interactive: false });
+    return services.run({ title: `Instalar ${names[tool]} — WinGet, instalação silenciosa`, executable: winget,
+      args: ['install', '--id', id, '--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements', '--no-upgrade'], env, interactive: false, timeoutMs: 15 * 60 * 1000 });
   }
-  if (process.platform !== 'linux') throw new Error('Instalação automática disponível apenas para Linux e Windows. Use a distribuição oficial da ferramenta.');
+  if (process.platform === 'darwin') {
+    const brew = await resolveTool('brew', services);
+    const formula = HOMEBREW_FORMULAE[tool];
+    if (!formula) throw new Error('Não existe receita macOS verificada para esta ferramenta.');
+    if (!brew) throw new Error(`O Homebrew não está instalado. Instale ${names[tool]} pelo site oficial (${OFFICIAL_DOWNLOADS[tool] ?? 'site do fabricante'}) ou instale o Homebrew (brew.sh) e reabra o aplicativo: ele encontra a instalação sozinho.`);
+    return services.run({ title: `Instalar ${names[tool]} — Homebrew`, executable: brew, args: ['install', formula],
+      env: { ...env, NONINTERACTIVE: '1', HOMEBREW_NO_ENV_HINTS: '1' }, interactive: false, timeoutMs: 15 * 60 * 1000 });
+  }
+  if (process.platform !== 'linux') throw new Error('Instalação automática disponível apenas para Linux, macOS e Windows. Use a distribuição oficial da ferramenta.');
   const recipes: Array<{ manager: string; args: string[]; tools: Record<string, string[]> }> = [
-    { manager: 'apt-get', args: ['install', '--no-upgrade'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python3', 'python3-venv', 'python3-pip'], ffmpeg: ['ffmpeg'], ffprobe: ['ffmpeg'], gh: ['gh'] } },
-    { manager: 'dnf', args: ['install'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python3', 'python3-pip'], ffmpeg: ['ffmpeg-free'], ffprobe: ['ffmpeg-free'], gh: ['gh'] } },
-    { manager: 'pacman', args: ['-S', '--needed'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python', 'python-pip'], ffmpeg: ['ffmpeg'], ffprobe: ['ffmpeg'], gh: ['github-cli'] } },
-    { manager: 'zypper', args: ['install'], tools: { git: ['git'], node: ['nodejs22', 'npm22'], npm: ['npm22'], python: ['python311', 'python311-pip'], ffmpeg: ['ffmpeg'], ffprobe: ['ffmpeg'], gh: ['gh'] } },
+    { manager: 'apt-get', args: ['install', '-y', '--no-upgrade'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python3', 'python3-venv', 'python3-pip'], ffmpeg: ['ffmpeg'], ffprobe: ['ffmpeg'], gh: ['gh'] } },
+    { manager: 'dnf', args: ['install', '-y'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python3', 'python3-pip'], ffmpeg: ['ffmpeg-free'], ffprobe: ['ffmpeg-free'], gh: ['gh'] } },
+    { manager: 'pacman', args: ['-S', '--needed', '--noconfirm'], tools: { git: ['git'], node: ['nodejs', 'npm'], npm: ['npm'], python: ['python', 'python-pip'], ffmpeg: ['ffmpeg'], ffprobe: ['ffmpeg'], gh: ['github-cli'] } },
+    { manager: 'zypper', args: ['--non-interactive', 'install'], tools: { git: ['git'], node: ['nodejs22', 'npm22'], npm: ['npm22'], python: ['python311', 'python311-pip'], ffmpeg: ['ffmpeg'], ffprobe: ['ffmpeg'], gh: ['gh'] } },
   ];
   const pkexec = await resolveTool('pkexec', services);
   if (!pkexec) throw new Error('A instalação de pré-requisitos Linux exige autorização administrativa humana. O serviço gráfico pkexec não está disponível. Peça ao administrador para instalar a ferramenta com o gerenciador oficial da distribuição; o aplicativo não executa sudo.');

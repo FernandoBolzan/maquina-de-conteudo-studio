@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Clock, Maximize2, Terminal } from 'lucide-react';
+import { Clock, Gamepad2, Maximize2, Square, Terminal } from 'lucide-react';
 import type { AgentActivity, Job } from '../shared/contracts';
 
 export type GenerationProgressState = 'idle' | 'running' | 'succeeded' | 'failed' | 'cancelled';
@@ -52,12 +52,16 @@ function statusLine(state: GenerationProgressState, statusText: string | undefin
   return state === 'idle' ? 'Aguardando início' : 'Em andamento';
 }
 
-export function GenerationProgress({ title, job, state, statusText, onOpenTerminal }: {
+export function GenerationProgress({ title, job, state, statusText, onOpenTerminal, onOpenGame, onCancel, cancelling }: {
   title: string;
   job?: Job;
   state: GenerationProgressState;
   statusText?: string;
   onOpenTerminal?: () => void;
+  onOpenGame?: () => void;
+  /** Interrompe a execução em andamento; o botão só aparece enquanto ela roda. */
+  onCancel?: () => void;
+  cancelling?: boolean;
 }) {
   const running = state === 'running';
   const [now, setNow] = useState(() => Date.now());
@@ -139,6 +143,27 @@ export function GenerationProgress({ title, job, state, statusText, onOpenTermin
           <span className="gen-terminal-status-text">{line}</span>
         </div>
         <div className="gen-terminal-actions">
+          {running && onOpenGame && (
+            <button
+              type="button"
+              className="button small secondary gen-terminal-btn gen-arcade-btn"
+              onClick={onOpenGame}
+            >
+              <Gamepad2 size={14} />
+              <span>Jogar enquanto aguarda</span>
+            </button>
+          )}
+          {running && onCancel && (
+            <button
+              type="button"
+              className="button small danger gen-terminal-btn"
+              onClick={onCancel}
+              disabled={cancelling}
+            >
+              <Square size={13} />
+              <span>{cancelling ? 'Cancelando…' : 'Cancelar geração'}</span>
+            </button>
+          )}
           <button
             type="button"
             className="button small secondary gen-terminal-btn"

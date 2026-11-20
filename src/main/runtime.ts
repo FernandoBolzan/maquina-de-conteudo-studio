@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, relative, isAbsolute, extname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { AppEvent, Settings, Snapshot } from '../shared/contracts.js';
+import type { AppEvent, LocalVoiceOperationEvent, Settings, Snapshot } from '../shared/contracts.js';
 import type { Services } from './context.js';
 import { text } from './context.js';
 import { Supervisor, capture } from './supervisor.js';
@@ -12,6 +12,7 @@ import { handleAgents } from './agents.js';
 import { handleSetup } from './setup.js';
 import { cloneElevenLabsVoice, deleteElevenLabsClone, listElevenLabsVoices, validateElevenLabsKey } from './elevenlabs.js';
 import { MobileService } from './mobile/service.js';
+import { auditionLocalVoice, getLocalVoiceCatalog, installLocalVoice } from './local-voice-catalog.js';
 export interface Host {
   pickFile: Services['pickFile']; openPath: Services['openPath']; openExternal: Services['openExternal'];
   assetPrefix: string; secureStorageAvailable(): boolean; encryptSecret(value: string): string; decryptSecret(value: string): string;
@@ -30,6 +31,7 @@ export class Runtime {
   private elevenLabsWarning?: string;
   private saving = Promise.resolve();
   private pickedDirectories: string[] = [];
+  private localVoiceOperations = new Map<string, { voiceId: string; kind: 'install' | 'audition'; controller: AbortController }>();
   constructor(readonly dataDir: string, private host: Host, private emit: (event: AppEvent) => void = () => {}, readonly version = '0.1.0') {
     this.supervisor = new Supervisor(join(dataDir, 'history'), (event) => {
       this.emit(event);
@@ -89,16 +91,19 @@ export class Runtime {
     });
     await this.saving; return structuredClone(this.settings);
   }
+  private isAuthorizedMedia(path: string): boolean {
+    return within(this.settings.workspace, path) || within(join(this.dataDir, 'runtime', 'local-voices', 'auditions'), path);
+  }
   private assetUrl(path: string): string {
     const canonical = realpathSync(path);
-    if (!within(this.settings.workspace, canonical) || !MEDIA[extname(canonical).toLowerCase()]) throw new Error('Mídia fora da pasta autorizada.');
+    if (!this.isAuthorizedMedia(canonical) || !MEDIA[extname(canonical).toLowerCase()]) throw new Error('Mídia fora da pasta autorizada.');
     for (const [token, known] of this.media) if (known === canonical) return `${this.host.assetPrefix}${token}`;
     const token = randomUUID(); this.media.set(token, canonical); return `${this.host.assetPrefix}${token}`;
   }
   async mediaPath(token: string): Promise<string> {
     const path = this.media.get(token); if (!path) throw new Error('Mídia não autorizada.');
     const canonical = await realpath(path);
-    if (!within(this.settings.workspace, canonical) || canonical !== path) throw new Error('A mídia mudou de localização.');
+    if (!this.isAuthorizedMedia(canonical) || canonical !== path) throw new Error('A mídia mudou de localização.');
     return canonical;
   }
   private elevenLabsStatus() {
@@ -181,6 +186,42 @@ export class Runtime {
       this.emit({ type: 'refresh' });
       return { deleted: true };
     }
+    if (action === 'localVoices.catalog') return getLocalVoiceCatalog(this.services);
+    if (action === 'localVoices.cancel') {
+      const operationId = text(payload, 'operationId', 100);
+      const operation = this.localVoiceOperations.get(operationId);
+      if (!operation) return { cancelled: false };
+      operation.controller.abort();
+      return { cancelled: true };
+    }
+    if (action === 'localVoices.install' || action === 'localVoices.audition') {
+      const id = text(payload, 'id', 128);
+      const operationId = text(payload, 'operationId', 100);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operationId)) throw new Error('ID da operação local inválido.');
+      if (this.localVoiceOperations.has(operationId)) throw new Error('Esta operação local já está em andamento.');
+      const kind = action === 'localVoices.install' ? 'install' : 'audition';
+      const controller = new AbortController();
+      this.localVoiceOperations.set(operationId, { voiceId: id, kind, controller });
+      const onProgress = (state: Omit<LocalVoiceOperationEvent, 'operationId' | 'voiceId' | 'kind'>) => {
+        this.emit({ type: 'local-voice', localVoiceOperation: { operationId, voiceId: id, kind, ...state } });
+      };
+      try {
+        onProgress({ phase: 'preparing', message: kind === 'install' ? 'Preparando a instalação local.' : 'Preparando a audição local.' });
+        if (kind === 'install') {
+          await installLocalVoice(id, this.services, { signal: controller.signal, onProgress });
+          onProgress({ phase: 'ready', progress: 1, message: 'Voz instalada e verificada.' });
+          return { installed: true };
+        }
+        const path = await auditionLocalVoice(id, this.services, { signal: controller.signal, onProgress });
+        onProgress({ phase: 'ready', progress: 1, message: 'Audição local pronta.' });
+        return { url: this.assetUrl(path) };
+      } catch (error) {
+        onProgress({ phase: controller.signal.aborted ? 'cancelled' : 'failed', message: error instanceof Error ? error.message : String(error) });
+        throw error;
+      } finally {
+        this.localVoiceOperations.delete(operationId);
+      }
+    }
     if (action === 'jobs.cancel') return this.supervisor.cancel(text(payload, 'id', 100));
     if (action === 'jobs.input') { if (typeof payload.data !== 'string') throw new Error('Entrada inválida.'); return this.supervisor.input(text(payload, 'id', 100), payload.data); }
     if (action === 'jobs.respond') { if (typeof payload.data !== 'string') throw new Error('Resposta inválida.'); return this.supervisor.respond(text(payload, 'id', 100), payload.data); }
@@ -198,6 +239,7 @@ export class Runtime {
     throw new Error('Operação não suportada.');
   }
   async dispose(): Promise<void> {
+    for (const operation of this.localVoiceOperations.values()) operation.controller.abort();
     await this.mobile.stop().catch(() => {});
     await this.supervisor.dispose();
     await this.saving;

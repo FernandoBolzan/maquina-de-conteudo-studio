@@ -1,14 +1,16 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell, session, Menu, safeStorage } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { execFile } from 'node:child_process';
 import updater from 'electron-updater';
 import { Runtime } from './runtime.js';
 import { notifyJobFinished } from './notifications.js';
 import { consent } from './context.js';
-import { unsupportedUpdateMessage } from './update-policy.js';
+import { isDeveloperIdSigned, unsupportedUpdateMessage } from './update-policy.js';
 import { createAppUpdater, type AppUpdaterService } from './app-updater.js';
 import { isPermissionGranted } from './permissions.js';
 import { openFolder } from './open-folder.js';
+import { focusExistingWindow } from './window-lifecycle.js';
 
 const { autoUpdater } = updater;
 const here = dirname(fileURLToPath(import.meta.url));
@@ -24,13 +26,30 @@ if (devURL && !/^http:\/\/127\.0\.0\.1:\d+\/?$/.test(devURL)) throw new Error('M
 if (process.platform === 'linux' && (process.env.XDG_CURRENT_DESKTOP ?? '').split(':').some(desktop => desktop.toLowerCase() === 'cosmic') && !app.commandLine.hasSwitch('password-store')) {
   app.commandLine.appendSwitch('password-store', 'gnome-libsecret');
 }
+// Chromium names every PulseAudio/PipeWire stream "Chromium". The session manager (WirePlumber/pipewire-pulse)
+// persists and restores volume per application name, so this app inherited whatever level any other
+// Chromium-based app was last left at (e.g. -36 dB). libpulse applies PULSE_PROP_OVERRIDE_* to the audio
+// service, which is spawned after this point and inherits the environment; the app gets its own saved volume.
+if (process.platform === 'linux' && !('PULSE_PROP_OVERRIDE_application.name' in process.env)) {
+  process.env['PULSE_PROP_OVERRIDE_application.name'] = 'Máquina de Conteúdo';
+}
+// Windows só mostra notificações nativas do app (e agrupa a barra de tarefas) com o AppUserModelID do instalador NSIS, que é o appId.
+if (process.platform === 'win32') app.setAppUserModelId('com.maquinadeconteudo.studio');
 protocol.registerSchemesAsPrivileged([{ scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', () => { window?.show(); window?.focus(); });
+  app.on('second-instance', () => focusExistingWindow(window));
   app.whenReady().then(start).catch(error => { dialog.showErrorBox('Não foi possível iniciar', String(error)); app.quit(); });
 }
+/** Assinatura do app no macOS; só um Developer ID permite a atualização automática. */
+function bundleHasDeveloperId(): Promise<boolean> {
+  const bundle = resolve(app.getPath('exe'), '..', '..', '..');
+  const { promise, resolve: done } = Promise.withResolvers<boolean>();
+  execFile('codesign', ['-dv', '--verbose=2', bundle], { timeout: 10_000 }, (_error, stdout, stderr) => done(isDeveloperIdSigned(`${stdout}\n${stderr}`)));
+  return promise;
+}
 async function start(): Promise<void> {
+  const macSigned = process.platform === 'darwin' && app.isPackaged ? await bundleHasDeveloperId() : undefined;
   appUpdater = createAppUpdater({
     updater: autoUpdater,
     publish: status => { if (window && !window.isDestroyed()) window.webContents.send('maquina:event', { type: 'update', update: status }); },
@@ -64,7 +83,7 @@ async function start(): Promise<void> {
     update: async (action, payload) => {
       if (action === 'app.updateStatus') return appUpdater?.status() ?? { state: 'idle', message: '' };
       if (!app.isPackaged) return { state: 'unsupported', message: 'Atualização do aplicativo disponível somente no pacote instalado.' };
-      const unsupported = unsupportedUpdateMessage(process.platform, process.env.APPIMAGE);
+      const unsupported = unsupportedUpdateMessage(process.platform, process.env.APPIMAGE, macSigned);
       if (unsupported) {
         if (action === 'app.updateCheck') return { state: 'unsupported', message: unsupported };
         consent(payload);
@@ -85,6 +104,7 @@ async function start(): Promise<void> {
     } catch { return new Response('Not found', { status: 404 }); }
   });
   window = new BrowserWindow({ width: 1440, height: 960, minWidth: 800, minHeight: 600, title: 'Máquina de Conteúdo (Studio)', icon: join(here, '../renderer/icon.png'), backgroundColor: '#09090b', autoHideMenuBar: true, show: false, webPreferences: { preload: join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
+  window.once('closed', () => { window = undefined; });
   const appUrl = devURL || renderer;
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => callback(isPermissionGranted(permission, details, appUrl)));
   session.defaultSession.setPermissionCheckHandler((_contents, permission, _requestingOrigin, details) => isPermissionGranted(permission, details, appUrl));
@@ -114,7 +134,7 @@ async function start(): Promise<void> {
   });
   window.once('ready-to-show', () => { window?.show(); console.log('ELECTRON_WINDOW_READY'); });
   if (devURL) await window.loadURL(devURL); else await window.loadFile(join(here, '../renderer/index.html'));
-  if (app.isPackaged && !unsupportedUpdateMessage(process.platform, process.env.APPIMAGE)) appUpdater?.start();
+  if (app.isPackaged && !unsupportedUpdateMessage(process.platform, process.env.APPIMAGE, macSigned)) appUpdater?.start();
 }
 app.on('before-quit', event => {
   if (quitting || !runtime) return;

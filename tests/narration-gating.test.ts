@@ -58,6 +58,37 @@ test('stray audio without an ElevenLabs key does not promise generation', () => 
   assert.doesNotMatch(result.issues[0] ?? '', /gere/);
 });
 
+test('local voice selection offers local generation without an ElevenLabs key', () => {
+  const result = narrationGate({
+    provider: 'local',
+    localVoice: { engine: 'kokoro', modelId: 'kokoro-v1.0', voiceId: 'af_heart' },
+    scenes: [scene({ id: 'a', title: 'Abertura' })],
+    elevenLabsAttached: false,
+    voiceApproved: false,
+    elevenLabsReady: false,
+    mode: 'narrated',
+  });
+  assert.equal(result.active, true);
+  assert.equal(result.issues.length, 1);
+  assert.match(result.issues[0] ?? '', /voz local e gere/);
+  assert.doesNotMatch(result.issues[0] ?? '', /chave ElevenLabs/);
+});
+
+test('switching away from a generated local voice keeps stale audio blocked for regeneration', () => {
+  const result = narrationGate({
+    provider: 'elevenlabs',
+    voiceId: 'eleven-voice',
+    scenes: [scene({ id: 'a', title: 'Abertura', stray: true })],
+    elevenLabsAttached: false,
+    voiceApproved: false,
+    elevenLabsReady: false,
+  });
+  assert.equal(result.active, true);
+  assert.equal(result.issues.length, 1);
+  assert.match(result.issues[0] ?? '', /Cena "Abertura": o áudio associado está ausente, desatualizado/);
+  assert.match(result.issues[0] ?? '', /Envie ou grave/);
+});
+
 test('ElevenLabs audio blocks render after the narration text changed without re-approval', () => {
   const result = narrationGate({ voiceId: 'v1', scenes: [scene({ id: 'a', attached: true, approved: true })], elevenLabsAttached: true, voiceApproved: false, elevenLabsReady: true });
   assert.equal(result.issues.length, 1);

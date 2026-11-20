@@ -25,6 +25,8 @@ export function getMobileHtml(): string {
       --success-muted: rgba(16, 185, 129, 0.15);
       --warning: #f59e0b;
       --warning-muted: rgba(245, 158, 11, 0.15);
+      --decision-approved: #15803d;
+      --decision-revision: #b91c1c;
       --error: #ef4444;
       --error-muted: rgba(239, 68, 68, 0.15);
       --radius: 12px;
@@ -804,8 +806,9 @@ export function getMobileHtml(): string {
       align-items: center;
       gap: 4px;
     }
-    .review-item-status.kept { color: var(--success); }
-    .review-item-status.redo { color: var(--warning); }
+    .decision-chip.is-kept { color: #4ade80; }
+    .decision-chip.is-redo { color: #f87171; }
+    .decision-chip.is-pending { color: var(--muted); }
     .review-action-btn-group {
       display: flex;
       gap: 6px;
@@ -822,9 +825,9 @@ export function getMobileHtml(): string {
       text-align: center;
     }
     .btn-review-keep.active {
-      background: var(--success);
+      background: var(--decision-approved);
       color: #fff;
-      border-color: var(--success);
+      border-color: #4ade80;
     }
     .btn-review-redo {
       flex: 1;
@@ -838,9 +841,30 @@ export function getMobileHtml(): string {
       text-align: center;
     }
     .btn-review-redo.active {
-      background: var(--warning);
-      color: #000;
-      border-color: var(--warning);
+      background: var(--decision-revision);
+      color: #fff;
+      border-color: #f87171;
+    }
+    .btn-review-keep:disabled, .btn-review-redo:disabled { opacity: 0.5; cursor: not-allowed; }
+    .redo-note {
+      width: 100%;
+      font-size: 12px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--fg);
+      resize: vertical;
+    }
+    .btn-link-secondary {
+      display: block;
+      margin: 12px auto 0;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 12px;
+      text-decoration: underline;
+      cursor: pointer;
     }
 
     /* Step Navigation Footer */
@@ -1331,6 +1355,14 @@ export function getMobileHtml(): string {
             <option value="post-4x5">Post Vertical 4:5</option>
             <option value="story-9x16">Story Estático 9:16</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label for="createUseBrandImages">Fotos e referências da marca</label>
+          <select id="createUseBrandImages" class="form-control">
+            <option value="no">Não usar fotos</option>
+            <option value="yes">Usar quando pertinentes</option>
+          </select>
+          <small>Esta escolha fica salva no projeto e vale para imagens e vídeos.</small>
         </div>
 
         <!-- Páginas (se carrossel) -->
@@ -1994,14 +2026,16 @@ export function getMobileHtml(): string {
           <div style="display: flex; flex-direction: column; gap: 10px;">
             <div class="form-group">
               <label class="input-label">Tema / Pauta Principal</label>
-              <textarea id="editBriefTopic" class="form-control" rows="3">\${activeProject.brief || ''}</textarea>
+              <textarea id="editBriefTopic" class="form-control" rows="3" oninput="window.refreshAdvance()">\${activeProject.brief || ''}</textarea>
             </div>
+            \${activeProject.kind === 'image' ? '' : \`
             <div style="display: flex; gap: 8px;">
               <button class="btn-sm btn-secondary" style="flex: 1;" onclick="window.saveBrief()">💾 Salvar Pauta</button>
               <button class="btn-sm btn-accent" style="flex: 1;" onclick="window.prepareStepContent()">
-                ⚡ Preparar \${activeProject.kind === 'image' ? 'Textos (Codex)' : 'Roteiro (Claude)'}
+                ⚡ Preparar Roteiro (Claude)
               </button>
             </div>
+            \`}
           </div>
         \`;
       } else if (currentStep.id === 'texts') {
@@ -2024,7 +2058,7 @@ export function getMobileHtml(): string {
           \` : \`
             <div class="step-alert warning">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-              <div><strong>Aprovação pendente.</strong> Revise os textos e clique em <em>Aprovar Textos para Produção</em>.</div>
+              <div><strong>Aprovação pendente.</strong> Revise os textos e use o botão abaixo para aprovar e continuar.</div>
             </div>
           \`}
 
@@ -2042,11 +2076,10 @@ export function getMobileHtml(): string {
 
           \${pages.length === 0 ? \`
             <div class="card" style="text-align: center; padding: 20px; color: var(--muted); font-size: 13px;">
-              Nenhum texto preparado ainda.
-              <button class="btn-sm btn-accent" style="margin-top: 10px; width: auto;" onclick="window.prepareStepContent()">⚡ Preparar Textos com IA</button>
+              Nenhum texto preparado ainda. Use o botão abaixo para preparar os textos.
             </div>
           \` : \`
-            <div class="page-cards-list">
+            <div class="page-cards-list" oninput="window.refreshAdvance()">
               \${pages.map(p => \`
                 <div class="page-card" data-page="\${p.page}">
                   <div class="page-card-header">
@@ -2054,12 +2087,16 @@ export function getMobileHtml(): string {
                     <span class="page-card-badge">\${p.page === 1 ? 'Primeiro Impacto' : p.page === pages.length ? 'Chamada' : 'Desenvolvimento'}</span>
                   </div>
                   <div>
-                    <label class="input-label">Headline (2 a 6 palavras)</label>
-                    <input type="text" class="input-headline" value="\${(p.headline || '').replace(/"/g, '&quot;')}" data-field="headline">
+                    <label class="input-label">Título na arte</label>
+                    <input type="text" class="input-headline" value="\${escapeHtml(p.headline || '')}" data-field="headline">
                   </div>
                   <div>
-                    <label class="input-label">Copy / Texto Principal</label>
-                    <textarea class="input-copy" data-field="copy">\${p.copy || ''}</textarea>
+                    <label class="input-label">\${activeProject.visualStyle?.id === 'story-interaction-image' ? 'Pergunta e opções do Story' : 'Subtítulo na arte'}</label>
+                    <textarea class="input-body" data-field="body" maxlength="180">\${escapeHtml(p.body || '')}</textarea>
+                  </div>
+                  <div>
+                    <label class="input-label">Copy para publicação/legenda · não imprimir na arte</label>
+                    <textarea class="input-copy" data-field="copy">\${escapeHtml(p.copy || '')}</textarea>
                   </div>
                   <div>
                     <label class="input-label">Quem aparece na arte</label>
@@ -2071,11 +2108,6 @@ export function getMobileHtml(): string {
                   </div>
                 </div>
               \`).join('')}
-            </div>
-
-            <div style="display: flex; gap: 8px; margin-top: 10px;">
-              <button class="btn-sm btn-secondary" style="flex: 1;" onclick="window.saveVisualTexts()">💾 Salvar Alterações</button>
-              <button class="btn-sm btn-accent" style="flex: 1.5;" onclick="window.approveVisualTexts()">✅ Aprovar Textos para Produção</button>
             </div>
           \`}
         \`;
@@ -2139,6 +2171,7 @@ export function getMobileHtml(): string {
         const textsApproved = Boolean(review?.approved);
         const latestBatch = activeProject.batches?.[0];
         const batchAssets = latestBatch?.assets || [];
+        const batchReady = latestBatch?.status?.state === 'ready';
 
         contentHtml = \`
           <div class="step-eyebrow">Etapa \${activeStepIndex + 1} de \${totalSteps} · Gerar Imagens</div>
@@ -2153,21 +2186,12 @@ export function getMobileHtml(): string {
                 <strong>Aprovação necessária:</strong> Os textos precisam ser revisados e aprovados antes de disparar a geração de artes.
               </div>
             </div>
-            <button class="btn-sm btn-secondary" style="width: 100%; margin-top: 6px;" onclick="window.selectStep(1)">
-              Ir para Etapa 2: Textos
-            </button>
           \` : \`
-            \${batchAssets.length > 0 ? \`
+            \${batchReady ? \`
               <div class="step-alert success">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
                 <div><strong>Rodada de imagens pronta!</strong> \${batchAssets.length} artes geradas disponíveis para revisão.</div>
               </div>
-            \` : ''}
-
-            \${!isRunning ? \`
-              <button class="btn-primary" style="margin-top: 6px;" onclick="window.generateImages()">
-                🚀 \${batchAssets.length > 0 ? 'Regerar Rodada Inteira com Codex' : \`Gerar \${review?.pages?.length || 5} Imagens com Codex\`}
-              </button>
             \` : ''}
 
             \${batchAssets.length > 0 ? \`
@@ -2183,10 +2207,11 @@ export function getMobileHtml(): string {
                     </div>
                   \`).join('')}
                 </div>
-                <button class="btn-sm btn-accent" style="width: 100%; margin-top: 10px;" onclick="window.selectStep(3)">
-                  Avançar para Revisão Imagem a Imagem →
-                </button>
               </div>
+            \` : ''}
+
+            \${batchReady && !isRunning ? \`
+              <button class="btn-link-secondary" onclick="window.generateImages()">Regerar a rodada inteira com Codex</button>
             \` : ''}
           \`}
         \`;
@@ -2234,14 +2259,15 @@ export function getMobileHtml(): string {
       } else if (currentStep.id === 'review') {
         if (activeProject.kind === 'image') {
           const latestBatch = activeProject.batches?.[0];
-          const batchAssets = latestBatch?.assets || [];
-          const hasRedo = batchAssets.some(a => a.redo);
+          const batchReady = latestBatch?.status?.state === 'ready';
+          const batchAssets = batchReady ? (latestBatch.assets || []) : [];
+          const hasRedo = batchAssets.some(a => a.redo && !a.approved);
           const allApproved = batchAssets.length > 0 && batchAssets.every(a => a.approved);
 
           contentHtml = \`
             <div class="step-eyebrow">Etapa \${activeStepIndex + 1} de \${totalSteps} · Revisão</div>
             <div class="step-shell-title">Revisar Imagem a Imagem</div>
-            <p class="step-shell-desc">Marque cada imagem como <em>Manter</em> ou <em>Refazer</em>. Refazer permite que o Codex corrija apenas os slides marcados.</p>
+            <p class="step-shell-desc">Aprove cada imagem ou peça revisão. As imagens com revisão solicitada são refeitas pelo Codex, só elas.</p>
             \${runningBanner}
 
             \${allApproved ? \`
@@ -2252,17 +2278,13 @@ export function getMobileHtml(): string {
             \` : hasRedo ? \`
               <div class="step-alert warning">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                <div>Há imagens marcadas para refazer. Clique abaixo para regerar apenas essas imagens.</div>
+                <div>Há imagens com revisão solicitada. Decida as demais e use o botão abaixo para gerar a nova versão só delas.</div>
               </div>
-              <button class="btn-primary" style="margin-top: 6px;" onclick="window.reviseImages()">
-                ↺ Regerar Imagens Marcadas com Codex
-              </button>
             \` : ''}
 
             \${batchAssets.length === 0 ? \`
               <div class="card" style="text-align: center; padding: 20px; color: var(--muted); font-size: 13px;">
-                Nenhuma imagem gerada para revisar.
-                <button class="btn-sm btn-accent" style="margin-top: 10px; width: auto;" onclick="window.selectStep(2)">Ir para Etapa 3: Gerar Imagens</button>
+                \${latestBatch ? 'A rodada de imagens ainda não está pronta para revisão.' : 'Nenhuma imagem gerada para revisar. Volte e gere as imagens.'}
               </div>
             \` : \`
               <div class="review-grid" style="margin-top: 10px;">
@@ -2272,13 +2294,13 @@ export function getMobileHtml(): string {
                     <div class="review-item-meta">
                       <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-size: 12px; font-weight: 700;">Slide \${i + 1}</span>
-                        \${a.approved ? '<span class="review-item-status kept">✓ Mantida</span>' : a.redo ? '<span class="review-item-status redo">↺ Refazer</span>' : '<span style="font-size: 11px; color: var(--muted);">Pendente</span>'}
+                        \${a.approved ? '<span class="review-item-status decision-chip is-kept">Aprovada</span>' : a.redo ? '<span class="review-item-status decision-chip is-redo">Revisão solicitada</span>' : '<span class="review-item-status decision-chip is-pending">Pendente</span>'}
                       </div>
-                      \${a.redoNote ? \`<div style="font-size: 11px; color: var(--warning); line-height: 1.2;">Nota: \${a.redoNote}</div>\` : ''}
                       <div class="review-action-btn-group">
-                        <button class="btn-review-keep \${a.approved ? 'active' : ''}" onclick="window.keepAsset('\${a.path}')">Manter</button>
-                        <button class="btn-review-redo \${a.redo ? 'active' : ''}" onclick="window.redoAsset('\${a.path}')">Refazer</button>
+                        <button class="btn-review-keep \${a.approved ? 'active' : ''}" aria-pressed="\${a.approved ? 'true' : 'false'}" aria-label="Aprovar imagem Slide \${i + 1}" \${isRunning ? 'disabled' : ''} onclick="window.decideAsset('\${a.path}', 'approve')">\${a.approved ? '✓ Aprovada' : 'Aprovar'}</button>
+                        <button class="btn-review-redo \${a.redo && !a.approved ? 'active' : ''}" aria-pressed="\${a.redo && !a.approved ? 'true' : 'false'}" aria-label="Pedir revisão da imagem Slide \${i + 1}" \${isRunning ? 'disabled' : ''} onclick="window.decideAsset('\${a.path}', 'revise')">\${a.redo && !a.approved ? 'Revisão solicitada' : 'Pedir revisão'}</button>
                       </div>
+                      \${a.redo && !a.approved ? \`<textarea class="redo-note" rows="2" placeholder="O que deve mudar nesta imagem? (opcional)" onchange="window.noteAsset('\${a.path}', this.value)">\${escapeHtml(a.redo.note || '')}</textarea>\` : ''}
                     </div>
                   </div>
                 \`).join('')}
@@ -2338,27 +2360,32 @@ export function getMobileHtml(): string {
       }
 
       // Step Navigation Footer
-      const canGoNext = currentStep.status === 'done' || activeStepIndex === totalSteps - 1;
+      const imageAdvance = ['brief', 'texts', 'images', 'review'].includes(currentStep.id) ? computeAdvance(currentStep.id) : null;
+      let canGoNext = currentStep.status === 'done' || activeStepIndex === totalSteps - 1;
       let nextHint = '';
-      if (!canGoNext) {
+      if (imageAdvance) {
+        nextHint = imageAdvance.hint || '';
+      } else if (!canGoNext) {
         if (currentStep.id === 'brief') nextHint = 'Salve a pauta ou prepare os textos para avançar.';
-        else if (currentStep.id === 'texts') nextHint = 'Aprove os textos acima para avançar para a geração de imagens.';
-        else if (currentStep.id === 'images') nextHint = 'Gere as imagens para poder revisá-las.';
         else if (currentStep.id === 'script') nextHint = 'Aprove o roteiro para poder renderizar o vídeo.';
         else if (currentStep.id === 'render') nextHint = 'Renderize o vídeo para poder revisá-lo.';
         else if (currentStep.id === 'review') nextHint = 'Aprove todos os itens para liberar a entrega.';
       }
+
+      const nextButtonHtml = imageAdvance
+        ? \`<button id="stepAdvanceBtn" class="btn-step-next" \${imageAdvance.enabled ? '' : 'disabled'} onclick="window.advanceStep()">\${imageAdvance.label}</button>\`
+        : \`<button class="btn-step-next" \${canGoNext ? '' : 'disabled'} onclick="window.nextStep()">
+            \${activeStepIndex === totalSteps - 1 ? 'Concluído' : 'Próximo →'}
+          </button>\`;
 
       const footerHtml = \`
         <div class="step-nav-footer">
           <button class="btn-step-prev" \${activeStepIndex === 0 ? 'disabled style="opacity: 0.35;"' : ''} onclick="window.prevStep()">
             ← Voltar
           </button>
-          <button class="btn-step-next" \${canGoNext ? '' : 'disabled'} onclick="window.nextStep()">
-            \${activeStepIndex === totalSteps - 1 ? 'Concluído' : 'Próximo →'}
-          </button>
+          \${nextButtonHtml}
         </div>
-        \${nextHint ? \`<div class="step-hint-text">\${nextHint}</div>\` : ''}
+        <div id="stepAdvanceHint" class="step-hint-text" \${nextHint ? '' : 'style="display: none;"'}>\${nextHint}</div>
       \`;
 
       shell.innerHTML = contentHtml + footerHtml;
@@ -2422,7 +2449,7 @@ export function getMobileHtml(): string {
     }
 
     window.saveBrief = async () => {
-      if (!activeProject) return;
+      if (!activeProject) return false;
       const topicEl = document.getElementById('editBriefTopic');
       const brief = topicEl ? topicEl.value.trim() : (activeProject.brief || '');
       try {
@@ -2435,13 +2462,14 @@ export function getMobileHtml(): string {
         if (res.ok) {
           activeProject.brief = brief;
           await window.openProjectDetail(activeProject.id, 'brief', true);
-          alert('Pauta salva com sucesso!');
-        } else {
-          alert(data.error || 'Erro ao salvar pauta.');
+          if (activeProject.kind !== 'image') alert('Pauta salva com sucesso!');
+          return true;
         }
+        alert(data.error || 'Erro ao salvar pauta.');
       } catch {
         alert('Erro de conexão ao salvar pauta.');
       }
+      return false;
     };
 
     window.prepareStepContent = async () => {
@@ -2468,16 +2496,8 @@ export function getMobileHtml(): string {
     };
 
     window.saveVisualTexts = async () => {
-      if (!activeProject) return;
-      const pageCards = document.querySelectorAll('.page-card');
-      const pages = [];
-      pageCards.forEach(card => {
-        const pageNum = Number(card.dataset.page);
-        const headline = card.querySelector('[data-field="headline"]').value.trim();
-        const copy = card.querySelector('[data-field="copy"]').value.trim();
-        const person = card.querySelector('[data-field="person"]').value;
-        pages.push({ page: pageNum, headline, copy, depictedPerson: person });
-      });
+      if (!activeProject) return false;
+      const pages = readTextPages();
 
       try {
         const res = await fetch('/api/projects/' + activeProject.id + '/action', {
@@ -2488,13 +2508,13 @@ export function getMobileHtml(): string {
         const data = await res.json();
         if (res.ok) {
           await window.openProjectDetail(activeProject.id, 'texts', true);
-          alert('Textos salvos com sucesso!');
-        } else {
-          alert(data.error || 'Erro ao salvar textos.');
+          return true;
         }
+        alert(data.error || 'Erro ao salvar textos.');
       } catch {
         alert('Erro de conexão ao salvar textos.');
       }
+      return false;
     };
 
     window.approveVisualTexts = async () => {
@@ -2591,19 +2611,177 @@ export function getMobileHtml(): string {
       } catch {}
     };
 
-    window.redoAsset = async (path) => {
-      if (!activeProject) return;
-      const note = prompt('Observação para a IA refazer esta imagem (opcional):') || '';
+    let decisionBusy = false;
+    async function sendAssetDecision(body) {
+      if (!activeProject || decisionBusy) return;
+      decisionBusy = true;
       try {
         const res = await fetch('/api/projects/' + activeProject.id + '/action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session },
-          body: JSON.stringify({ action: 'review-asset', path, redo: true, note }),
+          body: JSON.stringify(body),
         });
         if (res.ok) {
           await window.openProjectDetail(activeProject.id, 'review', true);
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Erro ao registrar a decisão.');
         }
-      } catch {}
+      } catch {
+        alert('Erro de conexão ao registrar a decisão.');
+      } finally {
+        decisionBusy = false;
+      }
+    }
+
+    // Approve toggles approval; revise toggles the revision mark. Clicking the active button undoes it.
+    window.decideAsset = async (path, kind) => {
+      const batch = activeProject && activeProject.batches && activeProject.batches[0];
+      const asset = batch && batch.assets.find(x => x.path === path);
+      if (!asset) return;
+      if (kind === 'approve') {
+        await sendAssetDecision(asset.approved
+          ? { action: 'approve-asset', path, approved: false }
+          : { action: 'approve-asset', path });
+      } else {
+        await sendAssetDecision(asset.redo && !asset.approved
+          ? { action: 'review-asset', path, redo: false }
+          : { action: 'review-asset', path, redo: true, note: '' });
+      }
+    };
+
+    window.noteAsset = async (path, note) => {
+      await sendAssetDecision({ action: 'review-asset', path, redo: true, note: note.trim() });
+    };
+
+    window.preparePostnow = async () => {
+      const batch = activeProject && activeProject.batches && activeProject.batches[0];
+      if (!batch) return;
+      try {
+        const res = await fetch('/api/projects/' + activeProject.id + '/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session },
+          body: JSON.stringify({ action: 'render', batchId: batch.id }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          switchTab('live');
+        } else {
+          alert(data.error || 'Erro ao preparar as imagens importadas.');
+        }
+      } catch {
+        alert('Erro de conexão ao preparar as imagens importadas.');
+      }
+    };
+
+    function escapeHtml(value) {
+      return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function readTextPages() {
+      const pages = [];
+      document.querySelectorAll('.page-card').forEach(card => {
+        pages.push({
+          page: Number(card.dataset.page),
+          headline: card.querySelector('[data-field="headline"]').value.trim(),
+          body: card.querySelector('[data-field="body"]').value.trim(),
+          copy: card.querySelector('[data-field="copy"]').value.trim(),
+          depictedPerson: card.querySelector('[data-field="person"]').value,
+        });
+      });
+      return pages;
+    }
+
+    function textsDirty() {
+      const saved = (activeProject.visualReview && activeProject.visualReview.pages) || [];
+      return readTextPages().some(p => {
+        const s = saved.find(x => x.page === p.page);
+        return !s || (s.headline || '').trim() !== p.headline || (s.body || '').trim() !== p.body || (s.copy || '').trim() !== p.copy || (s.depictedPerson || 'none') !== p.depictedPerson;
+      });
+    }
+
+    // The single advance button of an image step: server action, promoted to save-first when the fields were edited here.
+    function computeAdvance(stepId) {
+      if (!activeProject || activeProject.kind !== 'image') return null;
+      const action = activeProject.footerActions && activeProject.footerActions[stepId];
+      if (!action) return null;
+      if (stepId === 'brief') {
+        const topicEl = document.getElementById('editBriefTopic');
+        if (topicEl) {
+          const field = topicEl.value.trim();
+          if (!field) return { kind: 'wait', label: 'Escreva a pauta para continuar', enabled: false };
+          if (field !== (activeProject.brief || '').trim()) return { kind: 'save-brief', label: 'Salvar e continuar', enabled: true };
+        }
+      } else if (stepId === 'texts') {
+        const review = activeProject.visualReview;
+        const promotable = action.kind === 'continue' || action.kind === 'approve-texts' || action.kind === 'save-approve-texts'
+          || (action.kind === 'wait' && review && (review.blocking || []).length > 0 && !activeProject.isRunning && !activeProject.formatAdaptation);
+        if (promotable && textsDirty()) return { kind: 'save-approve-texts', label: 'Salvar, aprovar e continuar', enabled: true };
+      }
+      return action;
+    }
+
+    let advanceBusy = false;
+
+    window.refreshAdvance = () => {
+      const btn = document.getElementById('stepAdvanceBtn');
+      if (!btn || !activeProject) return;
+      const stepId = activeProject.journey?.steps?.[activeStepIndex]?.id;
+      const action = computeAdvance(stepId);
+      if (!action) return;
+      btn.textContent = advanceBusy ? 'Aguarde…' : action.label;
+      btn.disabled = advanceBusy || !action.enabled;
+      const hint = document.getElementById('stepAdvanceHint');
+      if (hint) {
+        hint.textContent = action.hint || '';
+        hint.style.display = action.hint ? '' : 'none';
+      }
+    };
+
+    window.advanceStep = async () => {
+      if (!activeProject || advanceBusy) return;
+      const stepId = activeProject.journey?.steps?.[activeStepIndex]?.id;
+      const action = computeAdvance(stepId);
+      if (!action || !action.enabled) return;
+      advanceBusy = true;
+      window.refreshAdvance();
+      try {
+        switch (action.kind) {
+          case 'save-brief':
+            if (await window.saveBrief()) window.nextStep();
+            break;
+          case 'continue':
+          case 'go-review':
+          case 'deliver':
+            window.nextStep();
+            break;
+          case 'prepare-texts':
+            await window.prepareStepContent();
+            break;
+          case 'approve-texts':
+            await window.approveVisualTexts();
+            break;
+          case 'save-approve-texts':
+            if (await window.saveVisualTexts()) {
+              if (activeProject.visualReview && activeProject.visualReview.ready) await window.approveVisualTexts();
+              else alert('Textos salvos, mas ainda há itens pendentes antes de aprovar.');
+            }
+            break;
+          case 'generate':
+          case 'regenerate':
+            await window.generateImages();
+            break;
+          case 'prepare-postnow':
+            await window.preparePostnow();
+            break;
+          case 'revise':
+            await window.reviseImages();
+            break;
+        }
+      } finally {
+        advanceBusy = false;
+        window.refreshAdvance();
+      }
     };
 
     window.renderVideo = async () => {
@@ -2693,6 +2871,7 @@ export function getMobileHtml(): string {
       const formatSelect = document.getElementById('createFormat');
       const pageCountGroup = document.getElementById('pageCountGroup');
 
+      document.getElementById('createUseBrandImages').value = kind === 'video' ? 'yes' : 'no';
       if (kind === 'image') {
         typeImage.className = 'create-type-btn selected';
         typeVideo.className = 'create-type-btn';
@@ -2724,7 +2903,8 @@ export function getMobileHtml(): string {
       if (!titleInput.dataset.manual) {
         const val = e.target.value.trim();
         if (val) {
-          const prefix = selectedCreateKind === 'image' ? 'Carrossel: ' : 'Vídeo: ';
+          const format = document.getElementById('createFormat').value;
+          const prefix = selectedCreateKind === 'video' ? 'Vídeo: ' : format.startsWith('carousel-') ? 'Carrossel: ' : format.startsWith('story-') ? 'Story: ' : 'Post: ';
           titleInput.value = prefix + val.slice(0, 36);
         }
       }
@@ -2738,8 +2918,9 @@ export function getMobileHtml(): string {
       e.preventDefault();
       const topic = document.getElementById('createTopic').value.trim();
       let title = document.getElementById('createTitle').value.trim();
-      if (!title) title = (selectedCreateKind === 'image' ? 'Carrossel: ' : 'Vídeo: ') + topic.slice(0, 30);
       const format = document.getElementById('createFormat').value;
+      const photoPolicy = document.getElementById('createUseBrandImages').value === 'yes';
+      if (!title) title = (selectedCreateKind === 'video' ? 'Vídeo: ' : format.startsWith('carousel-') ? 'Carrossel: ' : format.startsWith('story-') ? 'Story: ' : 'Post: ') + topic.slice(0, 30);
       const pageCount = Number(document.getElementById('createPages').value) || 5;
       const audience = document.getElementById('createAudience').value.trim();
       const tone = document.getElementById('createTone').value.trim();
@@ -2752,7 +2933,8 @@ export function getMobileHtml(): string {
         \`- Tom de voz: \${tone || 'Direto e claro'}\`,
         \`- Chamada para ação: \${cta || 'Compartilhe'}\`,
         \`- Formato: \${format}\`,
-      ].join('\n');
+        \`- Fotos de referência da marca: \${photoPolicy ? 'usar quando pertinentes e autorizadas' : 'não usar'}\`,
+      ].join('\\n');
 
       const submitBtn = document.getElementById('submitCreateBtn');
       submitBtn.disabled = true;
@@ -2765,6 +2947,7 @@ export function getMobileHtml(): string {
           body: JSON.stringify({
             title,
             topic,
+            useBrandImages: photoPolicy,
             kind: selectedCreateKind,
             format,
             pageCount,

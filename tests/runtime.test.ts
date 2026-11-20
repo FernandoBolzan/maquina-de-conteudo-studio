@@ -168,6 +168,170 @@ test('Projects use readable folder names and pass the name to the VideoGo storyb
   }
 });
 
+test('narration provider switches preserve independent ElevenLabs and local voice identities', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mdc-voice-switch-'));
+  const runtime = new Runtime(join(root, 'data'), {
+    assetPrefix: 'media://asset/',
+    secureStorageAvailable: () => false,
+    encryptSecret: () => { throw new Error('Secure storage unavailable in tests.'); },
+    decryptSecret: () => { throw new Error('Secure storage unavailable in tests.'); },
+    pickFile: async () => undefined,
+    openPath: async () => undefined,
+    openExternal: async () => undefined,
+    update: async () => ({ available: false, message: 'indisponível' }),
+  }, () => undefined);
+  try {
+    await runtime.init();
+    await runtime.invoke('app.settings', { workspace: join(root, 'workspace') });
+    const project = await runtime.invoke('projects.create', { title: 'Troca de provedor', kind: 'video', brief: '' }) as Project;
+    const initial = await runtime.invoke('projects.narration', { id: project.id }) as NarrationState;
+    const scenes = initial.scenes.map(scene => ({ ...scene, narration: 'Olá.', spokenText: 'Olá.' }));
+    const elevenLabs = await runtime.invoke('projects.narration.save', {
+      id: project.id, provider: 'elevenlabs', voiceId: 'eleven-voice-one', scenes,
+    }) as NarrationState;
+    assert.equal(elevenLabs.voiceId, 'eleven-voice-one');
+    const local = await runtime.invoke('projects.narration.save', {
+      id: project.id, provider: 'local', localVoice: { engine: 'kokoro', modelId: 'kokoro-v1.0', voiceId: 'af_heart' }, scenes,
+    }) as NarrationState;
+    assert.equal(local.provider, 'local');
+    assert.equal(local.voiceId, 'eleven-voice-one');
+    assert.deepEqual(local.localVoice, { engine: 'kokoro', modelId: 'kokoro-v1.0', voiceId: 'af_heart' });
+    const restored = await runtime.invoke('projects.narration', { id: project.id }) as NarrationState;
+    assert.equal(restored.provider, 'local');
+    assert.deepEqual(restored.localVoice, local.localVoice);
+    const switchedBack = await runtime.invoke('projects.narration.save', {
+      id: project.id, provider: 'elevenlabs', voiceId: 'eleven-voice-two', scenes,
+    }) as NarrationState;
+    assert.equal(switchedBack.provider, 'elevenlabs');
+    assert.equal(switchedBack.voiceId, 'eleven-voice-two');
+    assert.deepEqual(switchedBack.localVoice, local.localVoice);
+  } finally {
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('switching local narration to ElevenLabs regenerates without deleting local audio', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mdc-local-to-eleven-'));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => String(input).includes('/v2/voices')
+    ? new Response(JSON.stringify({ voices: [{ voice_id: 'voice-test', name: 'Teste PT-BR', category: 'professional' }], has_more: false }), { status: 200 })
+    : new Response('{}', { status: 200 });
+  const engine = join(root, 'engine');
+  const cli = join(engine, 'dist', 'cli', 'index.js');
+  await mkdir(join(engine, 'dist', 'cli'), { recursive: true });
+  await writeFile(cli, `
+const fs = require('node:fs');
+const path = require('node:path');
+if (process.argv.includes('--help')) {
+  console.log('--generate-audio --voice --allow-paid');
+} else {
+  const input = process.argv[4];
+  const storyboard = JSON.parse(fs.readFileSync(input, 'utf8'));
+  for (const scene of storyboard.scenes) {
+    if (!String(scene.narration || '').trim()) continue;
+    const output = path.resolve(path.dirname(input), scene.audio.narration.assetPath);
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+    fs.writeFileSync(output, Buffer.from('new-eleven-audio'));
+  }
+  fs.writeFileSync(input, JSON.stringify(storyboard));
+}
+`);
+  const runtime = new Runtime(join(root, 'data'), {
+    assetPrefix: 'media://asset/',
+    secureStorageAvailable: () => true,
+    encryptSecret: secret => `encrypted:${Buffer.from(secret).toString('base64')}`,
+    decryptSecret: value => Buffer.from(value.replace(/^encrypted:/, ''), 'base64').toString('utf8'),
+    pickFile: async () => undefined,
+    openPath: async () => undefined,
+    openExternal: async () => undefined,
+    update: async () => ({ available: false, message: 'indisponível' }),
+  }, () => undefined);
+  try {
+    await runtime.init();
+    await runtime.invoke('elevenlabs.configure', { key: 'xi_test_voice_switch_secret' });
+    await runtime.services.saveSettings({ workspace: join(root, 'workspace'), enginePaths: { videogo: engine } });
+    const project = await runtime.invoke('projects.create', { title: 'Regenerar narração', kind: 'video', brief: '' }) as Project;
+    const initial = await runtime.invoke('projects.narration', { id: project.id }) as NarrationState;
+    const scenes = initial.scenes.map((scene, index) => ({ ...scene, narration: index === 0 ? 'Olá.' : '', spokenText: index === 0 ? 'Olá.' : '' }));
+    const localVoice = { engine: 'kokoro' as const, modelId: 'kokoro-v1.0', voiceId: 'af_heart' };
+    await runtime.invoke('projects.narration.save', { id: project.id, provider: 'local', localVoice, scenes });
+    const sceneId = scenes[0]!.id;
+    const oldAssetPath = `assets/audio/narration/local-existing/${sceneId}.mp3`;
+    const oldAudio = Buffer.from('old-local-audio-bytes');
+    await mkdir(join(project.path, 'assets', 'audio', 'narration', 'local-existing'), { recursive: true });
+    await writeFile(join(project.path, oldAssetPath), oldAudio);
+    const storyboardPath = join(project.path, 'storyboard.json');
+    const storyboard = JSON.parse(await readFile(storyboardPath, 'utf8')) as { scenes: Array<{ id: string; audio?: Record<string, unknown> }> };
+    const targetScene = storyboard.scenes.find(scene => scene.id === sceneId)!;
+    targetScene.audio = { ...targetScene.audio, narration: { assetPath: oldAssetPath, startOffsetSeconds: 0, gain: 1 } };
+    await writeFile(storyboardPath, JSON.stringify(storyboard));
+    const recordPath = join(root, 'workspace', '.studio', 'projects', `${project.id}.json`);
+    const record = JSON.parse(await readFile(recordPath, 'utf8')) as Record<string, unknown>;
+    record.narrationAudio = {
+      scenes: {
+        [sceneId]: {
+          assetPath: oldAssetPath, source: 'local',
+          textHash: createHash('sha256').update(JSON.stringify({ narration: 'Olá.', spokenText: 'Olá.' })).digest('hex'),
+          provenance: { schema: 1, provider: 'local', engine: 'kokoro', modelId: localVoice.modelId, voiceId: localVoice.voiceId },
+        },
+      },
+    };
+    await writeFile(recordPath, JSON.stringify(record));
+    const localState = await runtime.invoke('projects.narration', { id: project.id }) as NarrationState;
+    assert.equal(localState.scenes[0]!.audioAttached, true);
+    assert.equal(localState.scenes[0]!.audioSource, 'local');
+    const switched = await runtime.invoke('projects.narration.save', {
+      id: project.id, provider: 'elevenlabs', voiceId: 'voice-test', scenes,
+    }) as NarrationState;
+    assert.equal(switched.scenes[0]!.audioAttached, false);
+    assert.equal(switched.scenes[0]!.stray, true);
+    assert.deepEqual(await readFile(join(project.path, oldAssetPath)), oldAudio);
+    await runtime.invoke('projects.narration.approve', { id: project.id, approved: true });
+    const job = await runtime.invoke('projects.narration.generate', { id: project.id, confirm: true }) as { id: string };
+    assert.equal((await runtime.services.waitJob(job.id)).status, 'succeeded');
+    const regenerated = await runtime.invoke('projects.narration', { id: project.id }) as NarrationState;
+    assert.equal(regenerated.scenes[0]!.audioAttached, true);
+    assert.equal(regenerated.scenes[0]!.audioSource, 'elevenlabs');
+    assert.equal(regenerated.audioReady, true);
+    assert.equal(regenerated.audioApproved, false);
+    assert.deepEqual(await readFile(join(project.path, oldAssetPath)), oldAudio);
+    const savedRecord = JSON.parse(await readFile(recordPath, 'utf8')) as { narrationAudio: { history?: Array<{ sceneId: string; assetPath: string; source: string }> } };
+    assert.ok(savedRecord.narrationAudio.history?.some(entry => entry.sceneId === sceneId && entry.assetPath === oldAssetPath && entry.source === 'local'));
+    const successfulStoryboard = await readFile(storyboardPath);
+    const currentAudioPath = regenerated.scenes[0]!.audioPath!;
+    const currentAudio = await readFile(join(project.path, currentAudioPath));
+    const successfulRecord = await readFile(recordPath);
+    await writeFile(cli, `
+const fs = require('node:fs');
+const path = require('node:path');
+if (process.argv.includes('--help')) {
+  console.log('--generate-audio --voice --allow-paid');
+} else {
+  const input = process.argv[4];
+  const storyboard = JSON.parse(fs.readFileSync(input, 'utf8'));
+  for (const scene of storyboard.scenes) {
+    if (!String(scene.narration || '').trim()) continue;
+    const output = path.resolve(path.dirname(input), scene.audio.narration.assetPath);
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+    fs.writeFileSync(output, Buffer.from('partial replacement'));
+  }
+  process.exit(1);
+}
+`);
+    const failedJob = await runtime.invoke('projects.narration.generate', { id: project.id, confirm: true }) as { id: string };
+    assert.equal((await runtime.services.waitJob(failedJob.id)).status, 'failed');
+    assert.deepEqual(await readFile(storyboardPath), successfulStoryboard);
+    assert.deepEqual(await readFile(recordPath), successfulRecord);
+    assert.deepEqual(await readFile(join(project.path, oldAssetPath)), oldAudio);
+    assert.deepEqual(await readFile(join(project.path, currentAudioPath)), currentAudio);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('ElevenLabs armazena segredo criptografado e bloqueia geração paga antes de aprovar narração', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mdc-elevenlabs-'));
   const originalFetch = globalThis.fetch;
@@ -320,7 +484,7 @@ test('deleting a rendered image removes its file, source image, and approval rec
     const output = join(project.path, 'generated', 'runs', batch.id, 'slide-01.png');
     await writeFile(output, await readFile(source));
     await writeFile(join(project.path, 'generated', 'runs', batch.id, '.mapping.json'), JSON.stringify({ pages: [{ page: 1, input: sourceName, output: 'slide-01.png' }] }));
-    await writeFile(join(project.path, 'generated', 'runs', batch.id, '.status.json'), JSON.stringify({ state: 'ready', updatedAt: new Date().toISOString() }));
+    await writeFile(join(project.path, 'generated', 'runs', batch.id, '.status.json'), JSON.stringify({ state: 'ready', format: 'post-1x1', updatedAt: new Date().toISOString() }));
     detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
     detail = await runtime.invoke('projects.approve', { id: project.id, path: output, approved: true }) as ProjectDetail;
     assert.equal(detail.assets.find(asset => asset.path === output)?.approved, true);
@@ -425,7 +589,7 @@ test('agent actions recover pending asset deletions before preparing work', asyn
       id: project.id, provider: 'codex', prompt: 'Não iniciar durante recuperação.', confirm: true,
     }), /JSON corrompido/);
     await assert.rejects(runtime.invoke('agents.generateImages', {
-      id: project.id, confirm: true, logoPolicy: 'cover-closing',
+      id: project.id, confirm: true,
     }), /JSON corrompido/);
     assert.equal(runAttempts, 0);
     assert.deepEqual(runtime.services.jobs(), []);
@@ -461,7 +625,7 @@ test('project listing recovers a partially completed asset deletion journal', as
     await writeFile(source, 'source');
     await writeFile(output, 'rendered');
     await writeFile(join(run, '.mapping.json'), JSON.stringify({ pages: [{ page: 1, input, output: 'slide-01.png' }] }));
-    await writeFile(join(run, '.status.json'), JSON.stringify({ state: 'ready', updatedAt: new Date().toISOString() }));
+    await writeFile(join(run, '.status.json'), JSON.stringify({ state: 'ready', format: 'post-1x1', updatedAt: new Date().toISOString() }));
     const recordPath = join(workspace, '.studio', 'projects', `${project.id}.json`);
     const record = JSON.parse(await readFile(recordPath, 'utf8')) as Record<string, unknown>;
     record.approvals = { [`generated/runs/${batchId}/slide-01.png`]: 'approved-stamp' };
@@ -557,18 +721,24 @@ test('roteiro draft preenchido fica disponível à edição e narração sem lib
     const project = await runtime.invoke('projects.create', { title: 'Roteiro draft', kind: 'video', brief: 'Teste' }) as Project;
     const initial = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
     assert.equal(initial.storyboardAvailable, false);
+    assert.equal(initial.storyboardCompositionReady, false);
     const path = join(project.path, 'storyboard.json');
-    const data = JSON.parse(await readFile(path, 'utf8')) as { status: string; scenes: { id: string; narration: string; onScreen: string[]; visual: Record<string, unknown>; audio: Record<string, unknown> }[] };
+    const data = JSON.parse(await readFile(path, 'utf8')) as { status: string; scenes: { id: string; narration: string; onScreen: string[]; visual: Record<string, unknown>; audio: Record<string, unknown> }[]; composition?: { path: string } };
     data.scenes[0]!.narration = 'Texto gerado pelo agente.';
     data.scenes[0]!.onScreen = ['Texto na tela'];
     data.scenes[0]!.audio.spokenText = '[calm] Texto gerado pelo agente.';
     data.scenes[0]!.audio.narration = { assetPath: 'assets/audio/narration/missing.wav', startOffsetSeconds: 0, gain: 1 };
     data.scenes[0]!.visual.assetPath = 'assets/visuals/generated/ainda-nao-gerada.png';
+    data.composition = { path: '.videogo/composition' };
+    const compositionDir = join(project.path, '.videogo', 'composition');
+    await mkdir(compositionDir, { recursive: true });
+    await writeFile(join(compositionDir, 'index.html'), '<!doctype html><html></html>');
     await writeFile(path, JSON.stringify(data));
     const original = await readFile(path, 'utf8');
     const detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
     assert.equal(detail.storyboardAvailable, true);
     assert.equal(detail.storyboardReady, false);
+    assert.equal(detail.storyboardCompositionReady, true);
     const scenes = await runtime.invoke('projects.storyboard', { id: project.id }) as { scenes: { onScreen: string }[] };
     assert.equal(scenes.scenes[0]!.onScreen, 'Texto na tela');
     const narrated = await runtime.invoke('projects.narration', { id: project.id }) as NarrationState;

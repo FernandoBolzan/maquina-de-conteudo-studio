@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { Runtime } from '../src/main/runtime.js';
 import type { RunSpec } from '../src/main/context.js';
-import type { Job, Project, ProjectDetail } from '../src/shared/contracts.js';
+import type { Brand, Job, Project, ProjectDetail } from '../src/shared/contracts.js';
+import { motionDirectorPrompt } from '../src/shared/video-production.js';
+const ONE_PIXEL_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p2sAAAAASUVORK5CYII=', 'base64');
 
 test('Codex auto-approval keeps its workspace-write sandbox without conflicting --sandbox', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mdc-agent-args-'));
@@ -112,9 +114,19 @@ test('video projects run pinned Claude Opus 5.5 with read access to VideoGo and 
     await mkdir(join(engine, 'dist', 'cli'), { recursive: true });
     await writeFile(join(engine, 'dist', 'cli', 'index.js'), '');
     await runtime.services.saveSettings({ enginePaths: { videogo: engine } });
+    const sourcePhoto = join(root, 'marca.png');
+    await writeFile(sourcePhoto, ONE_PIXEL_PNG);
+    const brand = await runtime.invoke('brands.save', {
+      name: 'Marca sem foto na produção',
+      tone: 'Direto e acolhedor.',
+      colors: ['#123456', '#f97316'],
+      references: [{ path: sourcePhoto, name: 'referencia-marca.png' }],
+    }) as Brand;
     const project = await runtime.invoke('projects.create', {
       title: 'Projeto de Vídeo com Opus',
       kind: 'video',
+      brandId: brand.id,
+      useBrandImages: false,
       brief: 'Crie um vídeo explicativo com Opus.',
     }) as Project;
 
@@ -130,18 +142,21 @@ test('video projects run pinned Claude Opus 5.5 with read access to VideoGo and 
     };
     runtime.services.run = async spec => { captured = spec; return { ...fakeJob, title: spec.title }; };
     runtime.services.waitJob = async id => ({ ...fakeJob, id, status: 'succeeded' });
-    runtime.services.capture = async () => ({ code: 1, stdout: '', stderr: 'Maestro isolado neste teste.' });
+    let captures = 0;
+    runtime.services.capture = async () => { captures += 1; return { code: 1, stdout: '', stderr: 'Maestro isolado neste teste.' }; };
 
     // Even if requested with provider 'codex' or model 'gpt-6-luna', video project must route to Claude Opus
     await runtime.invoke('agents.start', {
       id: project.id,
       provider: 'codex',
       model: 'gpt-6-luna',
-      prompt: 'Construa o roteiro e a direção visual.',
+      prompt: motionDirectorPrompt({ fromPost: true }),
       confirm: true,
     });
 
     assert.ok(captured);
+    assert.equal(captured.executable, claude, 'a produção de cena e HTML não pode ser enviada ao Codex');
+    assert.match(captured.title, /Claude · claude-opus-5-5/);
     assert.ok(captured.args.includes('--model'));
     assert.equal(captured.args[captured.args.indexOf('--model') + 1], 'claude-opus-5-5');
     assert.equal(captured.args[captured.args.indexOf('--effort') + 1], 'medium');
@@ -150,6 +165,15 @@ test('video projects run pinned Claude Opus 5.5 with read access to VideoGo and 
     assert.ok(allowed.some(rule => rule.startsWith('Bash(') && rule.endsWith(`${join(engine, 'dist', 'cli', 'index.js')} project validate:*)`)), 'o agente precisa validar o storyboard');
     assert.ok(allowed.some(rule => rule.endsWith(' project composition:*)')), 'o agente precisa montar a composição autoral');
     assert.ok(allowed.includes(`Bash(${hyperframes} snapshot:*)`), 'o agente precisa ver quadros da composição');
+    assert.equal(project.useBrandImages, false);
+    const positionalPrompt = captured.args.find(argument => argument.startsWith('Leia '));
+    const contextPathMatch = positionalPrompt?.match(/^Leia ("(?:[^"\\]|\\.)+") para/);
+    assert.ok(contextPathMatch?.[1], 'a sessão deve apontar para um contexto real');
+    const context = await readFile(JSON.parse(contextPathMatch![1]!), 'utf8');
+    assert.match(context, /fotos da marca estão desativadas/i);
+    assert.doesNotMatch(context, /referencia-marca\.png|marca\.png/);
+    assert.equal(captures, 0, 'Maestro não pode inspecionar o projeto quando fotos estão desativadas');
+    assert.deepEqual((await readdir(join(project.path, 'assets', 'brand'))).filter(name => name === 'marca.png' || name === 'referencia-marca.png'), []);
     assert.ok(!allowed.some(rule => /^Bash\([^)]*\*\)$/.test(rule) && !/ (project (validate|sound|composition|render|sheet)|lint|snapshot|docs):\*\)$/.test(rule)), 'nenhum shell irrestrito');
   } finally {
     await runtime.dispose();

@@ -1,12 +1,13 @@
 /** Campos de texto de uma página, como o agente os grava no projeto. */
 export interface TextPageFields {
   headline: string;
+  body?: string;
   copy: string;
 }
 
 /** Há algum texto gravado nas páginas. Usado para não sobrescrever trabalho existente. */
 export function hasTextContent(pages: readonly TextPageFields[]): boolean {
-  return pages.some(page => page.headline.trim() !== '' || page.copy.trim() !== '');
+  return pages.some(page => page.headline.trim() !== '' || Boolean(page.body?.trim()) || page.copy.trim() !== '');
 }
 
 /**

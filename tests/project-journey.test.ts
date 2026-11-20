@@ -29,6 +29,25 @@ test('PostNow advances from a saved brief through review and only offers export 
   assert.equal(readyToExport.nextStep.id, 'export');
   assert.equal(readyToExport.nextStep.status, 'current');
 });
+test('PostNow image step stays current until the full page set is ready', () => {
+  const incomplete = getProjectJourney(imageInput({
+    hasBrief: true,
+    textsApproved: true,
+    outputs: [{ approved: false }],
+    imagesReady: false,
+  }));
+  assert.equal(incomplete.steps.find(step => step.id === 'images')?.status, 'current');
+  assert.equal(incomplete.nextStep.id, 'images');
+
+  const complete = getProjectJourney(imageInput({
+    hasBrief: true,
+    textsApproved: true,
+    outputs: [{ approved: false }, { approved: false }, { approved: false }],
+    imagesReady: true,
+  }));
+  assert.equal(complete.steps.find(step => step.id === 'images')?.status, 'done');
+  assert.equal(complete.nextStep.id, 'review');
+});
 
 test('VideoGo voice step is done when unused and waits for a selected voice to be ready', () => {
   const silentPath = getProjectJourney(videoInput({ hasBrief: true, hasScript: true }));
@@ -65,4 +84,12 @@ test('an active project job marks the real next stage as in progress', () => {
   const journey = getProjectJourney(imageInput({ hasBrief: true, isRunning: true }));
   assert.equal(journey.nextStep.id, 'texts');
   assert.equal(journey.nextStep.status, 'running');
+});
+
+test('video voice never completes while the script is not approved', () => {
+  const notApproved = getProjectJourney(videoInput({ hasBrief: true, hasScript: false, voice: { selected: true, ready: false, needsKey: false } }));
+  assert.equal(notApproved.nextStep.id, 'script');
+  assert.equal(notApproved.steps.find(step => step.id === 'voice')?.status, 'upcoming');
+  const approved = getProjectJourney(videoInput({ hasBrief: true, hasScript: true, voice }));
+  assert.equal(approved.steps.find(step => step.id === 'voice')?.status, 'done');
 });
