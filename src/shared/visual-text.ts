@@ -81,6 +81,25 @@ export function captionMirror(prompt: string): string | undefined {
   return section.trim();
 }
 
+/**
+ * Quando a legenda do arquivo de arte só difere do campo `copy` por espaços e linhas em branco (o agente costuma pôr uma
+ * linha em branco antes das hashtags), devolve o arquivo com a legenda idêntica a `copy`, que é o que o motor PostNow
+ * exige (a copy literal precisa estar no prompt). Sem diferença, ou com diferença de conteúdo, devolve `undefined`.
+ */
+export function alignCaptionMirror(prompt: string, copy: string): string | undefined {
+  const mirror = captionMirror(prompt);
+  const wanted = copy.trim();
+  if (mirror === undefined || !wanted || mirror === wanted) return undefined;
+  if (mirror.replace(/\s+/g, ' ') !== wanted.replace(/\s+/g, ' ')) return undefined;
+  const label = new RegExp(`^## ${escapeRegExp(CAPTION_MIRROR_LABEL)}\\s*\\r?\\n`, 'm');
+  const match = label.exec(prompt);
+  if (!match) return undefined;
+  const start = match.index + match[0].length;
+  const nextSection = prompt.slice(start).search(/^(?:## |POSTNOW_[A-Z_]+=)/m);
+  const end = nextSection < 0 ? prompt.length : start + nextSection;
+  return `${prompt.slice(0, start)}${wanted}\n\n${prompt.slice(end)}`;
+}
+
 /** Texts on a single art; publication copy lives only in the caption section. */
 export interface ArtText { headline: string; body: string; copy: string; }
 export interface ArtTextSync { text: string; missing: ('headline' | 'body' | 'copy')[]; }

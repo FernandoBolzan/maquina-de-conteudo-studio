@@ -167,6 +167,30 @@ test('approving the texts copies a claim recorded as "sources" into the "source"
   }
 });
 
+test('a caption that differs from the copy field only by blank lines is aligned instead of blocking; a different caption still blocks', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mdc-depicted-person-'));
+  const { runtime, project } = await carouselWithIdentities(root, () => 'none');
+  try {
+    const native = JSON.parse(await readFile(join(project.path, 'project.json'), 'utf8')) as { pages: { prompt_file: string; copy: string }[] };
+    const first = native.pages[0]!;
+    const second = native.pages[1]!;
+    const firstFile = join(project.path, first.prompt_file);
+    const original = await readFile(firstFile, 'utf8');
+    assert.ok(original.includes(first.copy), 'o arquivo de arte começa com a legenda idêntica ao campo copy');
+    await writeFile(firstFile, original.replace(first.copy, first.copy.replace('\n\n#', '\n\n\n#')));
+    const secondFile = join(project.path, second.prompt_file);
+    await writeFile(secondFile, (await readFile(secondFile, 'utf8')).replace(second.copy, 'Outra legenda, com texto diferente.'));
+    const detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
+    const blocking = detail.visualReview?.blocking ?? [];
+    assert.ok(!blocking.some((item) => item.startsWith('Página 1: a legenda não corresponde')), blocking.join(' | '));
+    assert.ok(blocking.some((item) => item.startsWith('Página 2: a legenda não corresponde')), blocking.join(' | '));
+    assert.ok((await readFile(firstFile, 'utf8')).includes(first.copy), 'a legenda do arquivo de arte voltou a ser idêntica ao campo copy');
+  } finally {
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('agents.generateImages stops before any PostNow round when a page has no depicted_person', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mdc-depicted-person-'));
   const { runtime, project } = await carouselWithIdentities(root, (index) => (index === 0 ? undefined : 'none'));

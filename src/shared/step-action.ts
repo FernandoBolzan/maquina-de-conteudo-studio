@@ -80,7 +80,7 @@ export function imageFooterAction(input: ImageFooterInput): FooterAction | undef
           return act('generate', generateLabel, images.canGenerate, images.canGenerate ? undefined : 'Aprove os textos na etapa anterior para liberar a geração.');
         case 'failed':
         case 'legacyNoStatus':
-          return act('generate', 'Gerar de novo', images.canGenerate, images.blockMessage);
+          return act('generate', 'Gerar de novo', images.canGenerate, images.canGenerate ? undefined : images.blockMessage);
         case 'importedPending':
           return act('prepare-postnow', 'Preparar imagens importadas', images.canPreparePostnow, images.canPreparePostnow ? undefined : images.blockMessage);
         case 'ready':

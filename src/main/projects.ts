@@ -6,7 +6,7 @@ import { basename, dirname, extname, join, relative } from 'node:path';
 import { postNowFormatAcceptsPageCount, type Asset, type Brand, type BrandReference, type FormatAdaptation, type GenerationBatch, type LocalVoiceEngine, type LocalVoiceSelection, type NarrationMode, type NarrationProvider, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type VisualGenerationReview, type VisualStyle } from '../shared/contracts.js';
 import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, formatCanvas, isPostNowFormat, pagesRangeFor, type PostNowKind } from '../shared/formats.js';
 import { brandImageOptOutIssues, depictedPersonPolicyIssues, isDepictedPerson, isDepictedPersonPolicy, type DepictedPerson, portraitDiversityIssues, portraitPlanIssues } from '../shared/depicted-person.js';
-import { applyArtText, captionHashtagIssue, captionMirror, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, type VisualTextEditPage, type VisualTextEditScene } from '../shared/visual-text.js';
+import { alignCaptionMirror, applyArtText, captionHashtagIssue, captionMirror, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, type VisualTextEditPage, type VisualTextEditScene } from '../shared/visual-text.js';
 import { composeVideoStyle, visualStyleFor } from '../shared/prompt-library.js';
 import { isImageBackgroundMode, resolveImageBackgroundMode } from '../shared/image-background.js';
 import { isLogoPolicy, type LogoPolicy } from '../shared/logo-policy.js';
@@ -1491,6 +1491,24 @@ async function approveVisualContent(root: string, stored: StoredProject, payload
   await save(root, stored);
   return detail(root, stored, services);
 }
+/**
+ * O agente costuma gravar a legenda do arquivo de arte com uma linha em branco a mais que o campo `copy`, e o motor exige a copy literal no prompt.
+ * Quando a diferença é só de espaços, o arquivo de arte é alinhado ao campo `copy` em vez de travar a aprovação. Só roda com o projeto parado.
+ */
+async function repairCaptionMirrors(stored: StoredProject, services: Services): Promise<void> {
+  if (services.jobs().some(job => job.projectId === stored.project.id && job.status === 'running')) return;
+  const projectFile = await localPath(stored.project.path, 'project.json');
+  const native = await readJson(projectFile).then(value => object(value, 'Projeto PostNow'), () => undefined);
+  if (!native || !Array.isArray(native.pages)) return;
+  for (const raw of native.pages) {
+    const page = object(raw, 'Página PostNow');
+    if (typeof page.prompt_file !== 'string' || typeof page.copy !== 'string') continue;
+    const promptPath = await localPath(stored.project.path, page.prompt_file);
+    const current = await readFile(promptPath, 'utf8').catch(() => undefined);
+    const aligned = current === undefined ? undefined : alignCaptionMirror(current, page.copy);
+    if (aligned !== undefined) await atomicText(promptPath, aligned);
+  }
+}
 /** Aprovação editorial só vale para o conteúdo aprovado no Studio: flags escritas fora dele são zeradas na leitura. */
 async function reconcileEditorialApprovals(stored: StoredProject, services: Services): Promise<InternalVisualReview> {
   const review = await buildVisualReview(stored, services);
@@ -1650,7 +1668,7 @@ async function detail(root: string, stored: StoredProject, services: Services): 
   assets.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   let visualReview: InternalVisualReview | undefined;
   if (stored.project.kind === 'image') {
-    try { visualReview = await reconcileEditorialApprovals(stored, services); }
+    try { await repairCaptionMirrors(stored, services); visualReview = await reconcileEditorialApprovals(stored, services); }
     catch (error) {
       if (!stored.formatAdaptation) throw error;
       const format = stored.formatAdaptation.targetFormat;

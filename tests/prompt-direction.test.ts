@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { Runtime } from '../src/main/runtime.js';
 import type { RunSpec } from '../src/main/context.js';
-import { depictedPersonLine } from '../src/main/agents.js';
+import { depictedPersonLine, usageLimitNotice } from '../src/main/agents.js';
 import { approvedPortraitAt, postnowHome } from '../src/main/content/postnow.js';
 import type { Brand, Job, Project, ProjectDetail } from '../src/shared/contracts.js';
 import { ELEMENT_ATTACH_LIMIT, IMAGEGEN_REFERENCE_LIMIT, PORTRAIT_ATTACH_LIMIT, imageGenerationReferences } from '../src/shared/brand-references.js';
@@ -182,3 +182,14 @@ test('a brand can keep several photos of the person and the first one is the off
   const home = await postnowHome(runtime.services);
   assert.equal(await approvedPortraitAt(home, reloaded), `references/${basename(reloaded.references[0]!.path)}`, 'a primeira foto da pessoa é o retrato oficial do motor');
 }));
+
+test('usageLimitNotice explains a Codex usage limit with the time it comes back, and stays silent for other failures', () => {
+  const log = '2026-11-20T13:29:41Z ERROR codex_core::tools::router: error=image generation failed: http 429 Too Many Requests: Some("{\\"error\\":{\\"type\\":\\"usage_limit_reached\\",\\"message\\":\\"The usage limit has been reached\\",\\"plan_type\\":\\"plus\\",\\"resets_at\\":1795193073,\\"limit_window_minutes\\":1440,\\"resets_in_seconds\\":11692}}")';
+  const notice = usageLimitNotice(log, Date.UTC(2026, 10, 20, 13, 30));
+  assert.ok(notice);
+  assert.match(notice, /limite de uso de imagens do seu plano do ChatGPT/);
+  assert.match(notice, /cerca de 3h15 /);
+  assert.match(notice, /Gerar de novo/);
+  assert.match(usageLimitNotice('usage_limit_reached', 0) ?? '', /Gerar de novo/);
+  assert.equal(usageLimitNotice('Comando falhou (código 128): git status'), undefined);
+});

@@ -157,7 +157,8 @@ function codexItem(type: 'item.started' | 'item.completed', item: Record<string,
     const code = item.exit_code;
     if (typeof code !== 'number' || code === 0) return {};
     const shown = unwrapShell(text(item.command) ?? '');
-    return activity('error', shown ? `Comando falhou (código ${code}): ${shown}` : `Comando falhou (código ${code})`);
+    // Comando auxiliar que não funcionou (ex.: `git status` fora de repositório) é rotina do agente, não erro da tarefa: aparece neutro.
+    return activity('command', shown ? `Comando auxiliar não funcionou (código ${code}): ${shown}` : `Comando auxiliar não funcionou (código ${code})`);
   }
   if (itemType === 'error') return activity('error', text(item.message) ?? text(item.text) ?? 'Erro reportado pelo agente');
   if (!started) return itemType.includes('image') ? activity('image', 'Imagem gerada') : {};

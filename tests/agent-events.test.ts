@@ -73,7 +73,7 @@ test('names the failed command after its exit code, cut to the activity limit', 
     item: { type: 'command_execution', command, status: 'failed', exit_code: 128 },
   }));
   assert.ok(result?.activity);
-  assert.equal(result.activity.kind, 'error');
+  assert.equal(result.activity.kind, 'command');
   assert.ok(result.activity.text.includes('código 128'));
   assert.ok(result.activity.text.includes('git -C /repo --verbose'));
   assert.ok(!result.activity.text.includes('/bin/bash'));
@@ -87,7 +87,7 @@ test('reports a failed command with no text by its exit code alone', () => {
     item: { type: 'command_execution', status: 'failed', exit_code: 1 },
   }));
   assert.ok(result?.activity);
-  assert.equal(result.activity.kind, 'error');
+  assert.equal(result.activity.kind, 'command');
   assert.ok(result.activity.text.includes('código 1'));
   assert.ok(!result.activity.text.includes('undefined'));
 });

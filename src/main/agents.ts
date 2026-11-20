@@ -33,6 +33,22 @@ function carouselSection(slides: CarouselSlide[]): string {
   if (!filled.length) return '## Publicação\n\nNenhuma página tem conteúdo ainda. Escreva o conteúdo conforme o pedido e o briefing.';
   return ['## Publicação (ordem de leitura)', ...filled.map(slide => `${slide.page} · ${slide.role || 'página'} · Headline na arte: ${slide.headline || 'vazio'} · Body na arte: ${slide.body || 'vazio'} · Copy para legenda: ${slide.copy || 'vazio'} · Função visual: ${slide.visualFunction || 'vazio'} · Prompt: ${slide.promptFile || 'vazio'}`)].join('\n');
 }
+/**
+ * O Codex responde HTTP 429 `usage_limit_reached` quando a cota de imagens do plano do ChatGPT acaba. A pessoa vê a causa e a hora
+ * em que o limite volta, em vez de "0 imagens-fonte". `undefined` quando o log não traz esse erro.
+ */
+export function usageLimitNotice(log: string, now: number = Date.now()): string | undefined {
+  if (!/usage_limit_reached|usage limit has been reached/i.test(log)) return undefined;
+  const seconds = Number(/resets_in_seconds\\?"?\s*:\s*(\d+)/.exec(log)?.[1]);
+  let when = '';
+  if (Number.isFinite(seconds) && seconds > 0) {
+    const minutes = Math.ceil(seconds / 60);
+    const span = minutes >= 60 ? `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}` : `${minutes} min`;
+    const clock = new Date(now + seconds * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    when = ` O limite volta em cerca de ${span} (por volta das ${clock}).`;
+  }
+  return `O limite de uso de imagens do seu plano do ChatGPT foi atingido, então o Codex não gerou as artes.${when} Nada foi perdido: quando o limite voltar, use "Gerar de novo".`;
+}
 /** Quem aparece na página, dito ao gerador junto com os números das imagens anexadas que são a foto da pessoa. */
 export function depictedPersonLine(person: string, who: { brandName?: string; portraitSlots: number[] }): string {
   const name = who.brandName ?? 'a pessoa da marca';
@@ -570,7 +586,12 @@ export async function handleAgents(action: string, payload: Record<string, unkno
       } } : {}),
     });
     void services.waitJob(job.id).then(async completed => {
-      if (imageGeneration && completed.status !== 'succeeded' && (await readBatchStatus(project.path, generationId!))?.state !== 'failed') await writeBatchStatus(project.path, generationId!, { state: 'failed', message: completed.status === 'cancelled' ? 'Geração cancelada por você. Os originais existentes foram preservados; revise e gere de novo quando quiser.' : 'A geração ou o processamento não terminou. Consulte o log; os originais existentes foram preservados.' });
+      if (imageGeneration && completed.status !== 'succeeded') {
+        const limit = usageLimitNotice(completed.log);
+        const written = (await readBatchStatus(project.path, generationId!))?.state === 'failed';
+        // O aviso de limite de uso troca a mensagem técnica do motor ("0 imagens-fonte"), que não explica nada à pessoa.
+        if (limit || !written) await writeBatchStatus(project.path, generationId!, { state: 'failed', message: limit ?? (completed.status === 'cancelled' ? 'Geração cancelada por você. Os originais existentes foram preservados; revise e gere de novo quando quiser.' : 'A geração ou o processamento não terminou. Consulte o log; os originais existentes foram preservados.') });
+      }
       services.emit({ type: 'refresh' });
     }).catch(() => undefined);
     services.emit({ type: 'refresh' });

@@ -4,6 +4,18 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 
 ## 2026-11-20
 
+### Publicado — v0.3.5
+- Inclui as correções abaixo, achadas ao testar o fluxo de imagens de ponta a ponta no app real (projeto novo, textos, geração, revisão e aprovação).
+
+### Corrigido — "a legenda não corresponde ao campo de publicação" travava a aprovação
+- O agente costuma gravar a legenda do arquivo de arte com uma linha em branco a mais antes das hashtags. A conferência exata barrava a aprovação sem que a pessoa pudesse corrigir. Agora, quando a diferença é só de espaços e linhas em branco, o app alinha o arquivo de arte ao campo da legenda (que é o que o PostNow exige), e só barra quando o texto é de fato diferente.
+
+### Corrigido — limite de uso do ChatGPT aparecia como "0 imagens-fonte"
+- Quando o plano do ChatGPT atinge o limite de imagens, o Codex responde HTTP 429 e não gera nada. A tela mostrava "Esta rodada tem 0 imagem(ns)-fonte; o roteiro exige 3". Agora diz que o limite foi atingido, em quanto tempo e a que horas ele volta, e que nada foi perdido ("Gerar de novo" quando voltar). A dica de "0 imagens-fonte" deixou de aparecer ao lado de um "Gerar de novo" já liberado.
+
+### Alterado — comandos auxiliares do agente não aparecem mais como erro
+- Na tela da geração, um comando que o agente tentou e não funcionou (por exemplo `git status` fora de um repositório) aparecia em vermelho como "Comando falhou". Agora aparece como "Comando auxiliar não funcionou", sem destaque de erro.
+
 ### Publicado — v0.3.4
 - Inclui tudo que está abaixo nesta data, além da v0.3.3. Também corrige o motor: afirmações com a fonte em `sources` agora passam na geração (ao aprovar os textos, a fonte é copiada para `source`, a chave que o PostNow valida).
 
