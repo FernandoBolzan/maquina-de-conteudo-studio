@@ -1899,7 +1899,6 @@ async function saveBrand(root: string, payload: Record<string, unknown>, service
       brand.references.push(withReferenceRole({ id: refId, name: refName.slice(0, 160), path: target, kind, url: services.assetUrl(target) }, item));
     }
   }
-  if (brand.references.filter(ref => ref.portrait).length > 1) throw new Error('Escolha apenas uma foto como retrato da cliente.');
   await atomicJson(join(root, '.studio', 'brands', `${id}.json`), {
     id: brand.id,
     name: brand.name,

@@ -30,7 +30,8 @@ export interface ImageFooterInput {
     canPreparePostnow: boolean;
     blockMessage?: string;
   };
-  review: { kept: number; redo: number; pending: number };
+  /** `drafting`: revisões abertas (a pessoa clicou em Pedir revisão) que ainda não foram confirmadas nem canceladas. */
+  review: { kept: number; redo: number; pending: number; drafting: number };
   busy: { imageGeneration: boolean; imageRevision: boolean };
   anyJobRunning: boolean;
   textAgentRunning: boolean;
@@ -90,6 +91,7 @@ export function imageFooterAction(input: ImageFooterInput): FooterAction | undef
     }
     case 'review':
       if (busy.imageRevision || images.batchState === 'generating') return wait('Gerando nova versão…');
+      if (review.drafting > 0) return wait('Confirme ou cancele a revisão', 'Clique em “Confirmar revisão” na imagem para registrar o pedido. A nova versão só é liberada depois disso.');
       if (review.pending > 0) return wait(`Falta decidir ${review.pending}`);
       if (review.redo > 0) return act('revise', `Gerar nova versão de ${review.redo} ${plural(review.redo, 'imagem', 'imagens')}`);
       return act('deliver', 'Ir para Entrega');

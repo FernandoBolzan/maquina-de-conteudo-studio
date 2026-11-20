@@ -595,6 +595,7 @@ export class MobileServer {
           kept: reviewAssets.filter(a => a.approved).length,
           redo: reviewAssets.filter(a => !a.approved && a.redo).length,
           pending: reviewAssets.filter(a => !a.approved && !a.redo).length,
+          drafting: 0,
         };
         const imagesReady = Boolean(
           !adapting && (latestBatch

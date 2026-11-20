@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowRight, ExternalLink, FileImage, FileText, Image as ImageIcon, Palette, Pencil, Plus, Shapes, Upload, User, X } from 'lucide-react';
-import { IMAGEGEN_REFERENCE_LIMIT } from '../shared/brand-references';
+import { ELEMENT_ATTACH_LIMIT, IMAGEGEN_REFERENCE_LIMIT, PORTRAIT_ATTACH_LIMIT } from '../shared/brand-references';
 import type { Brand, BrandReference } from '../shared/contracts';
 import { Empty, Modal, PageHeading } from './components';
 import { invoke, type ScreenProps } from './state';
@@ -32,6 +32,69 @@ function fileName(path: string): string {
 function logoLabel(path: string): string {
   const name = fileName(path);
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\./i.test(name) ? 'Logo salva na marca' : name;
+}
+
+interface ReferenceTileProps {
+  reference: DraftReference;
+  index: number;
+  mode: 'person' | 'reference';
+  primary?: boolean;
+  onChange: (index: number, patch: Partial<DraftReference>) => void;
+  onRemove: (index: number) => void;
+}
+
+/** Um arquivo da marca: a mesma peça serve para a seção de fotos da pessoa e para a de referências, só muda o papel. */
+function ReferenceTile({ reference: ref, index, mode, primary = false, onChange, onRemove }: ReferenceTileProps) {
+  return (
+    <div className="reference-item">
+      <div className="reference-thumb">
+        {ref.kind === 'image' && ref.url ? (
+          <img src={ref.url} alt={ref.name} loading="lazy" />
+        ) : ref.kind === 'image' ? (
+          <ImageIcon size={20} className="icon-ok" />
+        ) : (
+          <FileText size={20} className="icon-ok" />
+        )}
+        <span className="reference-badge">{ref.kind === 'pdf' ? 'PDF' : ref.kind === 'image' ? 'FOTO' : 'DOC'}</span>
+      </div>
+      <div className="reference-info">
+        <strong title={ref.name}>{ref.name}</strong>
+        <small>{ref.url ? 'Salvo na marca' : 'Novo arquivo · será copiado ao salvar'}</small>
+        {mode === 'person' ? (
+          <div className="reference-roles">
+            <small>{primary ? 'Retrato oficial da pessoa' : 'Foto da pessoa'}</small>
+            <button type="button" className="portrait-toggle" title="Esta imagem não mostra a pessoa: mover para as referências" onClick={() => onChange(index, { portrait: false })}>Mover para referências</button>
+          </div>
+        ) : ref.kind === 'image' ? (
+          <div className="reference-roles">
+            {!ref.element && <small>Arte de referência</small>}
+            <button
+              type="button"
+              className={`portrait-toggle${ref.element ? ' is-on' : ''}`}
+              aria-pressed={ref.element === true}
+              title={ref.element ? 'Clique para voltar a ser arte de referência' : 'Usar esta imagem dentro das artes (logo ou produto de outra marca)'}
+              onClick={() => onChange(index, { element: !ref.element })}
+            >
+              <Shapes size={11} aria-hidden="true" />{ref.element ? 'Elemento da arte' : 'Usar na arte'}
+            </button>
+            <button type="button" className="portrait-toggle" title="Esta imagem mostra a pessoa da marca: mover para as fotos da pessoa" onClick={() => onChange(index, { portrait: true, element: false })}>
+              <User size={11} aria-hidden="true" />É foto da pessoa
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <div className="reference-actions">
+        {ref.url && (
+          <button type="button" className="icon-button" title="Abrir arquivo" aria-label={`Abrir ${ref.name}`} onClick={() => { void invoke('app.open', { path: ref.path }); }}>
+            <ExternalLink size={13} />
+          </button>
+        )}
+        <button type="button" className="icon-button" title="Remover" aria-label={`Remover ${ref.name}`} onClick={() => onRemove(index)}>
+          <X size={13} />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
@@ -71,26 +134,34 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
     }
   }
 
-  async function pickReferences() {
-    const picked = await run('brand-refs', () =>
+  /** Envio separado: as fotos da pessoa entram com o papel de retrato; as referências entram como arte de referência (ou documento). */
+  async function pick(kind: 'people' | 'references') {
+    const people = kind === 'people';
+    const picked = await run(people ? 'brand-people' : 'brand-refs', () =>
       invoke<string[] | string | undefined>('app.pick', {
         multiple: true,
-        extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg', 'gif', 'avif', 'pdf', 'md', 'txt', 'json'],
+        extensions: people ? ['png', 'jpg', 'jpeg', 'webp'] : ['png', 'jpg', 'jpeg', 'webp', 'svg', 'gif', 'avif', 'pdf', 'md', 'txt', 'json'],
       }),
     );
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
     setReferences(current => {
-      const existingPaths = new Set(current.map(item => item.path));
+      const known = new Set(current.map(item => item.path));
       const added: DraftReference[] = [];
       for (const path of paths) {
-        if (!path || existingPaths.has(path)) continue;
-        existingPaths.add(path);
-        added.push({ name: fileName(path), path, kind: inferKind(path) });
+        if (!path || known.has(path)) continue;
+        known.add(path);
+        added.push({ name: fileName(path), path, kind: inferKind(path), ...(people ? { portrait: true } : {}) });
       }
       return [...current, ...added];
     });
   }
+  // Uma imagem que passa a ser foto da pessoa vai para o fim da lista: o retrato oficial é a primeira foto, e mover uma imagem não pode trocá-lo sem querer.
+  const changeReference = (index: number, patch: Partial<DraftReference>) => setReferences(current => {
+    const updated = current.map((item, i) => (i === index ? { ...item, ...patch } : item));
+    return patch.portrait === true ? [...updated.filter((_, i) => i !== index), updated[index]!] : updated;
+  });
+  const removeReference = (index: number) => setReferences(current => current.filter((_, i) => i !== index));
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -263,100 +334,63 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
                 )}
               </div>
 
+              <div className="references-section people-section">
+                <div className="references-header">
+                  <div>
+                    <div className="field-label">Fotos da pessoa ({references.filter(ref => ref.portrait).length})</div>
+                    <small className="field-help">Envie uma ou mais fotos de rosto da pessoa da marca. É só com elas que a IA mostra a pessoa nas artes.</small>
+                  </div>
+                  <button type="button" className="button small secondary" onClick={() => { void pick('people'); }} disabled={busy.has('brand-people')}>
+                    <Plus size={14} />Adicionar fotos da pessoa
+                  </button>
+                </div>
+                <p className="field-help references-portrait-help">
+                  A primeira foto é o retrato oficial e a IA recebe até {PORTRAIT_ATTACH_LIMIT} fotos por vez. Com pelo menos uma foto da pessoa, a capa e o último slide passam a mostrar essa pessoa.
+                </p>
+                {references.some(ref => ref.portrait) ? (
+                  <div className="reference-grid">
+                    {references.map((ref, index) => ref.portrait ? (
+                      <ReferenceTile key={`${ref.path}-${index}`} reference={ref} index={index} mode="person" primary={references.findIndex(item => item.portrait) === index} onChange={changeReference} onRemove={removeReference} />
+                    ) : null)}
+                  </div>
+                ) : (
+                  <div className="references-empty">
+                    <span>Nenhuma foto da pessoa ainda. Sem foto, as artes não mostram a pessoa.</span>
+                  </div>
+                )}
+              </div>
+
               <div className="references-section">
                 <div className="references-header">
                   <div>
-                    <div className="field-label">Fotos, PDFs e Referências Visuais ({references.length})</div>
-                    <small className="field-help">Adicione fotos da pessoa da marca, referências de estilo, PDFs de manual ou guias em texto.</small>
+                    <div className="field-label">Referências da marca ({references.filter(ref => !ref.portrait).length})</div>
+                    <small className="field-help">Artes, PDFs e documentos que mostram o nosso padrão visual. Servem só de estilo: as pessoas que aparecem nelas não são usadas nas artes.</small>
                   </div>
-                  <button type="button" className="button small secondary" onClick={() => { void pickReferences(); }} disabled={busy.has('brand-refs')}>
-                    <Plus size={14} />Adicionar fotos ou PDFs
+                  <button type="button" className="button small secondary" onClick={() => { void pick('references'); }} disabled={busy.has('brand-refs')}>
+                    <Plus size={14} />Adicionar referências
                   </button>
                 </div>
-                {references.some(ref => ref.kind === 'image') && (
+                {references.some(ref => !ref.portrait && ref.kind === 'image') && (
                   <div className="field-help references-roles-legend">
-                    <strong>Papel de cada imagem para a IA</strong>
                     <ul>
                       <li><b>Arte de referência</b> (sem marcação): o nosso padrão visual, que a IA segue ao criar.</li>
-                      <li><b>Usar como retrato</b>: a foto de rosto da pessoa. Só uma; com ela, a capa e o último slide mostram essa pessoa.</li>
-                      <li><b>Usar na arte</b>: algo que deve aparecer nas artes, como a logo de outra marca.</li>
+                      <li><b>Usar na arte</b>: algo que deve aparecer nas artes, como a logo de outra marca (até {ELEMENT_ATTACH_LIMIT} por vez).</li>
                     </ul>
                     <span>
-                      O gerador recebe até {IMAGEGEN_REFERENCE_LIMIT} imagens por vez: primeiro o retrato e os elementos, depois as artes na ordem da lista.
-                      {references.filter(ref => ref.kind === 'image').length > IMAGEGEN_REFERENCE_LIMIT ? ` Esta marca tem ${references.filter(ref => ref.kind === 'image').length} imagens; as que não couberem ficam só como texto.` : ''}
+                      O gerador recebe até {IMAGEGEN_REFERENCE_LIMIT} imagens por vez: primeiro as fotos da pessoa e os elementos, depois as artes na ordem da lista.
+                      {references.filter(ref => !ref.portrait && ref.kind === 'image').length > IMAGEGEN_REFERENCE_LIMIT ? ` Esta marca tem ${references.filter(ref => !ref.portrait && ref.kind === 'image').length} artes; as que não couberem ficam só como texto.` : ''}
                     </span>
                   </div>
                 )}
-
-                {references.length === 0 ? (
-                  <div className="references-empty">
-                    <span>Nenhuma foto ou PDF de referência adicionado ainda.</span>
+                {references.some(ref => !ref.portrait) ? (
+                  <div className="reference-grid">
+                    {references.map((ref, index) => !ref.portrait ? (
+                      <ReferenceTile key={`${ref.path}-${index}`} reference={ref} index={index} mode="reference" onChange={changeReference} onRemove={removeReference} />
+                    ) : null)}
                   </div>
                 ) : (
-                  <div className="reference-grid">
-                    {references.map((ref, index) => (
-                      <div className="reference-item" key={`${ref.path}-${index}`}>
-                        <div className="reference-thumb">
-                          {ref.kind === 'image' && ref.url ? (
-                            <img src={ref.url} alt={ref.name} loading="lazy" />
-                          ) : ref.kind === 'image' ? (
-                            <ImageIcon size={20} className="icon-ok" />
-                          ) : (
-                            <FileText size={20} className="icon-ok" />
-                          )}
-                          <span className="reference-badge">{ref.kind === 'pdf' ? 'PDF' : ref.kind === 'image' ? 'FOTO' : 'DOC'}</span>
-                        </div>
-                        <div className="reference-info">
-                          <strong title={ref.name}>{ref.name}</strong>
-                          <small>{ref.url ? 'Salvo na marca' : 'Novo arquivo · será copiado ao salvar'}</small>
-                          {ref.kind === 'image' && (
-                            <div className="reference-roles">
-                              {!ref.portrait && !ref.element && <small>Arte de referência</small>}
-                              <button
-                                type="button"
-                                className={`portrait-toggle${ref.portrait ? ' is-on' : ''}`}
-                                aria-pressed={ref.portrait === true}
-                                title={ref.portrait ? 'Clique para desmarcar este retrato' : 'Usar esta foto como retrato da cliente'}
-                                onClick={() => setReferences(current => current.map((item, i) => i === index ? { ...item, portrait: !item.portrait, element: false } : { ...item, portrait: false }))}
-                              >
-                                <User size={11} aria-hidden="true" />{ref.portrait ? 'Retrato da cliente' : 'Usar como retrato'}
-                              </button>
-                              <button
-                                type="button"
-                                className={`portrait-toggle${ref.element ? ' is-on' : ''}`}
-                                aria-pressed={ref.element === true}
-                                title={ref.element ? 'Clique para voltar a ser arte de referência' : 'Usar esta imagem dentro das artes (logo ou produto de outra marca)'}
-                                onClick={() => setReferences(current => current.map((item, i) => i === index ? { ...item, element: !item.element, portrait: false } : item))}
-                              >
-                                <Shapes size={11} aria-hidden="true" />{ref.element ? 'Elemento da arte' : 'Usar na arte'}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        <div className="reference-actions">
-                          {ref.url && (
-                            <button
-                              type="button"
-                              className="icon-button"
-                              title="Abrir arquivo"
-                              aria-label={`Abrir ${ref.name}`}
-                              onClick={() => { void invoke('app.open', { path: ref.path }); }}
-                            >
-                              <ExternalLink size={13} />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="icon-button"
-                            title="Remover referência"
-                            aria-label={`Remover ${ref.name}`}
-                            onClick={() => setReferences(current => current.filter((_, i) => i !== index))}
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="references-empty">
+                    <span>Nenhuma referência adicionada ainda.</span>
                   </div>
                 )}
               </div>

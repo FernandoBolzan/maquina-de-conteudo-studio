@@ -1476,6 +1476,7 @@ export function getMobileHtml(): string {
     let terminalLines = [];
     let selectedCreateKind = 'image';
     let activeStepIndex = 0;
+    let revisionDrafts = {};
     let promptRecipes = [];
     // Elements
     const liveDot = document.getElementById('liveDot');
@@ -2298,9 +2299,19 @@ export function getMobileHtml(): string {
                       </div>
                       <div class="review-action-btn-group">
                         <button class="btn-review-keep \${a.approved ? 'active' : ''}" aria-pressed="\${a.approved ? 'true' : 'false'}" aria-label="Aprovar imagem Slide \${i + 1}" \${isRunning ? 'disabled' : ''} onclick="window.decideAsset('\${a.path}', 'approve')">\${a.approved ? '✓ Aprovada' : 'Aprovar'}</button>
-                        <button class="btn-review-redo \${a.redo && !a.approved ? 'active' : ''}" aria-pressed="\${a.redo && !a.approved ? 'true' : 'false'}" aria-label="Pedir revisão da imagem Slide \${i + 1}" \${isRunning ? 'disabled' : ''} onclick="window.decideAsset('\${a.path}', 'revise')">\${a.redo && !a.approved ? 'Revisão solicitada' : 'Pedir revisão'}</button>
+                        <button class="btn-review-redo \${(revisionDrafts[a.path] !== undefined || (a.redo && !a.approved)) ? 'active' : ''}" aria-pressed="\${(revisionDrafts[a.path] !== undefined || (a.redo && !a.approved)) ? 'true' : 'false'}" aria-label="Pedir revisão da imagem Slide \${i + 1}" \${isRunning ? 'disabled' : ''} onclick="window.decideAsset('\${a.path}', 'revise')">\${revisionDrafts[a.path] !== undefined ? 'Pedindo revisão' : (a.redo && !a.approved) ? 'Revisão confirmada' : 'Pedir revisão'}</button>
                       </div>
-                      \${a.redo && !a.approved ? \`<textarea class="redo-note" rows="2" placeholder="O que deve mudar nesta imagem? (opcional)" onchange="window.noteAsset('\${a.path}', this.value)">\${escapeHtml(a.redo.note || '')}</textarea>\` : ''}
+                      \${revisionDrafts[a.path] !== undefined ? \`
+                        <textarea class="redo-note" rows="2" placeholder="O que deve mudar nesta imagem? (opcional)" oninput="window.draftRevisionNote('\${a.path}', this.value)">\${escapeHtml(revisionDrafts[a.path])}</textarea>
+                        <div class="review-action-btn-group">
+                          <button class="btn-review-redo" onclick="window.cancelRevision('\${a.path}')">Cancelar</button>
+                          <button class="btn-review-keep active" \${isRunning ? 'disabled' : ''} onclick="window.confirmRevision('\${a.path}')">Confirmar revisão</button>
+                        </div>
+                        <div class="step-hint-text">O pedido só vale depois de confirmado.</div>
+                      \` : (a.redo && !a.approved) ? \`
+                        <div class="step-hint-text"><strong>Revisão confirmada.</strong> \${a.redo.note ? escapeHtml('Pedido: ' + a.redo.note) : 'Sem observações.'}</div>
+                        <div class="review-action-btn-group"><button class="btn-review-redo" onclick="window.editRevision('\${a.path}')">Editar revisão</button></div>
+                      \` : ''}
                     </div>
                   </div>
                 \`).join('')}
@@ -2612,6 +2623,15 @@ export function getMobileHtml(): string {
     };
 
     let decisionBusy = false;
+    function latestBatchAssets() {
+      const batch = activeProject && activeProject.batches && activeProject.batches[0];
+      return batch && batch.status && batch.status.state === 'ready' ? (batch.assets || []) : [];
+    }
+    // Revisões abertas e ainda não confirmadas: a nova versão só é liberada depois de confirmar ou cancelar cada uma.
+    function openRevisionCount() {
+      const assets = latestBatchAssets();
+      return Object.keys(revisionDrafts).filter(p => assets.some(a => a.path === p)).length;
+    }
     async function sendAssetDecision(body) {
       if (!activeProject || decisionBusy) return;
       decisionBusy = true;
@@ -2634,24 +2654,37 @@ export function getMobileHtml(): string {
       }
     }
 
-    // Approve toggles approval; revise toggles the revision mark. Clicking the active button undoes it.
+    // Approve toggles approval. Revise opens a draft (nothing is saved); only "Confirmar revisão" registers it.
     window.decideAsset = async (path, kind) => {
-      const batch = activeProject && activeProject.batches && activeProject.batches[0];
-      const asset = batch && batch.assets.find(x => x.path === path);
+      const asset = latestBatchAssets().find(x => x.path === path);
       if (!asset) return;
       if (kind === 'approve') {
+        delete revisionDrafts[path];
         await sendAssetDecision(asset.approved
           ? { action: 'approve-asset', path, approved: false }
           : { action: 'approve-asset', path });
+      } else if (revisionDrafts[path] !== undefined) {
+        delete revisionDrafts[path];
+        renderProjectJourneyView();
+      } else if (asset.redo && !asset.approved) {
+        await sendAssetDecision({ action: 'review-asset', path, redo: false });
       } else {
-        await sendAssetDecision(asset.redo && !asset.approved
-          ? { action: 'review-asset', path, redo: false }
-          : { action: 'review-asset', path, redo: true, note: '' });
+        revisionDrafts[path] = (asset.redo && asset.redo.note) || '';
+        renderProjectJourneyView();
       }
     };
 
-    window.noteAsset = async (path, note) => {
-      await sendAssetDecision({ action: 'review-asset', path, redo: true, note: note.trim() });
+    window.draftRevisionNote = (path, value) => { revisionDrafts[path] = value; };
+    window.cancelRevision = (path) => { delete revisionDrafts[path]; renderProjectJourneyView(); };
+    window.editRevision = (path) => {
+      const asset = latestBatchAssets().find(x => x.path === path);
+      revisionDrafts[path] = (asset && asset.redo && asset.redo.note) || '';
+      renderProjectJourneyView();
+    };
+    window.confirmRevision = async (path) => {
+      const note = (revisionDrafts[path] || '').trim();
+      delete revisionDrafts[path];
+      await sendAssetDecision({ action: 'review-asset', path, redo: true, note });
     };
 
     window.preparePostnow = async () => {
@@ -2703,6 +2736,7 @@ export function getMobileHtml(): string {
     // The single advance button of an image step: server action, promoted to save-first when the fields were edited here.
     function computeAdvance(stepId) {
       if (!activeProject || activeProject.kind !== 'image') return null;
+      if (stepId === 'review' && openRevisionCount() > 0) return { kind: 'wait', label: 'Confirme ou cancele a revisão', enabled: false, hint: 'Toque em “Confirmar revisão” na imagem para registrar o pedido. A nova versão só é liberada depois disso.' };
       const action = activeProject.footerActions && activeProject.footerActions[stepId];
       if (!action) return null;
       if (stepId === 'brief') {

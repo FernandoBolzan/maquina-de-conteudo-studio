@@ -4,6 +4,21 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 
 ## 2026-11-20
 
+### Corrigido — a arte saía sem a pessoa
+- O prompt de geração não dizia qual página mostra a pessoa: listava título, subtítulo e função visual, mas não o "Quem aparece". Agora cada página diz quem aparece: a pessoa da marca (com os números dos anexos que são a foto dela), outra pessoa (sem usar o rosto da marca) ou ninguém. Sem foto da pessoa anexada, a IA deve avisar em vez de inventar o rosto.
+- A foto da pessoa deixa de ser confundida com arte de referência: pessoas que aparecem nas artes de referência nunca emprestam rosto, corpo ou roupa; elas servem só de layout e estilo.
+- Marcas que ainda tinham como retrato o slide `02-ideia-01-whatsapp.png` (escolhido por nome de arquivo por uma versão antiga) mostram esse slide em "Fotos da pessoa" como retrato oficial. Remova-o e envie fotos de rosto de verdade; sem isso a IA recebe um slide como se fosse o rosto.
+
+### Novo — fotos da pessoa e referências em envios separados
+- A tela Marcas tem duas áreas: "Fotos da pessoa" (uma ou mais fotos de rosto, só imagens) e "Referências da marca" (artes, PDFs e documentos que valem só como padrão visual). Cada arquivo pode ser movido de uma área para a outra ("É foto da pessoa" / "Mover para referências"). Nas referências, uma imagem pode ainda ser marcada "Usar na arte" (ex.: logo de outra marca).
+- A primeira foto da pessoa é o retrato oficial do motor PostNow; uma imagem movida para as fotos da pessoa vai para o fim da lista e não vira o retrato oficial sem querer. O gerador recebe até 4 fotos da pessoa, 3 elementos e as artes de referência, no máximo 10 imagens por vez, e a tela avisa quando algo fica de fora.
+
+### Novo — revisão de imagem só vale depois de confirmada
+- Em Revisar imagens, "Pedir revisão" abre o campo de observação sem gravar nada. O pedido só é registrado em "Confirmar revisão" (ou descartado em "Cancelar"), e enquanto houver uma revisão aberta o botão do rodapé fica travado em "Confirme ou cancele a revisão". Depois de confirmada, a revisão mostra o pedido e pode ser editada. Vale no app e no acesso mobile.
+
+### Publicado — v0.3.3
+- Inclui as correções e novidades acima, além de tudo da v0.3.2.
+
 ### Corrigido — a IA ignorava o que a pessoa pediu (ex.: a logo de outra marca)
 - O gerador de imagens recebia um veto genérico a logos ("não desenhe nem aplique a logo", "nunca invente logos"), que também barrava a logo de uma marca de terceiros pedida pela pessoa (ex.: o post era sobre o Claude e a logo do Claude saiu como uma fita abstrata). Agora o veto vale só para a logo oficial da marca vinculada, que o PostNow aplica depois. Logos, produtos e marcas de terceiros pedidos ou que são o assunto da arte devem aparecer.
 - O pedido que a pessoa escreve ao preparar os textos fica gravado no projeto e volta ao contexto da geração e das revisões. Antes ele só valia na sessão de textos, e a geração seguia só a direção visual que a IA tinha gravado (que podia dizer o contrário).

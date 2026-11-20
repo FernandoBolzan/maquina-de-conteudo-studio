@@ -124,6 +124,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const [narrationJobId, setNarrationJobId] = useState<string | null>(null);
   const [teleprompterOpen, setTeleprompterOpen] = useState(false);
   const [teleprompterIndex, setTeleprompterIndex] = useState(0);
+  const [openRevisionDrafts, setOpenRevisionDrafts] = useState(0);
   const [localCatalog, setLocalCatalog] = useState<LocalVoiceCatalogState | null>(null);
   const [localCatalogError, setLocalCatalogError] = useState('');
   const [localVoiceQuery, setLocalVoiceQuery] = useState('');
@@ -528,7 +529,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
       canPreparePostnow: renderInputsReady,
       blockMessage: renderBlockMessage,
     },
-    review: { kept: keptCount, redo: redoCount, pending: pendingCount },
+    review: { kept: keptCount, redo: redoCount, pending: pendingCount, drafting: openRevisionDrafts },
     busy: { imageGeneration: busy.has('image-generation'), imageRevision: busy.has('image-revision') },
     anyJobRunning: Boolean(running),
     textAgentRunning,
@@ -1398,7 +1399,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
                 <p className="field-help">{keptCount} para manter · {redoCount} para refazer · {pendingCount} sem decisão</p>
               </div>
               {!reviewEditable && reviewBlockMessage && <p className="field-help" role="status">{reviewBlockMessage}</p>}
-              <ImageReviewGrid items={reviewItems} disabled={!reviewEditable || busy.has('review-image')} decisions={{ onApprove: keepImage, onRevise: redoImage, onClear: clearImageDecision }} onDelete={deleteImageByPath} />
+              <ImageReviewGrid items={reviewItems} disabled={!reviewEditable || busy.has('review-image')} decisions={{ onApprove: keepImage, onRevise: redoImage, onClear: clearImageDecision }} onDraftingChange={setOpenRevisionDrafts} onDelete={deleteImageByPath} />
             </section>
           )}
 

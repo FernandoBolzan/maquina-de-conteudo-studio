@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { Runtime } from '../src/main/runtime.js';
 import type { RunSpec } from '../src/main/context.js';
+import { depictedPersonLine } from '../src/main/agents.js';
+import { approvedPortraitAt, postnowHome } from '../src/main/content/postnow.js';
 import type { Brand, Job, Project, ProjectDetail } from '../src/shared/contracts.js';
-import { IMAGEGEN_REFERENCE_LIMIT, imageGenerationReferences } from '../src/shared/brand-references.js';
+import { ELEMENT_ATTACH_LIMIT, IMAGEGEN_REFERENCE_LIMIT, PORTRAIT_ATTACH_LIMIT, imageGenerationReferences } from '../src/shared/brand-references.js';
 
 const ONE_PIXEL_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p2sAAAAASUVORK5CYII=', 'base64');
 
@@ -50,7 +52,7 @@ test('generation keeps what the person asked for: the typed request and project 
 
   const logo = join(root, 'logo.png');
   await writeFile(logo, ONE_PIXEL_PNG);
-  const sources = ['arte-a.png', 'arte-b.png', 'rosto.png', 'logo-terceiro.png'].map(name => join(root, name));
+  const sources = ['arte-a.png', 'arte-b.png', 'rosto.png', 'rosto-2.png', 'logo-terceiro.png'].map(name => join(root, name));
   for (const source of sources) await writeFile(source, ONE_PIXEL_PNG);
   const brand = await runtime.invoke('brands.save', {
     name: 'Marca X', tone: 'Claro.', colors: ['#123456'], logo,
@@ -58,7 +60,8 @@ test('generation keeps what the person asked for: the typed request and project 
       { path: sources[0], name: 'arte-a.png' },
       { path: sources[1], name: 'arte-b.png' },
       { path: sources[2], name: 'rosto.png', portrait: true },
-      { path: sources[3], name: 'logo-terceiro.png', element: true },
+      { path: sources[3], name: 'rosto-2.png', portrait: true },
+      { path: sources[4], name: 'logo-terceiro.png', element: true },
     ],
   }) as Brand;
   const project = await runtime.invoke('projects.create', { title: 'Post sobre outra marca', kind: 'image', format: 'post-1x1', brief: 'Tema: outra marca', brandId: brand.id, useBrandImages: true }) as Project;
@@ -96,14 +99,17 @@ test('generation keeps what the person asked for: the typed request and project 
 
   const manifest = context.slice(context.indexOf('## Imagens anexadas a este pedido'));
   const attached = specs[0]!.args.flatMap((arg, index) => arg === '--image' ? [specs[0]!.args[index + 1]!] : []);
-  assert.equal(attached.length, 4);
-  const roles = [/rosto\.png.*FOTO DA PESSOA/, /logo-terceiro\.png.*ELEMENTO PARA USAR NA ARTE/, /arte-a\.png.*ARTE DE REFERÊNCIA DA MARCA/, /arte-b\.png.*ARTE DE REFERÊNCIA DA MARCA/];
+  assert.equal(attached.length, 5);
+  const roles = [/rosto\.png.*FOTO DA PESSOA/, /rosto-2\.png.*FOTO DA PESSOA/, /logo-terceiro\.png.*ELEMENTO PARA USAR NA ARTE/, /arte-a\.png.*ARTE DE REFERÊNCIA DA MARCA/, /arte-b\.png.*ARTE DE REFERÊNCIA DA MARCA/];
   attached.forEach((path, index) => {
     const line = manifest.split('\n').find(item => item.startsWith(`${index + 1}. `));
     assert.ok(line, `linha ${index + 1} do manifesto`);
     assert.ok(line.includes(basename(path)), `o número ${index + 1} do manifesto aponta para o mesmo arquivo do --image`);
     assert.match(line, roles[index]!);
   });
+  assert.ok(context.includes('Quem aparece: Marca X. Mostre esta pessoa na arte, com o rosto fiel às imagens anexas 1, 2 (FOTO DA PESSOA)'), 'a página 1 diz quem aparece e quais anexos são a foto da pessoa');
+  assert.ok(context.includes('NÃO use o rosto, o corpo nem a roupa de pessoas que apareçam nela'), 'as artes de referência não emprestam rosto');
+  assert.ok(context.includes('Pessoas que aparecem nas artes de referência NÃO são a pessoa da marca'));
 }));
 
 test('brand image roles: portrait and element exclude each other, only images have a role, and the roles survive reloading', () => withRuntime(async (runtime, root) => {
@@ -137,3 +143,42 @@ test('ImageGen attachments put portrait and elements first, then reference arts 
   assert.deepEqual(attached.slice(0, 3).map(ref => ref.name), ['rosto', 'logo-terceiro', 'arte-1']);
   assert.deepEqual(skipped.map(ref => ref.name), ['arte-9', 'arte-10'], 'o que não cabe no limite são as últimas artes, nunca o retrato ou o elemento');
 });
+
+test('imageGenerationReferences caps person photos and elements so reference arts always fit', () => {
+  const image = (name: string, extra: object = {}) => ({ id: name, name, path: `/brand/${name}.png`, kind: 'image' as const, url: '', ...extra });
+  const refs = [
+    ...Array.from({ length: PORTRAIT_ATTACH_LIMIT + 3 }, (_, index) => image(`pessoa-${index + 1}`, { portrait: true })),
+    ...Array.from({ length: ELEMENT_ATTACH_LIMIT + 2 }, (_, index) => image(`elemento-${index + 1}`, { element: true })),
+    ...Array.from({ length: 12 }, (_, index) => image(`arte-${index + 1}`)),
+  ];
+  const { attached, skipped } = imageGenerationReferences(refs);
+  assert.equal(attached.length, IMAGEGEN_REFERENCE_LIMIT);
+  assert.equal(attached.filter(ref => ref.portrait).length, PORTRAIT_ATTACH_LIMIT);
+  assert.equal(attached.filter(ref => ref.element).length, ELEMENT_ATTACH_LIMIT);
+  const arts = attached.filter(ref => !ref.portrait && !ref.element);
+  assert.deepEqual(arts.map(ref => ref.name), Array.from({ length: IMAGEGEN_REFERENCE_LIMIT - PORTRAIT_ATTACH_LIMIT - ELEMENT_ATTACH_LIMIT }, (_, index) => `arte-${index + 1}`), 'as artes de referência que sobram vêm na ordem da lista');
+  assert.deepEqual(attached.slice(0, PORTRAIT_ATTACH_LIMIT).map(ref => ref.name), ['pessoa-1', 'pessoa-2', 'pessoa-3', 'pessoa-4'], 'a primeira foto da pessoa vem primeiro');
+  assert.ok(skipped.some(ref => ref.name === 'pessoa-5') && skipped.some(ref => ref.name === 'elemento-4'));
+});
+
+test('each page tells the generator who appears: the client with the person photos, someone else, or nobody', () => {
+  const who = { brandName: 'Marca X', portraitSlots: [1, 3] };
+  assert.match(depictedPersonLine('client_portrait', who), /Quem aparece: Marca X\. Mostre esta pessoa na arte, com o rosto fiel às imagens anexas 1, 3 \(FOTO DA PESSOA\)/);
+  assert.match(depictedPersonLine('client_portrait', { brandName: 'Marca X', portraitSlots: [] }), /nenhuma foto da pessoa foi anexada.*Não invente o rosto/);
+  assert.match(depictedPersonLine('other_person', who), /outra pessoa, que NÃO é Marca X\. Não use o rosto das fotos da pessoa da marca/);
+  assert.match(depictedPersonLine('none', who), /ninguém\. Sem pessoas nem rostos/);
+});
+
+test('a brand can keep several photos of the person and the first one is the official portrait for the engine', () => withRuntime(async (runtime, root) => {
+  const logo = join(root, 'logo.png');
+  await writeFile(logo, ONE_PIXEL_PNG);
+  const photos = ['pessoa-1.png', 'pessoa-2.png', 'pessoa-3.png'].map(name => join(root, name));
+  for (const photo of photos) await writeFile(photo, ONE_PIXEL_PNG);
+  const saved = await runtime.invoke('brands.save', { name: 'Marca Z', tone: '', colors: ['#123456'], logo, references: photos.map((path, index) => ({ path, name: `pessoa-${index + 1}.png`, portrait: true })) }) as Brand;
+  assert.equal(saved.references.filter(ref => ref.portrait).length, 3, 'mais de uma foto da pessoa é aceita');
+  const reloaded = (await runtime.invoke('brands.list', {}) as Brand[]).find(item => item.id === saved.id)!;
+  assert.deepEqual(reloaded.references.map(ref => ref.name), ['pessoa-1.png', 'pessoa-2.png', 'pessoa-3.png']);
+  assert.ok(reloaded.references.every(ref => ref.portrait === true));
+  const home = await postnowHome(runtime.services);
+  assert.equal(await approvedPortraitAt(home, reloaded), `references/${basename(reloaded.references[0]!.path)}`, 'a primeira foto da pessoa é o retrato oficial do motor');
+}));

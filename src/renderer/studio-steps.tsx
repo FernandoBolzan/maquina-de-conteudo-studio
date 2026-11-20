@@ -132,9 +132,18 @@ const DECISION_CHIP: Record<ImageReviewItem['decision'], { label: string; classN
 
 const FOCUSABLE_SELECTOR = 'button:not(:disabled), textarea:not(:disabled), input:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])';
 
+/** Rascunhos de revisão: o pedido só vale depois de confirmado; até lá nada é gravado no projeto e a nova versão não é liberada. */
+export interface RevisionDraftState {
+  notes: Record<string, string>;
+  open: (path: string, note: string) => void;
+  change: (path: string, note: string) => void;
+  close: (path: string) => void;
+}
+
 interface DecisionControlsProps {
   item: ImageReviewItem;
   disabled: boolean;
+  drafts: RevisionDraftState;
   onApprove: (path: string) => void;
   onRevise: (path: string, note: string) => void;
   onClear: (path: string) => void;
@@ -142,30 +151,16 @@ interface DecisionControlsProps {
 
 export type ImageDecisionHandlers = Pick<DecisionControlsProps, 'onApprove' | 'onRevise' | 'onClear'>;
 
-function DecisionControls({ item, disabled, onApprove, onRevise, onClear }: DecisionControlsProps): JSX.Element {
-  const [note, setNote] = useState(item.note);
+function DecisionControls({ item, disabled, drafts, onApprove, onRevise, onClear }: DecisionControlsProps): JSX.Element {
   const noteId = useId();
   const approved = item.decision === 'kept';
   const revision = item.decision === 'redo';
+  const draft = drafts.notes[item.path];
+  const drafting = draft !== undefined;
 
-  // Última nota conhecida pelo servidor; evita reenviar o mesmo texto e permite o flush ao desmontar.
-  const latest = useRef({ note, saved: item.note, decision: item.decision, path: item.path, onRevise });
-  latest.current = { note, saved: item.note, decision: item.decision, path: item.path, onRevise };
-
-  useEffect(() => {
-    setNote(item.note);
-  }, [item.note]);
-
-  useEffect(
-    () => () => {
-      const current = latest.current;
-      if (current.decision === 'redo' && current.note.trim() !== current.saved.trim()) current.onRevise(current.path, current.note.trim());
-    },
-    [],
-  );
-
-  const flushNote = () => {
-    if (note.trim() !== item.note.trim()) onRevise(item.path, note.trim());
+  const confirmRevision = () => {
+    onRevise(item.path, (draft ?? '').trim());
+    drafts.close(item.path);
   };
 
   return (
@@ -179,32 +174,54 @@ function DecisionControls({ item, disabled, onApprove, onRevise, onClear }: Deci
           title={approved ? 'Clique para desfazer' : undefined}
           disabled={disabled}
           busy={item.busy}
-          onClick={() => (approved ? onClear(item.path) : onApprove(item.path))}
+          onClick={() => {
+            drafts.close(item.path);
+            if (approved) onClear(item.path);
+            else onApprove(item.path);
+          }}
         />
         <DecisionToggle
           kind="revision"
-          active={revision}
-          label={revision ? 'Revisão solicitada' : 'Pedir revisão'}
+          active={drafting || revision}
+          label={drafting ? 'Pedindo revisão' : revision ? 'Revisão confirmada' : 'Pedir revisão'}
           ariaLabel={`Pedir revisão da imagem ${item.name}`}
-          title={revision ? 'Clique para desfazer' : undefined}
+          title={drafting ? 'Clique para cancelar' : revision ? 'Clique para desfazer' : undefined}
           disabled={disabled}
           busy={item.busy}
-          onClick={() => (revision ? onClear(item.path) : onRevise(item.path, ''))}
+          onClick={() => {
+            if (drafting) drafts.close(item.path);
+            else if (revision) onClear(item.path);
+            else drafts.open(item.path, item.note);
+          }}
         />
       </div>
-      {revision ? (
+      {drafting ? (
         <div className="image-review-redo">
           <label htmlFor={noteId}>O que deve mudar nesta imagem?</label>
           <textarea
             id={noteId}
             maxLength={1000}
             rows={3}
-            value={note}
+            value={draft}
             disabled={disabled}
             placeholder="Ex.: texto cortado no topo; trocar o fundo por algo mais neutro (opcional)"
-            onChange={(event) => setNote(event.target.value)}
-            onBlur={flushNote}
+            onChange={(event) => drafts.change(item.path, event.target.value)}
           />
+          <p className="field-help">O pedido só vale depois de confirmado. Só então a nova versão é liberada.</p>
+          <div className="image-review-redo-actions">
+            <button type="button" className="button ghost small" disabled={disabled} onClick={() => drafts.close(item.path)}>Cancelar</button>
+            <button type="button" className="button primary small" disabled={disabled} onClick={confirmRevision}>
+              <Check size={14} aria-hidden="true" />
+              Confirmar revisão
+            </button>
+          </div>
+        </div>
+      ) : revision ? (
+        <div className="image-review-redo is-confirmed">
+          <p className="field-help"><strong>Revisão confirmada.</strong> {item.note ? `Pedido: ${item.note}` : 'Sem observações.'}</p>
+          <div className="image-review-redo-actions">
+            <button type="button" className="button ghost small" disabled={disabled} onClick={() => drafts.open(item.path, item.note)}>Editar revisão</button>
+          </div>
         </div>
       ) : null}
     </div>
@@ -227,10 +244,11 @@ interface LightboxProps {
   onMove: (index: number) => void;
   onClose: () => void;
   decisions?: ImageDecisionHandlers;
+  drafts: RevisionDraftState;
   onDelete?: (path: string) => void;
 }
 
-function Lightbox({ items, index, disabled, onMove, onClose, decisions, onDelete }: LightboxProps): JSX.Element | null {
+function Lightbox({ items, index, disabled, onMove, onClose, decisions, drafts, onDelete }: LightboxProps): JSX.Element | null {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -375,7 +393,7 @@ function Lightbox({ items, index, disabled, onMove, onClose, decisions, onDelete
             <span className="lightbox-name" title={item.name}>{item.name}</span>
             <span className={DECISION_CHIP[item.decision].className}>{DECISION_CHIP[item.decision].label}</span>
           </div>
-          {decisions ? <DecisionControls key={item.path} item={item} disabled={disabled} {...decisions} /> : null}
+          {decisions ? <DecisionControls key={item.path} item={item} disabled={disabled} drafts={drafts} {...decisions} /> : null}
           {onDelete ? <DeleteImageButton name={item.name} disabled={disabled} onDelete={() => onDelete(item.path)} /> : null}
         </div>
       </div>
@@ -384,10 +402,24 @@ function Lightbox({ items, index, disabled, onMove, onClose, decisions, onDelete
   );
 }
 
-export function ImageReviewGrid({ items, disabled, decisions, onDelete }: { items: ImageReviewItem[]; disabled: boolean; decisions?: ImageDecisionHandlers; onDelete?: (path: string) => void }): JSX.Element {
+export function ImageReviewGrid({ items, disabled, decisions, onDelete, onDraftingChange }: { items: ImageReviewItem[]; disabled: boolean; decisions?: ImageDecisionHandlers; onDelete?: (path: string) => void; onDraftingChange?: (count: number) => void }): JSX.Element {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const [revisionNotes, setRevisionNotes] = useState<Record<string, string>>({});
   const triggerRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const originRef = useRef<number | null>(null);
+  const itemsKey = items.map(item => item.path).join('|');
+  const reportDrafting = useRef(onDraftingChange);
+  reportDrafting.current = onDraftingChange;
+  // Rodada nova: rascunhos de revisão da rodada anterior não valem mais.
+  useEffect(() => { setRevisionNotes({}); }, [itemsKey]);
+  useEffect(() => { reportDrafting.current?.(Object.keys(revisionNotes).length); }, [revisionNotes]);
+  useEffect(() => () => reportDrafting.current?.(0), []);
+  const drafts: RevisionDraftState = {
+    notes: revisionNotes,
+    open: (path, note) => setRevisionNotes(current => ({ ...current, [path]: note })),
+    change: (path, note) => setRevisionNotes(current => ({ ...current, [path]: note })),
+    close: path => setRevisionNotes(current => { const { [path]: _closed, ...rest } = current; return rest; }),
+  };
 
   const openAt = (index: number) => {
     originRef.current = index;
@@ -429,7 +461,7 @@ export function ImageReviewGrid({ items, disabled, decisions, onDelete }: { item
               <span className="image-review-name" title={item.name}>{item.name}</span>
               <span className={DECISION_CHIP[item.decision].className}>{DECISION_CHIP[item.decision].label}</span>
             </div>
-            {decisions ? <DecisionControls item={item} disabled={disabled} {...decisions} /> : null}
+            {decisions ? <DecisionControls item={item} disabled={disabled} drafts={drafts} {...decisions} /> : null}
             {onDelete ? <DeleteImageButton name={item.name} disabled={disabled} onDelete={() => onDelete(item.path)} /> : null}
           </article>
         ))}
@@ -442,6 +474,7 @@ export function ImageReviewGrid({ items, disabled, decisions, onDelete }: { item
           onMove={setOpenIndex}
           onClose={closeLightbox}
           decisions={decisions}
+          drafts={drafts}
           onDelete={onDelete}
         />
       ) : null}

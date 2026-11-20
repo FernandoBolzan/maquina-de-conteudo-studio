@@ -11,7 +11,7 @@ const image = (patch: Partial<Omit<ImageFooterInput, 'texts' | 'images' | 'revie
   brief: { dirty: false, empty: false, ...patch.brief },
   texts: { present: true, ready: true, approved: false, dirty: false, invalid: false, blockingCount: 0, unsupportedFormat: false, adapting: false, ...patch.texts },
   images: { expected: 5, batchState: 'none', stale: false, formatLabel: 'Carrossel 1:1', canGenerate: true, canPreparePostnow: true, ...patch.images },
-  review: { kept: 0, redo: 0, pending: 0, ...patch.review },
+  review: { kept: 0, redo: 0, pending: 0, drafting: 0, ...patch.review },
   busy: { imageGeneration: false, imageRevision: false, ...patch.busy },
 });
 
@@ -85,6 +85,18 @@ test('image review: pending blocks, redo regenerates through the same button, al
   shows(imageFooterAction(image({ ...step, review: { kept: 5 } })), 'deliver', true);
   shows(imageFooterAction(image({ step: 'review', busy: { imageRevision: true }, review: { redo: 1 } })), 'wait', false);
   assert.equal(imageFooterAction(image({ step: 'export' })), undefined);
+});
+
+test('image review: a revision that was opened but not confirmed blocks generation and delivery', () => {
+  const step = { step: 'review', images: { batchState: 'ready' as const } } as const;
+  // Uma revisão confirmada (redo) libera a nova versão; uma aberta e não confirmada trava tudo, mesmo com outras já confirmadas.
+  shows(imageFooterAction(image({ ...step, review: { redo: 2, kept: 3 } })), 'revise', true);
+  const open = imageFooterAction(image({ ...step, review: { redo: 2, kept: 2, drafting: 1 } }));
+  shows(open, 'wait', false);
+  assert.match(open?.label ?? '', /Confirme ou cancele a revisão/);
+  assert.match(open?.hint ?? '', /Confirmar revisão/);
+  shows(imageFooterAction(image({ ...step, review: { kept: 4, drafting: 1 } })), 'wait', false);
+  shows(imageFooterAction(image({ ...step, review: { kept: 5, drafting: 0 } })), 'deliver', true);
 });
 
 test('video script: approval is explicit, dirty edits save first, no mute states', () => {
