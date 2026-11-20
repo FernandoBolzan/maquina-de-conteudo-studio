@@ -2,6 +2,11 @@
 
 Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas por tag (`v*.*.*`) pelo workflow `release.yml`.
 
+## 2026-11-20
+
+### Publicado — v0.3.1
+- Reempacote sem mudança de código em relação à v0.3.0. Existe para que o atualizador automático entregue a build publicada a partir desta tag.
+
 ## 2026-11-19
 
 ### Corrigido — terminal do agente na geração de imagens
