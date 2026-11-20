@@ -111,24 +111,28 @@ test('single post and Story recipes ask for one art and never for carousel page 
     }
   }
 });
-test('single artwork separates concise on-art text from publication copy', () => {
+test('post single artwork keeps the content in the caption and always points to the description; Story stays short', () => {
   for (const recipe of PROMPT_RECIPES.filter(item => item.kind === 'image')) {
-    const prompt = composePrompt(recipe, {
-      topic: 'o oceano', audience: 'estudantes', tone: 'leve', callToAction: 'comente', format: 'post-1x1',
-    });
-    assert.match(prompt, /headline curto e um body\/subtítulo conciso/, recipe.id);
-    assert.match(prompt, /copy\/caption de publicação separada/, recipe.id);
-    assert.match(prompt, /sem listas, passos, dicas detalhadas, fontes, ressalvas longas ou CTA de publicação/, recipe.id);
+    const post = composePrompt(recipe, { topic: 'o oceano', audience: 'estudantes', tone: 'leve', callToAction: 'comente', format: 'post-1x1' });
+    assert.match(post, /o conteúdo vai na copy/, recipe.id);
+    assert.match(post, /Leia a descrição/, recipe.id);
+    assert.match(post, /“comente” entra somente na copy\/caption, nunca na arte/, recipe.id);
+    assert.doesNotMatch(post, /CAPA nunca traz o conteúdo/, recipe.id);
+    const story = composePrompt(recipe, { topic: 'o oceano', audience: 'estudantes', tone: 'leve', callToAction: 'comente', format: 'story-9x16' });
+    assert.doesNotMatch(story, /Leia a descrição/, `${recipe.id}: Story não tem descrição`);
+    assert.match(story, /copy\/caption de publicação separada/, recipe.id);
   }
 });
 
-test('carousel preserves per-slide content while Story interactions stay short and sticker-safe', () => {
+test('carousel puts the content between the cover and the last page, with only the hook on the cover; Story interactions stay short and sticker-safe', () => {
   const carousel = composePrompt(PROMPT_RECIPES.find(item => item.id === 'checklist-image')!, {
     topic: 'o oceano', audience: 'estudantes', tone: 'leve', callToAction: 'comente', format: 'carousel-1x1', pageCount: 5,
   });
   assert.match(carousel, /distribua itens distintos por slide/);
-  assert.match(carousel, /headline, body, copy e visual_function por slide/);
+  assert.match(carousel, /CAPA nunca traz o conteúdo/);
+  assert.match(carousel, /ENTRE a capa e a última página/);
   assert.match(carousel, /5 slides/);
+  assert.doesNotMatch(carousel, /Leia a descrição/);
   const story = composePrompt(PROMPT_RECIPES.find(item => item.id === 'story-interaction-image')!, {
     topic: 'o oceano', audience: 'estudantes', tone: 'leve', callToAction: 'comente', format: 'story-9x16',
   });

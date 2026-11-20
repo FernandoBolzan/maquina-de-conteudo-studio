@@ -2048,7 +2048,7 @@ export function getMobileHtml(): string {
         contentHtml = \`
           <div class="step-eyebrow">Etapa \${activeStepIndex + 1} de \${totalSteps} · Textos</div>
           <div class="step-shell-title">Revisão Editorial das Páginas</div>
-          <p class="step-shell-desc">Edite headline, copy e quem aparece em cada slide. É obrigatório aprovar os textos antes de gerar as imagens.</p>
+          <p class="step-shell-desc">Edite título, subtítulo e quem aparece em cada slide. A legenda da publicação é uma só e aparece depois que as imagens forem geradas. É obrigatório aprovar os textos antes de gerar as imagens.</p>
           \${runningBanner}
 
           \${isApproved ? \`
@@ -2095,10 +2095,7 @@ export function getMobileHtml(): string {
                     <label class="input-label">\${activeProject.visualStyle?.id === 'story-interaction-image' ? 'Pergunta e opções do Story' : 'Subtítulo na arte'}</label>
                     <textarea class="input-body" data-field="body" maxlength="180">\${escapeHtml(p.body || '')}</textarea>
                   </div>
-                  <div>
-                    <label class="input-label">Copy para publicação/legenda · não imprimir na arte</label>
-                    <textarea class="input-copy" data-field="copy">\${escapeHtml(p.copy || '')}</textarea>
-                  </div>
+                  <input type="hidden" data-field="copy" value="\${escapeHtml(p.copy || '')}">
                   <div>
                     <label class="input-label">Quem aparece na arte</label>
                     <select class="select-person" data-field="person">

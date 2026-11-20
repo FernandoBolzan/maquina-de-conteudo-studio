@@ -74,8 +74,8 @@ test('generation keeps what the person asked for: the typed request and project 
   const native = JSON.parse(await readFile(nativePath, 'utf8')) as { pages: Record<string, unknown>[]; [key: string]: unknown };
   Object.assign(native, { audience: 'Pessoas leigas.', objective: 'Explicar.', editorial: { claims_reviewed: false, copy_approved: false } });
   for (const page of native.pages) {
-    Object.assign(page, { headline: 'Título curto', body: 'Resumo curto.', copy: 'Legenda.\n\n#tema #assunto #dicas #conteudo #social', visual_function: 'Logo da outra marca em 3D, grande.', depicted_person: 'client_portrait' });
-    await writeFile(join(project.path, String(page.prompt_file)), `## Texto na arte\nHeadline: Título curto\nBody: Resumo curto.\n\n## Composição\nLogo da outra marca em 3D, grande.\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\nLegenda.\n\n#tema #assunto #dicas #conteudo #social\n`);
+    Object.assign(page, { headline: 'Título curto', body: 'Resumo curto. Leia a descrição.', copy: 'Legenda.\n\n#tema #assunto #dicas #conteudo #social', visual_function: 'Logo da outra marca em 3D, grande.', depicted_person: 'client_portrait' });
+    await writeFile(join(project.path, String(page.prompt_file)), `## Texto na arte\nHeadline: Título curto\nBody: Resumo curto. Leia a descrição.\n\n## Composição\nLogo da outra marca em 3D, grande.\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\nLegenda.\n\n#tema #assunto #dicas #conteudo #social\n`);
   }
   await writeFile(nativePath, `${JSON.stringify(native, null, 2)}\n`);
   await writeFile(join(project.path, 'research', 'claims.json'), JSON.stringify({ reviewed: false, claims: [{ id: 'c1', claim: 'Fato.', source: 'Fonte', source_url: 'https://example.org', status: 'approved' }] }));

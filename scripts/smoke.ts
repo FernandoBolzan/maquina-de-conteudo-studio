@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     const native = JSON.parse(await readFile(projectJsonPath, 'utf8')) as Record<string, unknown>;
     const page = (native.pages as Record<string, unknown>[])[0]!;
     const copy = 'Dor na mandíbula ao acordar merece atenção.\n\n#bruxismo #saudebucal #odontologia #bemestar #dicasdesaude';
-    const body = 'Perceba a tensão ao despertar e procure orientação.';
+    const body = 'Perceba a tensão ao despertar. Leia a descrição.';
     const visualFunction = 'Mostrar uma pessoa percebendo desconforto na mandíbula ao despertar.';
     native.audience = 'Pessoas adultas com desconforto ao acordar.';
     native.page_count_approved = true;

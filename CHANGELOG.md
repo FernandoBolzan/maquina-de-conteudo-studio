@@ -4,6 +4,21 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 
 ## 2026-11-20
 
+### Publicado — v0.3.6
+- Inclui a regra de estrutura (capa só com gancho; imagem única com a chamada para a descrição) e a legenda única, descritas abaixo.
+
+### Alterado — a legenda é uma só e aparece depois de gerar as imagens
+- A legenda da publicação deixou de ser um campo por página em Textos. Ela é uma só para o post ou carrossel inteiro: a IA a escreve uma vez (o mesmo texto vale em todas as páginas) e ela aparece em **Revisar imagens** e em **Entregar**, com "Salvar legenda" e "Copiar legenda". Em Textos só aparece se precisar de correção (por exemplo, sem as 5 hashtags), para você conseguir aprovar.
+- Editar a legenda depois de gerar as imagens não pede nova aprovação dos textos: a legenda não entra mais na aprovação. Aprovações feitas antes continuam valendo e passam para o novo formato sozinhas.
+- O motor PostNow exige a legenda em cada página; por isso o app grava o mesmo texto em todas as páginas e nos arquivos de arte ao salvar. Projetos antigos com legendas diferentes por página continuam como estão até você salvar a legenda; a legenda mostrada é a da página 1.
+- O editor do celular também deixou de mostrar a legenda por página. Ela ainda não aparece no celular depois da geração (só no app do computador).
+
+### Novo — onde fica o conteúdo: carrossel e imagem única
+- **Carrossel:** a capa nunca traz o conteúdo. Ela só tem o gancho (título e, no máximo, uma frase de promessa). Todo o conteúdo é distribuído nas páginas entre a capa e a última, e a última fecha com a chamada final. A regra vai no pedido ao agente, nas receitas da biblioteca de prompts e no editor de Textos (dica no subtítulo da capa). Se o subtítulo da capa trouxer lista, passos ou números enumerados ("1)", "2)", marcadores), a aprovação dos textos é bloqueada com a mensagem "a capa do carrossel não pode trazer o conteúdo".
+- **Imagem única (post):** o conteúdo vai na legenda; a arte traz só um título de gancho e um subtítulo curto que sempre termina com "Leia a descrição." A chamada final do projeto (ex.: "Salve e compartilhe") fica só na legenda. Sem a chamada para a descrição na arte, a aprovação é bloqueada. O Story não entra nessa regra, porque não tem descrição.
+- Projetos antigos que já têm texto nesses formatos podem aparecer com a pendência em "Complete antes de aprovar" até o texto ser ajustado (ex.: a capa do carrossel "Como melhorar prompts para o Claude Code" tem "1) objetivo, 2) contexto, 3) como conferir" no subtítulo). Imagens já geradas não mudam.
+- A conferência da capa é uma regra de forma (lista, passos e números enumerados): o app não consegue julgar se uma frase longa e sem lista ainda é "conteúdo". Isso continua na revisão visual.
+
 ### Publicado — v0.3.5
 - Inclui as correções abaixo, achadas ao testar o fluxo de imagens de ponta a ponta no app real (projeto novo, textos, geração, revisão e aprovação).
 

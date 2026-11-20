@@ -100,6 +100,37 @@ export function alignCaptionMirror(prompt: string, copy: string): string | undef
   return `${prompt.slice(0, start)}${wanted}\n\n${prompt.slice(end)}`;
 }
 
+/** Faixa [início, fim) do texto da legenda no arquivo de arte (depois do rótulo, até a próxima seção). */
+function captionMirrorRange(prompt: string): { start: number; end: number } | undefined {
+  const label = new RegExp(`^## ${escapeRegExp(CAPTION_MIRROR_LABEL)}\\s*\\r?\\n`, 'm');
+  const match = label.exec(prompt);
+  if (!match) return undefined;
+  const start = match.index + match[0].length;
+  const nextSection = prompt.slice(start).search(/^(?:## |POSTNOW_[A-Z_]+=)/m);
+  return { start, end: nextSection < 0 ? prompt.length : start + nextSection };
+}
+/** Grava a legenda única da publicação no arquivo de arte, qualquer que seja o texto anterior. `undefined` sem a seção da legenda. */
+export function setCaptionMirror(prompt: string, caption: string): string | undefined {
+  const range = captionMirrorRange(prompt);
+  return range ? `${prompt.slice(0, range.start)}${caption.trim()}\n\n${prompt.slice(range.end)}` : undefined;
+}
+/** O arquivo de arte sem o texto da legenda: a legenda é da publicação, não da aprovação dos textos da arte. */
+export function stripCaptionMirror(prompt: string): string {
+  const range = captionMirrorRange(prompt);
+  return range ? `${prompt.slice(0, range.start)}${prompt.slice(range.end)}` : prompt;
+}
+/** Problemas da legenda única da publicação (vazia, longa demais, sem as 5 hashtags, com travessão). */
+export function captionIssues(caption: string): string[] {
+  const text = caption.trim();
+  if (!text) return ['Informe a legenda.'];
+  const issues: string[] = [];
+  if (text.length > VISUAL_TEXT_LIMITS.copy) issues.push(`A legenda tem no máximo ${VISUAL_TEXT_LIMITS.copy} caracteres.`);
+  const hashtag = captionHashtagIssue(text);
+  if (hashtag) issues.push(hashtag);
+  if (hasDash(text)) issues.push(DASH_ERROR);
+  return issues;
+}
+
 /** Texts on a single art; publication copy lives only in the caption section. */
 export interface ArtText { headline: string; body: string; copy: string; }
 export interface ArtTextSync { text: string; missing: ('headline' | 'body' | 'copy')[]; }

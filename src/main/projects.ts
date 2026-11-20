@@ -6,7 +6,8 @@ import { basename, dirname, extname, join, relative } from 'node:path';
 import { postNowFormatAcceptsPageCount, type Asset, type Brand, type BrandReference, type FormatAdaptation, type GenerationBatch, type LocalVoiceEngine, type LocalVoiceSelection, type NarrationMode, type NarrationProvider, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type VisualGenerationReview, type VisualStyle } from '../shared/contracts.js';
 import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, formatCanvas, isPostNowFormat, pagesRangeFor, type PostNowKind } from '../shared/formats.js';
 import { brandImageOptOutIssues, depictedPersonPolicyIssues, isDepictedPerson, isDepictedPersonPolicy, type DepictedPerson, portraitDiversityIssues, portraitPlanIssues } from '../shared/depicted-person.js';
-import { alignCaptionMirror, applyArtText, captionHashtagIssue, captionMirror, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, type VisualTextEditPage, type VisualTextEditScene } from '../shared/visual-text.js';
+import { carouselCoverIssue, singleImageCtaIssue } from '../shared/content-structure.js';
+import { alignCaptionMirror, applyArtText, captionHashtagIssue, captionIssues, captionMirror, onScreenItems, onScreenText, setCaptionMirror, stripCaptionMirror, validateStoryboardScenes, validateVisualTextPages, type VisualTextEditPage, type VisualTextEditScene } from '../shared/visual-text.js';
 import { composeVideoStyle, visualStyleFor } from '../shared/prompt-library.js';
 import { isImageBackgroundMode, resolveImageBackgroundMode } from '../shared/image-background.js';
 import { isLogoPolicy, type LogoPolicy } from '../shared/logo-policy.js';
@@ -726,6 +727,37 @@ async function applyDepictedPersonPolicyToPages(stored: StoredProject, policy: D
   await atomicJson(projectFile, native);
   stored.visualApproval = undefined;
 }
+/**
+ * Legenda única da publicação. O motor PostNow exige a copy em cada página e no arquivo de arte dela, então o texto é gravado igual
+ * em todas. A legenda não entra no hash de aprovação: dá para editá-la depois de gerar as imagens sem refazer a aprovação dos textos.
+ */
+async function saveCaption(root: string, payload: Record<string, unknown>, services: Services): Promise<ProjectDetail> {
+  const stored = await editableProject(root, services, payload, 'image');
+  const caption = typeof payload.caption === 'string' ? payload.caption.trim() : '';
+  const issues = captionIssues(caption);
+  if (issues.length) throw new Error(issues.join(' '));
+  await buildVisualReview(stored, services); // passa uma aprovação feita com o hash antigo (com a legenda) para o hash novo antes de editar a legenda
+  const projectFile = await localPath(stored.project.path, 'project.json');
+  const native = object(await readJson(projectFile), 'Projeto PostNow');
+  if (!Array.isArray(native.pages)) throw new Error('Projeto sem páginas válidas.');
+  const prompts: { path: string; content: string }[] = [];
+  const nextPages: Record<string, unknown>[] = [];
+  for (const [index, raw] of native.pages.entries()) {
+    const page = object(raw, `Página ${index + 1}`);
+    if (typeof page.prompt_file !== 'string') throw new Error(`Página ${index + 1}: arquivo de arte ausente.`);
+    const artPath = await localPath(stored.project.path, page.prompt_file);
+    const art = await readFile(artPath, 'utf8').catch(error => { if (missing(error)) throw new Error(`Página ${index + 1}: arquivo de arte não encontrado.`); throw error; });
+    const next = setCaptionMirror(art, caption);
+    if (next === undefined) throw new Error(`Página ${index + 1}: o arquivo de arte não tem a seção da legenda. Use Preparar textos para o agente refazer esta página.`);
+    if (next !== art) prompts.push({ path: artPath, content: next });
+    nextPages.push({ ...page, copy: caption });
+  }
+  native.pages = nextPages;
+  for (const prompt of prompts) await atomicText(prompt.path, prompt.content);
+  await atomicJson(projectFile, native);
+  await save(root, stored);
+  return detail(root, stored, services);
+}
 async function saveVisualText(root: string, payload: Record<string, unknown>, services: Services): Promise<ProjectDetail> {
   const stored = await editableProject(root, services, payload, 'image');
   const projectFile = await localPath(stored.project.path, 'project.json');
@@ -1309,7 +1341,10 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
     })));
   }
   const pages: InternalVisualReview['pages'] = [];
+  const structureKind = isPostNowFormat(stored.project.format) ? POSTNOW_FORMATS[stored.project.format].kind : undefined;
   const promptContents: { path: string; content: string }[] = [];
+  const rawPromptContents: { path: string; content: string }[] = [];
+  let caption = '';
   for (const [index, raw] of rawPages.entries()) {
     const page = object(raw, `Página ${index + 1}`);
     const promptFile = typeof page.prompt_file === 'string' ? page.prompt_file : '';
@@ -1320,17 +1355,28 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
       try {
         if (!(await lstat(path)).isFile()) throw new Error('não é arquivo');
         prompt = await readFile(path, 'utf8');
-        promptContents.push({ path: promptFile, content: prompt });
+        promptContents.push({ path: promptFile, content: stripCaptionMirror(prompt) });
+        rawPromptContents.push({ path: promptFile, content: prompt });
       } catch { blocking.push(`Página ${index + 1}: arquivo de arte ausente ou ilegível. Use Preparar textos para o agente refazer esta página.`); }
     }
     const copy = typeof page.copy === 'string' ? page.copy : '';
     const visualFunction = typeof page.visual_function === 'string' ? page.visual_function : '';
     const headline = typeof page.headline === 'string' ? page.headline : '';
     const body = typeof page.body === 'string' ? page.body : '';
+    if (index === 0) caption = copy;
+    const sameAsCaption = index > 0 && copy.trim() === caption.trim();
     if (!copy.trim()) blocking.push(`Página ${index + 1}: legenda da publicação vazia.`);
-    else {
+    else if (!sameAsCaption) {
       const hashtagIssue = captionHashtagIssue(copy);
-      if (hashtagIssue) blocking.push(`Página ${index + 1}: ${hashtagIssue} Use Preparar textos ou edite a legenda em Textos.`);
+      if (hashtagIssue) blocking.push(index === 0 ? `Legenda da publicação: ${hashtagIssue} Corrija em “Legenda da publicação”.` : `Página ${index + 1}: ${hashtagIssue}`);
+    }
+    if (structureKind === 'carousel' && rawPages.length > 1 && index === 0) {
+      const coverIssue = carouselCoverIssue(body);
+      if (coverIssue) blocking.push(`Página 1: ${coverIssue}`);
+    }
+    if (structureKind === 'post' && rawPages.length === 1 && headline.trim() && body.trim()) {
+      const ctaIssue = singleImageCtaIssue(headline, body);
+      if (ctaIssue) blocking.push(`Página 1: ${ctaIssue}`);
     }
     if (!headline.trim()) blocking.push(`Página ${index + 1}: título da arte vazio. Use Preparar textos para o agente definir o texto visual.`);
     if (headline.length > 80) blocking.push(`Página ${index + 1}: o título da arte excede 80 caracteres.`);
@@ -1338,7 +1384,7 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
     if (body.length > 180) blocking.push(`Página ${index + 1}: o subtítulo da arte excede 180 caracteres.`);
     if (hasDash(headline)) blocking.push(`Página ${index + 1}: o título tem travessão. ${DASH_ERROR}`);
     if (hasDash(body)) blocking.push(`Página ${index + 1}: o subtítulo tem travessão. ${DASH_ERROR}`);
-    if (hasDash(copy)) blocking.push(`Página ${index + 1}: a legenda tem travessão. ${DASH_ERROR}`);
+    if (hasDash(copy) && !sameAsCaption) blocking.push(index === 0 ? `Legenda da publicação: a legenda tem travessão. ${DASH_ERROR}` : `Página ${index + 1}: a legenda tem travessão. ${DASH_ERROR}`);
     if (!visualFunction.trim()) blocking.push(`Página ${index + 1}: função visual vazia. Use Preparar textos para o agente refazer esta página.`);
     if (visualFunction.trim() && !prompt.includes(visualFunction)) blocking.push(`Página ${index + 1}: a função visual não está no arquivo de arte. Use Preparar textos para o agente refazer esta página.`);
     if (headline.trim() && !prompt.includes(headline)) blocking.push(`Página ${index + 1}: o título não está no arquivo de arte. Use Preparar textos para o agente refazer esta página.`);
@@ -1431,21 +1477,29 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
     blocking.push(...portraitPlanIssues(pages.map(page => page.depictedPerson), portraitApproved));
     blocking.push(...portraitDiversityIssues(nativeType, rawPages.map(p => ({ visualFunction: typeof (p as Record<string, unknown>).visual_function === 'string' ? (p as Record<string, unknown>).visual_function as string : undefined }))));
   }
-  const projectForHash = { ...native };
-  delete projectForHash.editorial;
   const claimsForHash = { ...claimsDocument };
   delete claimsForHash.reviewed;
-  const contentHash = createHash('sha256').update(JSON.stringify({
-    project: projectForHash,
-    brief: stored.project.brief,
-    notes: stored.notes,
-    format: stored.project.format,
-    brand: brand ? { id: brand.id, name: brand.name, tone: brand.tone, colors: brand.colors, references: referenceHashes } : null,
-    claims: claimsForHash,
-    storyboardContent,
-    prompts: promptContents.sort((a, b) => a.path.localeCompare(b.path)),
-    logoHash,
-  })).digest('hex');
+  const hashOf = (pagesForHash: unknown, prompts: { path: string; content: string }[]): string => {
+    const projectForHash: Record<string, unknown> = { ...native, pages: pagesForHash };
+    delete projectForHash.editorial;
+    return createHash('sha256').update(JSON.stringify({
+      project: projectForHash,
+      brief: stored.project.brief,
+      notes: stored.notes,
+      format: stored.project.format,
+      brand: brand ? { id: brand.id, name: brand.name, tone: brand.tone, colors: brand.colors, references: referenceHashes } : null,
+      claims: claimsForHash,
+      storyboardContent,
+      prompts: [...prompts].sort((a, b) => a.path.localeCompare(b.path)),
+      logoHash,
+    })).digest('hex');
+  };
+  // A legenda é da publicação: editar depois de gerar as imagens não pode invalidar a aprovação dos textos da arte.
+  const contentHash = hashOf(Array.isArray(native.pages) ? native.pages.map(page => (typeof page === 'object' && page !== null ? { ...page, copy: '' } : page)) : native.pages, promptContents);
+  // Aprovações feitas antes de a legenda sair do hash valem enquanto o conteúdo não mudou; passam para o hash novo na hora.
+  if (stored.visualApproval && stored.visualApproval.hash !== contentHash && stored.visualApproval.hash === hashOf(native.pages, rawPromptContents)) {
+    stored.visualApproval = { ...stored.visualApproval, hash: contentHash };
+  }
   const editorials = object(native.editorial ?? {}, 'Aprovação editorial');
   const approved = !stored.formatAdaptation && stored.visualApproval?.hash === contentHash
     && editorials.copy_approved === true
@@ -1460,6 +1514,7 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
     format: selectedFormat,
     width: canvas.width,
     height: canvas.height,
+    caption,
     pages,
     claims,
     contentHash,
@@ -1673,7 +1728,7 @@ async function detail(root: string, stored: StoredProject, services: Services): 
       if (!stored.formatAdaptation) throw error;
       const format = stored.formatAdaptation.targetFormat;
       const canvas = formatCanvas(format);
-      visualReview = { ready: false, approved: false, contentHash: '', blocking: ['A adaptação foi interrompida ou os arquivos estão incompletos. Tente novamente; o material original está preservado.'], format, width: canvas.width, height: canvas.height, pages: [], claims: [] };
+      visualReview = { ready: false, approved: false, contentHash: '', blocking: ['A adaptação foi interrompida ou os arquivos estão incompletos. Tente novamente; o material original está preservado.'], format, width: canvas.width, height: canvas.height, caption: '', pages: [], claims: [] };
     }
   }
   const batches: GenerationBatch[] = [];
@@ -2427,6 +2482,7 @@ export async function handleProjects(action: string, payload: Record<string, unk
     let result: unknown;
     if (action === 'brands.save') result = await saveBrand(root, payload, services);
     else if (action === 'projects.visual.save') result = await saveVisualText(root, payload, services);
+    else if (action === 'projects.caption.save') result = await saveCaption(root, payload, services);
     else if (action === 'projects.storyboard.save') result = await saveStoryboardText(root, payload, services);
     else if (action === 'projects.attachNarrationAudio') result = await attachNarrationAudio(root, payload, services);
     else if (action === 'projects.narration.removeAudio') result = await removeNarrationAudio(root, payload, services);

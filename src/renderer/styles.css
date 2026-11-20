@@ -3902,3 +3902,15 @@ dialog.modal.game-modal .modal-heading h2 {
     display: none;
   }
 }
+
+.caption-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+}
+.caption-panel h3 { margin: 0; font-size: 16px; }
+.caption-panel .field-help { margin: 0; }
+.caption-panel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }

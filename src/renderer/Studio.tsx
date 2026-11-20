@@ -16,10 +16,12 @@ import { composeAgentFollowUp, formatAgentAnswers, lastAgentMessage, parseAgentQ
 import { GenerationProgress, type GenerationProgressState } from './GenerationProgress';
 import { AIEscapeDialog } from './AIEscapeDialog';
 import { VisualTextEditor } from './VisualTextEditor';
+import { CaptionPanel } from './CaptionPanel';
 import { VideoSceneEditor, type StoryboardSceneText } from './VideoSceneEditor';
 import type { VisualTextEditPage, VisualTextEditScene } from '../shared/visual-text';
 import { hasTextContent, shouldAutoStartTextGeneration } from '../shared/text-generation';
 import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, isPostNowFormat } from '../shared/formats';
+import { structureHint } from '../shared/content-structure';
 import { motionDirectorPrompt, videoRevisionPrompt, videoStylePrompt } from '../shared/video-production';
 import { VideoStylePanel, type VideoStyleChoice } from './VideoStylePanel';
 import { audioCheckUnavailable, classifyBatch, exportReachable, hasVideoGoRender, journeyOutputAssets as getJourneyOutputAssets, latestReviewVideo, narrationBlocked as isNarrationBlocked, reviewVideos as getReviewVideos, isBatchStale } from '../shared/video-state';
@@ -851,6 +853,11 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
     setDetail(result);
     return result;
   }
+  async function saveCaption(caption: string): Promise<ProjectDetail> {
+    const result = await invokeEditor<ProjectDetail>('projects.caption.save', { projectId: id, caption });
+    setDetail(result);
+    return result;
+  }
   async function saveStoryboardScenes(scenes: VisualTextEditScene[]): Promise<ProjectDetail> {
     const result = await invokeEditor<ProjectDetail>('projects.storyboard.save', { projectId: id, scenes });
     setDetail(result);
@@ -1400,6 +1407,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
               </div>
               {!reviewEditable && reviewBlockMessage && <p className="field-help" role="status">{reviewBlockMessage}</p>}
               <ImageReviewGrid items={reviewItems} disabled={!reviewEditable || busy.has('review-image')} decisions={{ onApprove: keepImage, onRevise: redoImage, onClear: clearImageDecision }} onDraftingChange={setOpenRevisionDrafts} onDelete={deleteImageByPath} />
+              {visualReview?.caption ? <CaptionPanel caption={visualReview.caption} disabled={Boolean(running)} help="É uma só para a publicação inteira. Revise, edite se quiser e copie para postar." onSave={saveCaption} /> : null}
             </section>
           )}
 
@@ -1486,7 +1494,8 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
           {project.kind === 'image' && visualReview && (
             <section className="editorial-review" aria-label="Revisão dos textos" hidden={activeStep.id !== 'texts'}>
               {hasTextContent(visualReview.pages) ? <>
-              <VisualTextEditor ref={visualTextEditorRef} key={id} pages={visualReview.pages} storyInteraction={project.visualStyle?.id === 'story-interaction-image'} disabled={Boolean(running) || adaptationStarting || Boolean(project.formatAdaptation)} disabledReason={project.formatAdaptation ? 'Conclua a adaptação antes de editar os textos; o conteúdo original está preservado para novas tentativas.' : running || adaptationStarting ? 'Aguarde o processo em andamento terminar.' : undefined} hasGeneratedImages={Boolean(latestBatch)} onStateChange={state => { setVisualTextDirty(state.dirty); setVisualTextInvalid(state.invalid); }} onSave={saveVisualText} />
+              <VisualTextEditor ref={visualTextEditorRef} key={id} pages={visualReview.pages} storyInteraction={project.visualStyle?.id === 'story-interaction-image'} firstPageHint={structureHint(isPostNowFormat(project.format) ? POSTNOW_FORMATS[project.format].kind : undefined, visualReview.pages.length)} disabled={Boolean(running) || adaptationStarting || Boolean(project.formatAdaptation)} disabledReason={project.formatAdaptation ? 'Conclua a adaptação antes de editar os textos; o conteúdo original está preservado para novas tentativas.' : running || adaptationStarting ? 'Aguarde o processo em andamento terminar.' : undefined} hasGeneratedImages={Boolean(latestBatch)} onStateChange={state => { setVisualTextDirty(state.dirty); setVisualTextInvalid(state.invalid); }} onSave={saveVisualText} />
+              {visualReview.blocking.some(item => item.startsWith('Legenda da publicação')) ? <CaptionPanel caption={visualReview.caption} disabled={Boolean(running) || adaptationStarting || Boolean(project.formatAdaptation)} help="A legenda precisa de ajuste antes de aprovar os textos. Depois de gerar as imagens, ela aparece em Revisar imagens e em Entregar." onSave={saveCaption} /> : null}
               <details className="editorial-review-group">
                 <summary>Fontes e afirmações · {visualReview.claims.length} {visualReview.claims.length === 1 ? 'item' : 'itens'}</summary>
                 {visualReview.claims.map(claim => (
@@ -1555,6 +1564,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
               ))}
             </section>
           )}
+          {activeStep.id === 'export' && project.kind === 'image' && visualReview?.caption ? <CaptionPanel caption={visualReview.caption} disabled={Boolean(running)} help="A legenda da publicação é uma só. Copie para postar junto com as imagens." onSave={saveCaption} /> : null}
           {activeStep.id === 'export' && (
             <DeliveryOptions approvedCount={approved.length} totalCount={project.assets.length} busy={busy.has('export') || busy.has('export-zip')} onSaveZip={() => { void saveZip(); }} onExportFolder={() => { void exportPackage(); }} onOpenFolder={openProjectFolder} />
           )}

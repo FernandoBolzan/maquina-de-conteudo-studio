@@ -13,6 +13,8 @@ export interface VisualTextEditorProps {
   disabledReason?: string;
   hasGeneratedImages?: boolean;
   storyInteraction?: boolean;
+  /** Dica da regra de estrutura do tipo de publicação, mostrada no subtítulo da primeira página. */
+  firstPageHint?: string;
   onStateChange?: (state: TextEditorState) => void;
   onSave: (pages: VisualTextEditPage[]) => Promise<ProjectDetail>;
 }
@@ -24,7 +26,7 @@ function messages(issues: VisualTextPageIssues, field: VisualTextField) {
   };
 }
 
-export const VisualTextEditor = forwardRef<TextEditorHandle, VisualTextEditorProps>(function VisualTextEditor({ pages, disabled = false, disabledReason, hasGeneratedImages = false, storyInteraction = false, onStateChange, onSave }, ref) {
+export const VisualTextEditor = forwardRef<TextEditorHandle, VisualTextEditorProps>(function VisualTextEditor({ pages, disabled = false, disabledReason, hasGeneratedImages = false, storyInteraction = false, firstPageHint, onStateChange, onSave }, ref) {
   const sourceKey = JSON.stringify(pages);
   const [baseline, setBaseline] = useState<PageDraft[]>(() => pages.map(toPageDraft));
   const [drafts, setDrafts] = useState<PageDraft[]>(() => pages.map(toPageDraft));
@@ -88,7 +90,7 @@ export const VisualTextEditor = forwardRef<TextEditorHandle, VisualTextEditorPro
     <section className="text-editor" aria-labelledby="visual-text-title">
       <header className="text-editor-head">
         <h3 id="visual-text-title" className="sr-only">Textos das páginas</h3>
-        <p className="text-editor-note">O título e o subtítulo aparecem na imagem. A legenda acompanha a publicação e não é desenhada na arte. Ao continuar, os textos são salvos e aprovados.</p>
+        <p className="text-editor-note">O título e o subtítulo aparecem na imagem. A legenda da publicação é uma só e aparece depois que as imagens forem geradas. Ao continuar, os textos são salvos e aprovados.</p>
         {hasGeneratedImages ? <p className="text-editor-note">As imagens já geradas não mudam sozinhas. Gere uma nova versão depois de salvar.</p> : null}
         {disabled && disabledReason ? <p className="text-editor-note" role="note">{disabledReason}</p> : null}
       </header>
@@ -96,7 +98,6 @@ export const VisualTextEditor = forwardRef<TextEditorHandle, VisualTextEditorPro
         const pageIssues = issues[index];
         const headlineMessages = messages(pageIssues, 'headline');
         const bodyMessages = messages(pageIssues, 'body');
-        const copyMessages = messages(pageIssues, 'copy');
         const personMessages = messages(pageIssues, 'depictedPerson');
         const pageId = `vt-${draft.page}`;
         const headlineWords = headlineWordCount(draft.headline);
@@ -123,23 +124,14 @@ export const VisualTextEditor = forwardRef<TextEditorHandle, VisualTextEditorPro
                 aria-describedby={`${pageId}-body-meta${bodyMessages.errors.length ? ` ${pageId}-body-errors` : ''}`}
                 onChange={event => update(index, { body: event.target.value })} />
               <div className="text-editor-meta" id={`${pageId}-body-meta`}>
-                <span>{storyInteraction ? 'Pergunta específica e duas opções curtas; deixe espaço para sticker nativo.' : 'Resumo curto que será impresso na imagem.'}</span>
+                <span>{storyInteraction ? 'Pergunta específica e duas opções curtas; deixe espaço para sticker nativo.' : `Resumo curto que será impresso na imagem.${index === 0 && firstPageHint ? ` ${firstPageHint}` : ''}`}</span>
                 <span>{draft.body.trim().length}/{VISUAL_TEXT_LIMITS.body}</span>
               </div>
               {bodyMessages.errors.map(message => <p className="text-editor-error" id={`${pageId}-body-errors`} key={message}>{message}</p>)}
             </div>
-            <div className="text-editor-field">
-              <label htmlFor={`${pageId}-copy`}>Legenda da publicação · não aparece na imagem</label>
-              <textarea id={`${pageId}-copy`} className="text-editor-input" rows={5} value={draft.copy} disabled={disabled || busy}
-                aria-invalid={copyMessages.errors.length > 0}
-                aria-describedby={`${pageId}-copy-meta${copyMessages.errors.length ? ` ${pageId}-copy-errors` : ''}`}
-                onChange={event => update(index, { copy: event.target.value })} />
-              <div className="text-editor-meta" id={`${pageId}-copy-meta`}>
-                <span>Lista, dica e detalhes ficam aqui. Termine com uma linha de 5 hashtags relacionadas.</span>
-                <span>{draft.copy.trim().length}/{VISUAL_TEXT_LIMITS.copy}</span>
-              </div>
-              {copyMessages.errors.map(message => <p className="text-editor-error" id={`${pageId}-copy-errors`} key={message}>{message}</p>)}
-            </div>
+            {index === 0 && issues.some(pageIssues => messages(pageIssues, 'copy').errors.length > 0) ? (
+              <p className="text-editor-error" role="alert">A legenda da publicação precisa de ajuste. Corrija em “Legenda da publicação”, logo abaixo dos textos.</p>
+            ) : null}
             <div className="text-editor-field">
               <label htmlFor={`${pageId}-person`}>Quem aparece na arte</label>
               <select id={`${pageId}-person`} className="text-editor-input" value={draft.depictedPerson} disabled={disabled || busy}

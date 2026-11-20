@@ -203,7 +203,7 @@ test('a dash in the headline or copy blocks the review and the approval until it
 
   let detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
   assert.equal(detail.visualReview?.ready, false);
-  assert.equal(detail.visualReview?.blocking.filter(item => item.startsWith('Página 1: ') && item.includes('Reescreva sem travessão')).length, 2, 'título e legenda com travessão bloqueiam a página 1');
+  assert.equal(detail.visualReview?.blocking.filter(item => (item.startsWith('Página 1: ') || item.startsWith('Legenda da publicação: ')) && item.includes('Reescreva sem travessão')).length, 2, 'título e legenda com travessão bloqueiam');
   assert.equal(detail.visualReview?.blocking.some(item => item.startsWith('Página 2:')), false);
   await assert.rejects(runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }), /Ainda não é seguro aprovar/);
 
@@ -228,7 +228,7 @@ test('a caption without exactly 5 hashtags blocks the review and the approval un
 
   let detail = await writeCaption('Legenda sem hashtags.');
   assert.equal(detail.visualReview?.ready, false);
-  assert.ok(detail.visualReview?.blocking.some(item => item.startsWith('Página 1: A legenda precisa terminar com uma linha de exatamente 5 hashtags')), detail.visualReview?.blocking.join(' | '));
+  assert.ok(detail.visualReview?.blocking.some(item => item.startsWith('Legenda da publicação: A legenda precisa terminar com uma linha de exatamente 5 hashtags')), detail.visualReview?.blocking.join(' | '));
   assert.equal(detail.visualReview?.blocking.some(item => item.startsWith('Página 2:')), false);
   await assert.rejects(runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }), /Ainda não é seguro aprovar/);
 
@@ -239,4 +239,25 @@ test('a caption without exactly 5 hashtags blocks the review and the approval un
   assert.equal(detail.visualReview?.ready, true, detail.visualReview?.blocking.join(' | '));
   const approved = await runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }) as ProjectDetail;
   assert.equal(approved.visualReview?.approved, true);
+}));
+
+test('the publication caption is one text: saving it rewrites every page and art file, and does not undo the approval of the texts', () => withReviewableProject(async ({ runtime, project, pages, projectJsonPath }) => {
+  let detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
+  detail = await runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }) as ProjectDetail;
+  assert.equal(detail.visualReview?.approved, true);
+  const hashBefore = detail.visualReview!.contentHash;
+  const caption = 'Uma legenda só para o post inteiro.\n\n#um #dois #tres #quatro #cinco';
+  detail = await runtime.invoke('projects.caption.save', { projectId: project.id, caption }) as ProjectDetail;
+  assert.equal(detail.visualReview?.caption, caption);
+  assert.equal(detail.visualReview?.approved, true, 'editar a legenda depois da aprovação não pede nova aprovação dos textos');
+  assert.equal(detail.visualReview?.contentHash, hashBefore);
+  assert.equal(detail.visualReview?.ready, true, detail.visualReview?.blocking.join(' | '));
+  const native = JSON.parse(await readFile(projectJsonPath, 'utf8')) as { pages: { copy: string; prompt_file: string }[] };
+  assert.equal(native.pages.length, pages.length);
+  for (const page of native.pages) {
+    assert.equal(page.copy, caption);
+    assert.ok((await readFile(join(project.path, page.prompt_file), 'utf8')).includes(`## Copy para publicação/legenda, NÃO imprimir na arte:\n${caption}\n`));
+  }
+  await assert.rejects(runtime.invoke('projects.caption.save', { projectId: project.id, caption: 'Sem hashtags.' }), /5 hashtags/);
+  await assert.rejects(runtime.invoke('projects.caption.save', { projectId: project.id, caption: '   ' }), /Informe a legenda/);
 }));

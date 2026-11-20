@@ -1,4 +1,5 @@
 import type { ProjectFormatId, VisualStyle } from './contracts.js';
+import { CAROUSEL_STRUCTURE_RULE, SINGLE_IMAGE_STRUCTURE_RULE } from './content-structure.js';
 export type PromptKind = 'image' | 'video';
 
 export interface PromptRecipe {
@@ -45,12 +46,16 @@ export interface PromptStorage {
 export const PROMPT_LIBRARY_STORAGE_KEY = 'maquina-studio.prompt-library.v1';
 /** Preserves full-bleed composition; reserves logo space only when the saved project preference includes it. */
 const LOGO_AREA = 'A arte preenche todo o quadro até as quatro bordas, sem faixa, rodapé ou moldura vazia. Respeite somente a preferência de logo já salva no projeto; se a logo oficial será aplicada depois, deixe uma pequena área integrada no canto inferior direito. Se a preferência for sem logo, componha até as bordas.';
-const IMAGE_CONTENT_RULES = 'Escreva para {{audience}}, em tom {{tone}}. Uma ideia principal por página, texto legível e hierarquia clara. Para arte única, entregue somente headline curta e body/subtítulo conciso na imagem; coloque listas, dicas, etapas, detalhes, fontes, ressalvas e CTA completo em copy/caption de publicação, fora da arte. Para carrossel, distribua headline, body, copy e visual_function por slide, preservando conteúdo útil em cada página. {{brandImagePolicy}} Não invente fatos: registre afirmações factuais e fontes em research/claims.json. ' + LOGO_AREA;
+const IMAGE_CONTENT_RULES = 'Escreva para {{audience}}, em tom {{tone}}. Uma ideia principal por página, texto legível e hierarquia clara. {{brandImagePolicy}} Não invente fatos: registre afirmações factuais e fontes em research/claims.json. ' + LOGO_AREA;
+/** Imagem única de post: conteúdo na legenda e chamada para a descrição na arte; Story não tem descrição, então mantém só o texto curto. */
+const SINGLE_STRUCTURE_MARKER = '{{singleStructure}}';
+const POST_SINGLE_STRUCTURE = `${SINGLE_IMAGE_STRUCTURE_RULE} A chamada “{{callToAction}}” entra somente na copy/caption, nunca na arte.`;
+const STORY_SINGLE_STRUCTURE = 'Na arte, escreva apenas um headline curto e um body/subtítulo conciso, sem listas, passos, dicas detalhadas, fontes, ressalvas longas ou CTA de publicação; entregue o restante como copy/caption de publicação separada. A chamada “{{callToAction}}” entra somente na copy/caption, nunca na arte.';
 function imageRecipe(id: string, title: string, category: string, description: string, carousel: string, single: string, visualDirection: string): PromptRecipe {
   return {
     id, title, kind: 'image', category, description, visualDirection,
-    prompt: `Crie um carrossel sobre {{topic}}. ${carousel} ${IMAGE_CONTENT_RULES} Entregue exatamente {{pageCount}} slides, com sequência coerente e CTA “{{callToAction}}” no encerramento.`,
-    singlePrompt: `Crie exatamente uma única arte sobre {{topic}} para {{format}}. ${single} Na arte, escreva apenas um headline curto e um body/subtítulo conciso, sem listas, passos, dicas detalhadas, fontes, ressalvas longas ou CTA de publicação; entregue o restante como copy/caption de publicação separada. Inclua a chamada “{{callToAction}}” somente na copy/caption, nunca na arte. ${IMAGE_CONTENT_RULES} Não crie carrossel, sequência, páginas extras nem instruções de publicação.`,
+    prompt: `Crie um carrossel sobre {{topic}}. ${carousel} ${CAROUSEL_STRUCTURE_RULE} ${IMAGE_CONTENT_RULES} Entregue exatamente {{pageCount}} slides, com sequência coerente e CTA “{{callToAction}}” no encerramento.`,
+    singlePrompt: `Crie exatamente uma única arte sobre {{topic}} para {{format}}. ${single} ${SINGLE_STRUCTURE_MARKER} ${IMAGE_CONTENT_RULES} Não crie carrossel, sequência, páginas extras nem instruções de publicação.`,
   };
 }
 const VIDEO_OUTPUT_RULES = 'Crie somente roteiro/storyboard para VideoGo, sem gerar áudio nem renderizar. Entregue storyboard válido no formato já usado pelo projeto. Em cada cena, escreva narration e spokenText com as mesmas palavras faladas, onScreen conciso que complemente (não transcreva) a fala, duration e visual coerentes; use tags de locução Eleven v4 e IPA apenas em spokenText quando necessário. Planeje audio.sfx como notas e mantenha sfxCues vazio sem arquivos reais; trilha discreta sob a voz. {{brandImagePolicy}} Nunca invente capturas, clientes, depoimentos, dados, logotipos ou resultados. Inclua fontes verificáveis para afirmações factuais.';
@@ -273,7 +278,9 @@ export function formatDescription(format: ProjectFormatId): string {
   return FORMAT_DESCRIPTIONS[format];
 }
 export function composePrompt(recipe: PromptRecipe, input: PromptInputs): string {
-  const template = recipe.kind === 'image' && !input.format.startsWith('carousel-') && recipe.singlePrompt ? recipe.singlePrompt : recipe.prompt;
+  const template = recipe.kind === 'image' && !input.format.startsWith('carousel-') && recipe.singlePrompt
+    ? recipe.singlePrompt.replace(SINGLE_STRUCTURE_MARKER, input.format.startsWith('post-') ? POST_SINGLE_STRUCTURE : STORY_SINGLE_STRUCTURE)
+    : recipe.prompt;
   return `${interpolatePrompt(template, input)}\n\nFormato obrigatório: ${formatDescription(input.format)}. Respeite proporção, dimensões e áreas seguras; não converta para outro formato.`;
 }
 
