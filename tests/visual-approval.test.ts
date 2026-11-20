@@ -52,7 +52,7 @@ async function withReviewableProject(run: (fixture: ReviewableProject) => Promis
     const pages = (native.pages as Record<string, unknown>[]).map((page, index) => {
       const headline = `Título da página ${index + 1}`;
       const body = `Resumo curto da página ${index + 1}.`;
-      const copy = `Copy editorial da página ${index + 1}.`;
+      const copy = `Copy editorial da página ${index + 1}.\n\n#tema #assunto #dicas #conteudo #social`;
       const visualFunction = `Função visual da página ${index + 1}.`;
       const promptFile = String(page.prompt_file);
       return { ...page, headline, body, copy, visual_function: visualFunction, depicted_person: 'none', prompt_file: promptFile };
@@ -203,16 +203,40 @@ test('a dash in the headline or copy blocks the review and the approval until it
 
   let detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
   assert.equal(detail.visualReview?.ready, false);
-  assert.ok(detail.visualReview?.blocking.includes('Página 1: a headline tem travessão. Reescreva sem travessão: use vírgula, ponto, dois-pontos ou parênteses.'));
-  assert.ok(detail.visualReview?.blocking.some(item => item.startsWith('Página 1: a copy tem travessão.')));
+  assert.equal(detail.visualReview?.blocking.filter(item => item.startsWith('Página 1: ') && item.includes('Reescreva sem travessão')).length, 2, 'título e legenda com travessão bloqueiam a página 1');
   assert.equal(detail.visualReview?.blocking.some(item => item.startsWith('Página 2:')), false);
   await assert.rejects(runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }), /Ainda não é seguro aprovar/);
 
-  native.pages[0]!.copy = 'Copy sem travessão na página 1.';
+  native.pages[0]!.copy = 'Copy sem travessão na página 1.\n\n#tema #assunto #dicas #conteudo #social';
   native.pages[0]!.headline = 'Título limpo';
   await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
   await writeFile(promptPath, `## Texto na arte\nHeadline: ${native.pages[0]!.headline}\nBody: ${native.pages[0]!.body}\n\n## Composição\n${native.pages[0]!.visual_function}\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\n${native.pages[0]!.copy}\n`);
   detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
   assert.equal(detail.visualReview?.ready, true);
   assert.deepEqual(detail.visualReview?.blocking, []);
+}));
+
+test('a caption without exactly 5 hashtags blocks the review and the approval until it is fixed', () => withReviewableProject(async ({ runtime, project, pages, projectJsonPath }) => {
+  const promptPath = join(project.path, String(pages[0]!.prompt_file));
+  const native = JSON.parse(await readFile(projectJsonPath, 'utf8')) as { pages: { headline: string; body: string; copy: string; visual_function: string }[] };
+  const writeCaption = async (copy: string) => {
+    native.pages[0]!.copy = copy;
+    await writeFile(projectJsonPath, `${JSON.stringify(native, null, 2)}\n`);
+    await writeFile(promptPath, `## Texto na arte\nHeadline: ${native.pages[0]!.headline}\nBody: ${native.pages[0]!.body}\n\n## Composição\n${native.pages[0]!.visual_function}\n\n## Copy para publicação/legenda, NÃO imprimir na arte:\n${copy}\n`);
+    return runtime.invoke('projects.detail', { id: project.id }) as Promise<ProjectDetail>;
+  };
+
+  let detail = await writeCaption('Legenda sem hashtags.');
+  assert.equal(detail.visualReview?.ready, false);
+  assert.ok(detail.visualReview?.blocking.some(item => item.startsWith('Página 1: A legenda precisa terminar com uma linha de exatamente 5 hashtags')), detail.visualReview?.blocking.join(' | '));
+  assert.equal(detail.visualReview?.blocking.some(item => item.startsWith('Página 2:')), false);
+  await assert.rejects(runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }), /Ainda não é seguro aprovar/);
+
+  detail = await writeCaption('Legenda com quatro.\n\n#um #dois #tres #quatro');
+  assert.equal(detail.visualReview?.ready, false);
+
+  detail = await writeCaption('Legenda completa.\n\n#um #dois #tres #quatro #cinco');
+  assert.equal(detail.visualReview?.ready, true, detail.visualReview?.blocking.join(' | '));
+  const approved = await runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }) as ProjectDetail;
+  assert.equal(approved.visualReview?.approved, true);
 }));

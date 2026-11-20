@@ -53,7 +53,7 @@ test('carousel generation with empty pages stops before creating a round, contex
   let engineCalls = 0;
   runtime.services.run = async () => { engineCalls += 1; throw new Error('O motor não deve iniciar com páginas vazias.'); };
   try {
-    await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true }), /copy de publicação vazia/);
+    await assert.rejects(runtime.invoke('agents.generateImages', { id: project.id, confirm: true }), /Página 1: .*vazi/);
     assert.equal(engineCalls, 0);
     assert.deepEqual(await entriesOf(join(project.path, 'generated', 'runs')), []);
     assert.deepEqual(await entriesOf(join(project.path, '.studio-context')), []);

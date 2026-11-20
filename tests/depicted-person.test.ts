@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
-import { approvedPortraitAt, composeEnginePrompt, engineClientId, postnowHome, preparePostNowGeneration } from '../src/main/content/postnow.js';
+import { approvedPortraitAt, clearMirroredPortrait, composeEnginePrompt, engineClientId, postnowHome, preparePostNowGeneration, withMirroredPortrait } from '../src/main/content/postnow.js';
 import { Runtime } from '../src/main/runtime.js';
 import type { Brand, Project, ProjectDetail } from '../src/shared/contracts.js';
 import { brandImageOptOutIssues, portraitDiversityIssues, portraitPlanIssues, portraitRequiredPages } from '../src/shared/depicted-person.js';
@@ -78,7 +78,7 @@ async function carouselWithIdentities(root: string, identity: (index: number) =>
     ...page,
     headline: `Título da página ${index + 1}`,
     body: `Resumo curto da página ${index + 1}.`,
-    copy: `Copy editorial da página ${index + 1}.`,
+    copy: `Copy editorial da página ${index + 1}.\n\n#tema #assunto #dicas #conteudo #social`,
     visual_function: `Função visual da página ${index + 1}.`,
     depicted_person: identity(index),
   }));
@@ -172,7 +172,8 @@ test('portraitRequiredPages covers the carousel cover and closing page, or the s
 
 test('portraitPlanIssues blocks client_portrait without an approved portrait and missing client pages when there is one', () => {
   const none = ['none', 'none', 'none', 'none', 'none'];
-  assert.deepEqual(portraitPlanIssues('carousel', ['client_portrait', ...none.slice(1)], false), ['Página 1: Cliente (retrato aprovado) exige um retrato aprovado no perfil PostNow da marca. Cadastre-o com `postnow client set-portrait`.']);
+  assert.equal(portraitPlanIssues('carousel', ['client_portrait', ...none.slice(1)], false).length, 1);
+  assert.match(portraitPlanIssues('carousel', ['client_portrait', ...none.slice(1)], false)[0]!, /^Página 1: /);
   assert.deepEqual(portraitPlanIssues('carousel', none, false), []);
   assert.equal(portraitPlanIssues('carousel', none, true).length, 2);
   assert.match(portraitPlanIssues('carousel', none, true)[0]!, /^Página 1: com retrato aprovado/);
@@ -225,6 +226,67 @@ test('approvedPortraitAt repairs a legacy portrait profile without dropping its 
     assert.equal(repaired.brand.owner_portrait, 'references/portrait.png');
   } finally {
     await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('approvedPortraitAt never guesses the portrait from a file name; only the brand photo marked as portrait counts', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'mdc-portrait-flag-home-'));
+  const source = await mkdtemp(join(tmpdir(), 'mdc-portrait-flag-src-'));
+  const slide = join(source, '02-ideia-01-whatsapp.png');
+  const face = join(source, 'retrato-cliente.png');
+  const base = { id: '5e90b759-01c1-41c2-874d-edf468c74020', name: 'Fernando Bolzan', tone: '', colors: [] };
+  const photo = (name: string, path: string, portrait = false) => ({ id: name, name, path, kind: 'image' as const, url: '', ...(portrait ? { portrait: true } : {}) });
+  try {
+    await writeFile(slide, ONE_PIXEL_PNG);
+    await writeFile(face, ONE_PIXEL_PNG);
+    assert.equal(await approvedPortraitAt(home, { ...base, references: [photo('02-ideia-01-whatsapp.png', slide)] } as Brand), undefined);
+    assert.equal(await approvedPortraitAt(home, { ...base, references: [photo('retrato-cliente.png', face)] } as Brand), undefined);
+    assert.equal(await approvedPortraitAt(home, { ...base, references: [photo('02-ideia-01-whatsapp.png', slide), photo('retrato-cliente.png', face, true)] } as Brand), 'references/retrato-cliente.png');
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    await rm(source, { recursive: true, force: true });
+  }
+});
+
+test('a portrait copied into the engine profile from a brand photo follows the brand mark: shown, replaced and cleared', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'mdc-portrait-mirror-home-'));
+  const source = await mkdtemp(join(tmpdir(), 'mdc-portrait-mirror-src-'));
+  const slide = join(source, '0430f342-slide.png');
+  const face = join(source, 'face.png');
+  const base = { id: '5e90b759-01c1-41c2-874d-edf468c74020', name: 'Fernando Bolzan', tone: '', colors: [] };
+  const photo = (name: string, path: string, portrait = false) => ({ id: name, name, path, kind: 'image' as const, url: '', ...(portrait ? { portrait: true } : {}) });
+  const profileDir = join(home, 'clients', engineClientId(base as Brand));
+  const profilePath = join(profileDir, 'profile.json');
+  const ownerPortrait = async () => (JSON.parse(await readFile(profilePath, 'utf8')) as { brand: { owner_portrait?: string; reference_images: string[] } }).brand;
+  try {
+    await mkdir(profileDir, { recursive: true });
+    await writeFile(slide, ONE_PIXEL_PNG);
+    await writeFile(face, ONE_PIXEL_PNG);
+    const stale = { ...base, references: [photo('slide', slide), photo('face', face)] } as Brand;
+    await writeFile(profilePath, JSON.stringify({ brand: { owner_portrait: 'references/0430f342-slide.png', reference_images: ['references/0430f342-slide.png'] } }));
+
+    const shown = await withMirroredPortrait(home, stale);
+    assert.deepEqual(shown.references.filter(ref => ref.portrait).map(ref => ref.name), ['slide'], 'o retrato antigo do perfil aparece marcado na marca');
+
+    const marked = { ...base, references: [photo('slide', slide), photo('face', face, true)] } as Brand;
+    assert.equal(await approvedPortraitAt(home, marked), 'references/face.png', 'a foto marcada vale mais que o perfil antigo');
+    const replaced = await ownerPortrait();
+    assert.equal(replaced.owner_portrait, 'references/face.png');
+    assert.deepEqual(replaced.reference_images, ['references/face.png']);
+
+    await clearMirroredPortrait(home, { ...base, references: [photo('slide', slide)] } as Brand);
+    assert.equal((await ownerPortrait()).owner_portrait, 'references/face.png', 'só limpa quando o retrato do perfil é cópia de uma foto da marca');
+    await clearMirroredPortrait(home, marked);
+    assert.equal((await ownerPortrait()).owner_portrait, undefined);
+    assert.equal(await approvedPortraitAt(home, stale), undefined, 'sem marca e sem retrato no perfil, não há retrato');
+
+    await writeFile(profilePath, JSON.stringify({ brand: { owner_portrait: 'references/cadastrado-no-motor.jpg' } }));
+    await clearMirroredPortrait(home, marked);
+    assert.equal((await ownerPortrait()).owner_portrait, 'references/cadastrado-no-motor.jpg', 'retrato cadastrado fora da marca é preservado');
+    assert.equal(await approvedPortraitAt(home, stale), 'references/cadastrado-no-motor.jpg');
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    await rm(source, { recursive: true, force: true });
   }
 });
 
@@ -291,7 +353,7 @@ test('client_portrait without an approved portrait in the engine profile blocks 
     const detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
     const blocking = detail.visualReview?.blocking ?? [];
     assert.equal(detail.visualReview?.ready, false);
-    assert.ok(blocking.some((item) => item.startsWith('Página 1: Cliente (retrato aprovado) exige um retrato aprovado')), blocking.join(' | '));
+    assert.ok(blocking.some((item) => item.startsWith('Página 1: ')), blocking.join(' | '));
   } finally {
     await runtime.dispose();
     await rm(root, { recursive: true, force: true });

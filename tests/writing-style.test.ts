@@ -41,7 +41,7 @@ test('every library prompt and Studio rule reaches the agent free of dashes', ()
 });
 
 test('text the person edits is refused when it carries a dash', () => {
-  const page = { page: 1, headline: 'Guarda e convivência', body: 'Resumo simples.', copy: 'Texto simples.', depictedPerson: 'none' };
+  const page = { page: 1, headline: 'Guarda e convivência', body: 'Resumo simples.', copy: 'Texto simples.\n\n#guarda #familia #direito #filhos #convivencia', depictedPerson: 'none' };
   assert.deepEqual(validateVisualTextPages([page], 1).errors, []);
   assert.match(validateVisualTextPages([{ ...page, headline: `Guarda ${EM} convivência` }], 1).errors.join(' '), /Página 1: Reescreva sem travessão/);
   assert.match(validateVisualTextPages([{ ...page, copy: `Texto ${EN} com dash.` }], 1).errors.join(' '), /Página 1: Reescreva sem travessão/);

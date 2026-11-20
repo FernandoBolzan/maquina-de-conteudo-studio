@@ -6,7 +6,7 @@ import { basename, dirname, extname, join, relative } from 'node:path';
 import { postNowFormatAcceptsPageCount, type Asset, type Brand, type BrandReference, type FormatAdaptation, type GenerationBatch, type LocalVoiceEngine, type LocalVoiceSelection, type NarrationMode, type NarrationProvider, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type VisualGenerationReview, type VisualStyle } from '../shared/contracts.js';
 import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, formatCanvas, isPostNowFormat, pagesRangeFor, type PostNowKind } from '../shared/formats.js';
 import { brandImageOptOutIssues, depictedPersonPolicyIssues, isDepictedPerson, isDepictedPersonPolicy, portraitDiversityIssues, portraitPlanIssues } from '../shared/depicted-person.js';
-import { applyArtText, captionMirror, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, type VisualTextEditPage, type VisualTextEditScene } from '../shared/visual-text.js';
+import { applyArtText, captionHashtagIssue, captionMirror, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, type VisualTextEditPage, type VisualTextEditScene } from '../shared/visual-text.js';
 import { composeVideoStyle, visualStyleFor } from '../shared/prompt-library.js';
 import { isImageBackgroundMode, resolveImageBackgroundMode } from '../shared/image-background.js';
 import { isLogoPolicy, type LogoPolicy } from '../shared/logo-policy.js';
@@ -18,7 +18,7 @@ import { resolveTool, toolEnvironment } from './setup.js';
 import { atomicJson, atomicText, copyLocal, directory, fingerprint, inside, localPath, missing, object, privateWorkspaceDirectory, readJson, requireIdle, reserveProject, safeId, safePath, serialized, UUID, walk, workspace } from './content/storage.js';
 import { initializeNative, secureStoryboard, storyboard, type StoryboardSourceScene } from './content/native.js';
 import { buildInventory, executeDeletion, findNativeCopies, hasPendingDeletions, previewDeletion, recoverDeletions, requireNoPendingDeletion, type DeletionInventory, type RecoveredDeletion } from './content/lifecycle.js';
-import { approvedPortraitAt, finalizePostNowBatch, nextImageBatchId, postnowHome, readBatchStatus, writeBatchStatus } from './content/postnow.js';
+import { approvedPortraitAt, clearMirroredPortrait, finalizePostNowBatch, nextImageBatchId, postnowHome, readBatchStatus, withMirroredPortrait, writeBatchStatus } from './content/postnow.js';
 import { listElevenLabsVoices } from './elevenlabs.js';
 import type { NarrationAudioSource } from '../shared/contracts.js';
 import { isNarrationAudioSource, narrationGate, parseNarrationAttachSource } from '../shared/narration.js';
@@ -34,7 +34,7 @@ interface NarrationAudio { scenes: Record<string, NarrationAudioEntry>; history?
 interface LegacyNarrationAudio { hash: string; assetPaths: string[]; }
 interface VisualApproval { hash: string; approvedAt: string; }
 interface StoredFormatAdaptation extends FormatAdaptation { snapshotId: string; }
-interface StoredProject { project: Project; folderName: string; notes: string; approvals: Record<string, string>; imagePageCount?: number; redo?: Record<string, { stamp: string; note: string }>; visualApproval?: VisualApproval; formatAdaptation?: StoredFormatAdaptation; narrationSchemaVersion?: 1; narrationProvider?: NarrationProvider; localVoice?: LocalVoiceSelection; narrationMode?: NarrationMode; narrationApproval?: NarrationApproval; narrationAudio?: NarrationAudio; legacyNarrationAudio?: LegacyNarrationAudio; }
+interface StoredProject { project: Project; folderName: string; notes: string; /** Pedido que a pessoa escreveu ao preparar os textos; as etapas de gerar e refazer continuam obedecendo a ele. */ directive?: string; approvals: Record<string, string>; imagePageCount?: number; redo?: Record<string, { stamp: string; note: string }>; visualApproval?: VisualApproval; formatAdaptation?: StoredFormatAdaptation; narrationSchemaVersion?: 1; narrationProvider?: NarrationProvider; localVoice?: LocalVoiceSelection; narrationMode?: NarrationMode; narrationApproval?: NarrationApproval; narrationAudio?: NarrationAudio; legacyNarrationAudio?: LegacyNarrationAudio; }
 interface MappedImagePage { page: number; input: string; output: string; native?: string; }
 interface AssetDeletionTarget { scope: 'project' | 'postnow'; path: string; }
 interface AssetDeletionJournal {
@@ -287,7 +287,7 @@ async function load(root: string, id: string): Promise<StoredProject> {
         : POSTNOW_FORMATS[project.format].kind === 'carousel' ? 5 : 1;
     }
   }
-  return { project, folderName, notes: data.notes, approvals, redo, visualApproval, formatAdaptation, imagePageCount, narrationSchemaVersion: 1, narrationProvider, localVoice, narrationMode, narrationApproval, narrationAudio, legacyNarrationAudio };
+  return { project, folderName, notes: data.notes, directive: typeof data.directive === 'string' && data.directive.trim() ? data.directive : undefined, approvals, redo, visualApproval, formatAdaptation, imagePageCount, narrationSchemaVersion: 1, narrationProvider, localVoice, narrationMode, narrationApproval, narrationAudio, legacyNarrationAudio };
 }
 async function save(root: string, stored: StoredProject): Promise<void> {
   const { legacyNarrationAudio, ...record } = stored;
@@ -678,8 +678,17 @@ async function saveVisualPreferences(root: string, stored: StoredProject, payloa
   if (stored.project.kind !== 'image' && (payload.imageBackgroundMode !== undefined || payload.logoPolicy !== undefined)) {
     throw new Error('Fundo e logo só podem ser configurados em projetos PostNow.');
   }
-  if (payload.imageBackgroundMode === undefined && payload.useBrandImages === undefined && payload.logoPolicy === undefined && payload.depictedPersonPolicy === undefined) {
+  if (payload.imageBackgroundMode === undefined && payload.useBrandImages === undefined && payload.logoPolicy === undefined && payload.depictedPersonPolicy === undefined && payload.brandId === undefined) {
     throw new Error('Selecione ao menos uma preferência visual para salvar.');
+  }
+  if (payload.brandId !== undefined) {
+    if (payload.brandId === null || payload.brandId === '') delete stored.project.brandId;
+    else {
+      if (typeof payload.brandId !== 'string') throw new Error('Escolha uma marca válida.');
+      const brandId = safeId(payload.brandId);
+      if (!(await listBrands(services)).some(item => item.id === brandId)) throw new Error('A marca escolhida não existe mais.');
+      stored.project.brandId = brandId;
+    }
   }
   if (payload.imageBackgroundMode !== undefined) {
     const brand = stored.project.brandId ? (await listBrands(services)).find(item => item.id === stored.project.brandId) : undefined;
@@ -728,7 +737,7 @@ async function saveVisualText(root: string, payload: Record<string, unknown>, se
     const previous = { headline: typeof page.headline === 'string' ? page.headline : '', body: typeof page.body === 'string' ? page.body : '', copy: typeof page.copy === 'string' ? page.copy : '' };
     const art = applyArtText(currentArt, previous, { headline: fields.headline, body: fields.body, copy: fields.copy });
     if (art.missing.length) {
-      const labels = art.missing.map(field => field === 'headline' ? 'o título atual' : field === 'body' ? 'o subtítulo atual' : 'a copy atual').join(', ');
+      const labels = art.missing.map(field => field === 'headline' ? 'o título atual' : field === 'body' ? 'o subtítulo atual' : 'a legenda atual').join(', ');
       throw new Error(`Página ${index + 1}: não encontrei ${labels} no arquivo de arte, então a arte não acompanharia a mudança. Use Preparar textos para o agente refazer esta página.`);
     }
     if (Object.entries(fields).some(([key, value]) => page[key] !== value) || art.text !== currentArt) textChanged = true;
@@ -1250,7 +1259,7 @@ async function brandAt(root: string, id: string, services?: Services): Promise<B
       if (!(await lstat(refPath)).isFile()) continue;
       const kind = refKinds[extname(refPath).toLowerCase()];
       if (!kind) continue;
-      brand.references.push({ id: refId, name: refName, path: refPath, kind, url: services ? services.assetUrl(refPath) : '' });
+      brand.references.push({ id: refId, name: refName, path: refPath, kind, url: services ? services.assetUrl(refPath) : '', ...(entry.portrait === true && kind === 'image' ? { portrait: true } : {}), ...(entry.element === true && entry.portrait !== true && kind === 'image' ? { element: true } : {}) });
     }
   }
   return brand;
@@ -1258,7 +1267,8 @@ async function brandAt(root: string, id: string, services?: Services): Promise<B
 export async function listBrands(services: Services): Promise<Brand[]> {
   const root = await workspace(services);
   const brands: Brand[] = [];
-  for (const id of await ids(root, 'brands')) brands.push(await brandAt(root, id, services));
+  const home = await postnowHome(services);
+  for (const id of await ids(root, 'brands')) brands.push(await withMirroredPortrait(home, await brandAt(root, id, services)));
   return brands.sort((a, b) => a.name.localeCompare(b.name));
 }
 interface InternalVisualReview extends VisualGenerationReview { contentHash: string; }
@@ -1296,19 +1306,23 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
     const visualFunction = typeof page.visual_function === 'string' ? page.visual_function : '';
     const headline = typeof page.headline === 'string' ? page.headline : '';
     const body = typeof page.body === 'string' ? page.body : '';
-    if (!copy.trim()) blocking.push(`Página ${index + 1}: copy de publicação vazia.`);
+    if (!copy.trim()) blocking.push(`Página ${index + 1}: legenda da publicação vazia.`);
+    else {
+      const hashtagIssue = captionHashtagIssue(copy);
+      if (hashtagIssue) blocking.push(`Página ${index + 1}: ${hashtagIssue} Use Preparar textos ou edite a legenda em Textos.`);
+    }
     if (!headline.trim()) blocking.push(`Página ${index + 1}: título da arte vazio. Use Preparar textos para o agente definir o texto visual.`);
     if (headline.length > 80) blocking.push(`Página ${index + 1}: o título da arte excede 80 caracteres.`);
     if (!body.trim()) blocking.push(`Página ${index + 1}: subtítulo da arte vazio. Use Preparar textos para o agente definir o texto visual.`);
     if (body.length > 180) blocking.push(`Página ${index + 1}: o subtítulo da arte excede 180 caracteres.`);
-    if (hasDash(headline)) blocking.push(`Página ${index + 1}: a headline tem travessão. ${DASH_ERROR}`);
+    if (hasDash(headline)) blocking.push(`Página ${index + 1}: o título tem travessão. ${DASH_ERROR}`);
     if (hasDash(body)) blocking.push(`Página ${index + 1}: o subtítulo tem travessão. ${DASH_ERROR}`);
-    if (hasDash(copy)) blocking.push(`Página ${index + 1}: a copy tem travessão. ${DASH_ERROR}`);
+    if (hasDash(copy)) blocking.push(`Página ${index + 1}: a legenda tem travessão. ${DASH_ERROR}`);
     if (!visualFunction.trim()) blocking.push(`Página ${index + 1}: função visual vazia. Use Preparar textos para o agente refazer esta página.`);
     if (visualFunction.trim() && !prompt.includes(visualFunction)) blocking.push(`Página ${index + 1}: a função visual não está no arquivo de arte. Use Preparar textos para o agente refazer esta página.`);
     if (headline.trim() && !prompt.includes(headline)) blocking.push(`Página ${index + 1}: o título não está no arquivo de arte. Use Preparar textos para o agente refazer esta página.`);
     if (body.trim() && !prompt.includes(body)) blocking.push(`Página ${index + 1}: o subtítulo não está no arquivo de arte. Use Preparar textos para o agente refazer esta página.`);
-    if (copy.trim() && captionMirror(prompt)?.trim() !== copy.trim()) blocking.push(`Página ${index + 1}: a copy da legenda não corresponde ao campo de publicação. Use Preparar textos para o agente refazer esta página.`);
+    if (copy.trim() && captionMirror(prompt)?.trim() !== copy.trim()) blocking.push(`Página ${index + 1}: a legenda não corresponde ao campo de publicação. Use Preparar textos para o agente refazer esta página.`);
     const depictedPerson = typeof page.depicted_person === 'string' ? page.depicted_person : '';
     if (!isDepictedPerson(depictedPerson)) blocking.push(`Página ${index + 1}: defina quem aparece na arte (Ninguém, Outra pessoa ou Cliente (retrato aprovado)).`);
     pages.push({ page: index + 1, headline, body, copy, depictedPerson });
@@ -1362,7 +1376,8 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
     }
   } catch { blocking.push('O storyboard editorial está ausente.'); }
   const brand = stored.project.brandId ? (await listBrands(services)).find(item => item.id === stored.project.brandId) : undefined;
-  if (!brand?.logo || !brand.logo.toLowerCase().endsWith('.png')) blocking.push('Cadastre uma logo oficial PNG na marca antes de gerar.');
+  if (!brand) blocking.push('Vincule uma marca ao projeto antes de gerar.');
+  else if (!brand.logo || !brand.logo.toLowerCase().endsWith('.png')) blocking.push('Cadastre uma logo oficial PNG na marca antes de gerar.');
   let logoHash = '';
   if (brand?.logo) {
     try {
@@ -1550,6 +1565,20 @@ export async function commitImageRevision(root: string, id: string, input: { pre
     }
     await save(root, stored);
   });
+}
+/** Direção que a pessoa deu ao projeto (instruções e pedido ao preparar os textos); lida pelas etapas de gerar e refazer imagens. Chame somente sob `serialized(root)` (ex.: handleAgents); não aninhe. */
+export async function readPersonDirection(root: string, id: string): Promise<{ notes: string; directive: string }> {
+  const stored = await load(root, safeId(id));
+  return { notes: stored.notes, directive: stored.directive ?? '' };
+}
+/** Guarda o pedido que a pessoa escreveu ao preparar os textos; pedido vazio não apaga o anterior. Chame somente sob `serialized(root)`; não aninhe. */
+export async function recordPersonDirective(root: string, id: string, directive: string): Promise<void> {
+  const value = directive.trim();
+  if (!value) return;
+  const stored = await load(root, safeId(id));
+  if (stored.directive === value) return;
+  stored.directive = value;
+  await save(root, stored);
 }
 async function detail(root: string, stored: StoredProject, services: Services): Promise<ProjectDetail> {
   const assets: Asset[] = [];
@@ -1804,6 +1833,26 @@ async function create(root: string, payload: Record<string, unknown>): Promise<S
   const imagePageCount = kind === 'image' ? pageCount ?? (POSTNOW_FORMATS[format as PostNowFormatId].kind === 'carousel' ? 5 : 1) : undefined;
   return { project, folderName: folder.folderName, notes: '', approvals: {}, imagePageCount, narrationSchemaVersion: 1, narrationProvider: 'elevenlabs' };
 }
+/** Define o papel da imagem da marca: retrato da cliente ou elemento para a arte. Só imagens têm papel e um papel exclui o outro. */
+function withReferenceRole(ref: BrandReference, item: unknown): BrandReference {
+  const portrait = wantsPortrait(item);
+  const element = wantsElement(item);
+  if (portrait && element) throw new Error('Uma foto não pode ser retrato da cliente e elemento da arte ao mesmo tempo.');
+  const next: BrandReference = { ...ref };
+  delete next.portrait;
+  delete next.element;
+  if (ref.kind === 'image') {
+    if (portrait) next.portrait = true;
+    if (element) next.element = true;
+  }
+  return next;
+}
+function wantsPortrait(item: unknown): boolean {
+  return typeof item === 'object' && item !== null && 'portrait' in item && item.portrait === true;
+}
+function wantsElement(item: unknown): boolean {
+  return typeof item === 'object' && item !== null && 'element' in item && item.element === true;
+}
 async function saveBrand(root: string, payload: Record<string, unknown>, services: Services): Promise<Brand> {
   const id = payload.id === undefined ? randomUUID() : safeId(payload.id);
   const existing = payload.id === undefined ? undefined : await brandAt(root, id, services);
@@ -1836,7 +1885,7 @@ async function saveBrand(root: string, payload: Record<string, unknown>, service
       if (!rawPath) throw new Error('Referência inválida.');
       const kept = existing?.references.find(ref => ref.path === rawPath);
       if (kept) {
-        brand.references.push(kept);
+        brand.references.push(withReferenceRole(kept, item));
         continue;
       }
       const source = await safePath(rawPath);
@@ -1847,17 +1896,21 @@ async function saveBrand(root: string, payload: Record<string, unknown>, service
       const target = await localPath(root, join('brands', id, 'references', `${refId}${extension}`));
       await copyLocal(source, target);
       const refName = singleLine((item && typeof item === 'object' && 'name' in item && typeof item.name === 'string' && item.name.trim()) ? item.name : basename(source));
-      brand.references.push({ id: refId, name: refName.slice(0, 160), path: target, kind, url: services.assetUrl(target) });
+      brand.references.push(withReferenceRole({ id: refId, name: refName.slice(0, 160), path: target, kind, url: services.assetUrl(target) }, item));
     }
   }
+  if (brand.references.filter(ref => ref.portrait).length > 1) throw new Error('Escolha apenas uma foto como retrato da cliente.');
   await atomicJson(join(root, '.studio', 'brands', `${id}.json`), {
     id: brand.id,
     name: brand.name,
     tone: brand.tone,
     colors: brand.colors,
     ...(brand.logo ? { logo: brand.logo } : {}),
-    references: brand.references.map(({ id: rId, name: rName, path: rPath, kind: rKind }) => ({ id: rId, name: rName, path: rPath, kind: rKind })),
+    references: brand.references.map(ref => ({ id: ref.id, name: ref.name, path: ref.path, kind: ref.kind, ...(ref.portrait ? { portrait: true } : {}), ...(ref.element ? { element: true } : {}) })),
   });
+  if (Array.isArray(payload.references) && !brand.references.some(ref => ref.portrait)) {
+    await clearMirroredPortrait(await postnowHome(services), { ...brand, references: [...brand.references, ...(existing?.references ?? [])] });
+  }
   return brand;
 }
 async function importProject(root: string, payload: Record<string, unknown>): Promise<StoredProject> {

@@ -404,7 +404,7 @@ test('Mobile creation advances journey steps from brief to texts and images', as
     const initialPages = (native.pages as Record<string, unknown>[]).map((page, index) => {
       const headline = `Título da página ${index + 1}`;
       const body = `Resumo curto da página ${index + 1}.`;
-      const copy = `Copy editorial da página ${index + 1}.`;
+      const copy = `Copy editorial da página ${index + 1}.\n\n#tema #assunto #dicas #conteudo #social`;
       const visual_function = index === 0 ? 'Capa com tipografia de destaque' : index === 2 ? 'Fechamento com checklist e chamada' : 'Card central explicativo';
       return { ...page, headline, body, copy, visual_function, depicted_person: 'none' };
     });
@@ -415,9 +415,9 @@ test('Mobile creation advances journey steps from brief to texts and images', as
     }
     // 3. Save visual texts from mobile (updating headline).
     const updatedPages = [
-      { page: 1, headline: 'Novo Título Capa', body: 'Resumo curto da página 1.', copy: 'Copy editorial da página 1.', depictedPerson: 'none' },
-      { page: 2, headline: 'Título da página 2', body: 'Resumo curto da página 2.', copy: 'Copy editorial da página 2.', depictedPerson: 'none' },
-      { page: 3, headline: 'Título da página 3', body: 'Resumo curto da página 3.', copy: 'Copy editorial da página 3.', depictedPerson: 'none' },
+      { page: 1, headline: 'Novo Título Capa', body: 'Resumo curto da página 1.', copy: 'Copy editorial da página 1.\n\n#tema #assunto #dicas #conteudo #social', depictedPerson: 'none' },
+      { page: 2, headline: 'Título da página 2', body: 'Resumo curto da página 2.', copy: 'Copy editorial da página 2.\n\n#tema #assunto #dicas #conteudo #social', depictedPerson: 'none' },
+      { page: 3, headline: 'Título da página 3', body: 'Resumo curto da página 3.', copy: 'Copy editorial da página 3.\n\n#tema #assunto #dicas #conteudo #social', depictedPerson: 'none' },
     ];
     const saveRes = await fetch(`${baseUrl}/api/projects/${projectId}/action`, {
       method: 'POST',

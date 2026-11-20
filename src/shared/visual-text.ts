@@ -23,6 +23,21 @@ export function headlineWordCount(headline: string): number {
   return headline.trim().split(/\s+/).filter(Boolean).length;
 }
 
+/** Toda legenda de publicação termina com uma última linha de exatamente este número de hashtags. */
+export const CAPTION_HASHTAG_COUNT = 5;
+/** Instrução enviada à IA que escreve legendas. */
+export const CAPTION_HASHTAG_RULE = `HASHTAGS OBRIGATÓRIAS: termine toda legenda ou descrição com uma última linha contendo exatamente ${CAPTION_HASHTAG_COUNT} hashtags relacionadas ao tema, em português, diferentes entre si e separadas por espaço (ex.: #tema #assunto). Nenhum texto depois delas e nenhuma outra hashtag fora dessa linha.`;
+export const CAPTION_HASHTAG_ERROR = `A legenda precisa terminar com uma linha de exatamente ${CAPTION_HASHTAG_COUNT} hashtags relacionadas, diferentes entre si.`;
+/** Texto de erro quando a última linha da legenda não é exatamente 5 hashtags diferentes; undefined quando está certo. */
+export function captionHashtagIssue(copy: string): string | undefined {
+  const lines = copy.trim().split(/\r?\n/);
+  const tokens = (lines[lines.length - 1] ?? '').trim().split(/\s+/).filter(Boolean);
+  const valid = tokens.length === CAPTION_HASHTAG_COUNT
+    && tokens.every(token => /^#[\p{L}\p{N}_]+$/u.test(token))
+    && new Set(tokens.map(token => token.toLowerCase())).size === CAPTION_HASHTAG_COUNT;
+  return valid ? undefined : CAPTION_HASHTAG_ERROR;
+}
+
 /** Regras de uma página, aplicáveis a rascunhos incompletos (campos podem estar vazios ou inválidos). */
 export function visualTextPageIssues(page: Partial<Record<VisualTextField, unknown>>): VisualTextPageIssues {
   const errors: VisualTextIssue[] = [];
@@ -40,8 +55,12 @@ export function visualTextPageIssues(page: Partial<Record<VisualTextField, unkno
   else if (body.length > VISUAL_TEXT_LIMITS.body) errors.push({ field: 'body', message: `O subtítulo tem no máximo ${VISUAL_TEXT_LIMITS.body} caracteres.` });
   if (hasDash(body)) errors.push({ field: 'body', message: DASH_ERROR });
   const copy = typeof page.copy === 'string' ? page.copy.trim() : '';
-  if (!copy) errors.push({ field: 'copy', message: 'Informe a copy.' });
-  else if (copy.length > VISUAL_TEXT_LIMITS.copy) errors.push({ field: 'copy', message: `A copy tem no máximo ${VISUAL_TEXT_LIMITS.copy} caracteres.` });
+  if (!copy) errors.push({ field: 'copy', message: 'Informe a legenda.' });
+  else if (copy.length > VISUAL_TEXT_LIMITS.copy) errors.push({ field: 'copy', message: `A legenda tem no máximo ${VISUAL_TEXT_LIMITS.copy} caracteres.` });
+  else {
+    const hashtagIssue = captionHashtagIssue(copy);
+    if (hashtagIssue) errors.push({ field: 'copy', message: hashtagIssue });
+  }
   if (hasDash(copy)) errors.push({ field: 'copy', message: DASH_ERROR });
   if (!isDepictedPerson(page.depictedPerson)) errors.push({ field: 'depictedPerson', message: 'Escolha quem aparece na arte.' });
   return { errors, warnings };

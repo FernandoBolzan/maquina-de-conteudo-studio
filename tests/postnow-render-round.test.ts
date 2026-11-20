@@ -63,7 +63,7 @@ async function createCarousel(runtime: Runtime, root: string): Promise<Project> 
     ...page,
     headline: `Título da página ${index + 1}`,
     body: `Resumo curto da página ${index + 1}.`,
-    copy: `Copy editorial da página ${index + 1}.`,
+    copy: `Copy editorial da página ${index + 1}.\n\n#tema #assunto #dicas #conteudo #social`,
     visual_function: `Função visual da página ${index + 1}.`,
     depicted_person: 'none',
   }));

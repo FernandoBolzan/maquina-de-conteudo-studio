@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyArtText, CAPTION_MIRROR_LABEL, captionMirror, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, visualTextPageIssues, VISUAL_TEXT_LIMITS } from '../src/shared/visual-text.js';
+import { applyArtText, CAPTION_HASHTAG_ERROR, CAPTION_HASHTAG_RULE, CAPTION_MIRROR_LABEL, captionHashtagIssue, captionMirror, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, visualTextPageIssues, VISUAL_TEXT_LIMITS } from '../src/shared/visual-text.js';
 import { removeDashes } from '../src/shared/writing-style.js';
 
 function validPage(page: number) {
-  return { page, headline: 'Dez dicas simples', body: 'Resumo curto na arte.', copy: 'Texto da página.', depictedPerson: 'none' };
+  return { page, headline: 'Dez dicas simples', body: 'Resumo curto na arte.', copy: 'Texto da página.\n\n#tema #assunto #dicas #conteudo #social', depictedPerson: 'none' };
 }
 
 test('página sem headline é bloqueada com mensagem em português', () => {
@@ -112,4 +112,23 @@ test('o rótulo da copy de legenda sobrevive ao filtro de travessões enviado ao
 test('linhas POSTNOW_ depois da copy não entram na copy de legenda', () => {
   const prompt = `## Texto na arte\nHeadline: Sono\n\n## ${CAPTION_MIRROR_LABEL}\nCopy integral.\n\nPOSTNOW_COPY_RENDERING=generated_in_image\n`;
   assert.equal(captionMirror(prompt), 'Copy integral.');
+});
+
+test('toda legenda termina com uma última linha de exatamente 5 hashtags diferentes', () => {
+  const ok = (copy: string) => assert.equal(captionHashtagIssue(copy), undefined, copy);
+  const bad = (copy: string) => assert.equal(captionHashtagIssue(copy), CAPTION_HASHTAG_ERROR, copy);
+  ok('Texto.\n\n#um #dois #tres #quatro #cinco');
+  ok('Texto.\n#ação #educação #IA #dica_rápida #2026\n');
+  ok('#um #dois #tres #quatro #cinco');
+  bad('Texto sem hashtags.');
+  bad('Texto.\n\n#um #dois #tres #quatro');
+  bad('Texto.\n\n#um #dois #tres #quatro #cinco #seis');
+  bad('Texto.\n\n#um #dois #tres #quatro #UM');
+  bad('Texto.\n\n#um #dois #tres #quatro #cinco\nObrigado!');
+  bad('Texto com #hashtag no meio.\n\n#um #dois #tres #quatro');
+  bad('Texto.\n\n#um #dois #tres #quatro cinco');
+  bad('Texto.\n\n# #um #dois #tres #quatro');
+  assert.ok(visualTextPageIssues({ ...validPage(1), copy: 'Só texto.' }).errors.some(issue => issue.field === 'copy' && issue.message === CAPTION_HASHTAG_ERROR));
+  assert.equal(visualTextPageIssues(validPage(1)).errors.length, 0);
+  assert.match(CAPTION_HASHTAG_RULE, /exatamente 5 hashtags/);
 });

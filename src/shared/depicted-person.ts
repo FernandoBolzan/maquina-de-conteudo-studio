@@ -20,7 +20,7 @@ export function isDepictedPerson(value: unknown): value is DepictedPerson {
 export const DEPICTED_PERSON_POLICY_VALUES = ['auto', ...DEPICTED_PERSON_VALUES] as const;
 export type DepictedPersonPolicy = (typeof DEPICTED_PERSON_POLICY_VALUES)[number];
 export const DEPICTED_PERSON_POLICY_LABELS: Record<DepictedPersonPolicy, string> = {
-  auto: 'Automático (o agente decide pela pauta)',
+  auto: 'Automático (a IA decide)',
   none: DEPICTED_PERSON_LABELS.none,
   other_person: DEPICTED_PERSON_LABELS.other_person,
   client_portrait: DEPICTED_PERSON_LABELS.client_portrait,
@@ -48,12 +48,12 @@ export function portraitRequiredPages(kind: PostNowKind, pageCount: number): num
  */
 export function portraitPlanIssues(kind: PostNowKind, identities: readonly unknown[], portraitApproved: boolean): string[] {
   const withoutPortrait = identities.flatMap((identity, index) => identity === 'client_portrait' && !portraitApproved
-    ? [`Página ${index + 1}: Cliente (retrato aprovado) exige um retrato aprovado no perfil PostNow da marca. Cadastre-o com \`postnow client set-portrait\`.`]
+    ? [`Página ${index + 1}: Cliente (retrato aprovado) exige uma foto marcada como retrato da cliente na marca. Marque-a em Marcas ou escolha outra opção.`]
     : []);
   if (!portraitApproved) return withoutPortrait;
   const missingClient = portraitRequiredPages(kind, identities.length)
     .filter(page => isDepictedPerson(identities[page - 1]) && identities[page - 1] !== 'client_portrait')
-    .map(page => `Página ${page}: com retrato aprovado, esta página precisa mostrar a cliente; escolha Cliente (retrato aprovado).`);
+    .map(page => `Página ${page}: com retrato aprovado, esta página precisa mostrar a cliente; escolha Cliente (retrato aprovado). Se não deve mostrar a cliente, desmarque o retrato em Marcas.`);
   return [...withoutPortrait, ...missingClient];
 }
 
@@ -74,10 +74,10 @@ export function portraitDiversityIssues(kind: PostNowKind, pages: readonly { vis
  */
 export function depictedPersonPolicyIssues(policy: DepictedPersonPolicy, portraitApproved: boolean): string[] {
   if (policy === 'client_portrait' && !portraitApproved) {
-    return ['Cliente (retrato aprovado) exige um retrato aprovado no perfil PostNow da marca. Cadastre-o com `postnow client set-portrait` ou escolha outra opção.'];
+    return ['Cliente (retrato aprovado) exige uma foto marcada como retrato da cliente na marca. Marque-a em Marcas ou escolha outra opção.'];
   }
   if (portraitApproved && (policy === 'none' || policy === 'other_person')) {
-    return ['Com retrato aprovado, a capa e o fechamento precisam mostrar a cliente. Escolha Automático ou Cliente (retrato aprovado).'];
+    return ['Com retrato aprovado, a capa e o fechamento precisam mostrar a cliente. Escolha Automático ou Cliente (retrato aprovado), ou desmarque o retrato da cliente em Marcas.'];
   }
   return [];
 }

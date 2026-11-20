@@ -63,8 +63,8 @@ const IMAGE_ASPECTS: readonly ImageAspect[] = ['9:16', '1:1', '4:5', '4:3'];
 const IMAGE_ASPECT_FORMATS: Record<ImageAspect, { label: string; single: PostNowFormatId; carousel?: PostNowFormatId }> = {
   '9:16': { label: 'Story 9:16', single: 'story-9x16' },
   '1:1': { label: 'Feed quadrado 1:1', single: 'post-1x1', carousel: 'carousel-1x1' },
-  '4:5': { label: 'Feed vertical 4:5 · 1080×1350', single: 'post-4x5', carousel: 'carousel-4x5' },
-  '4:3': { label: 'Feed horizontal 4:3 · 1440×1080', single: 'post-4x3', carousel: 'carousel-4x3' },
+  '4:5': { label: 'Feed vertical 4:5', single: 'post-4x5', carousel: 'carousel-4x5' },
+  '4:3': { label: 'Feed horizontal 4:3', single: 'post-4x3', carousel: 'carousel-4x3' },
 };
 
 export interface ImageAspectOption {

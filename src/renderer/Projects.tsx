@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, ArrowRight, Film, FolderInput, Image, Layers, Moon, Monitor, Plus, Search, Shapes, Smartphone, Square, Sun } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Film, FolderInput, Image, Layers, Moon, Monitor, Plus, RectangleHorizontal, Search, Shapes, Smartphone, Square, Sun } from 'lucide-react';
 import type { Project, ProjectFormatId } from '../shared/contracts';
 import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, imageAspectOptions, isPostNowFormat, postNowFormatFor, videoAspectOptions, type ImageAspect } from '../shared/formats';
 import { IMAGE_BACKGROUND_OPTIONS, defaultImageBackgroundMode, type ImageBackgroundMode } from '../shared/image-background';
@@ -133,6 +133,7 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
       titleSuggestion.current = suggested;
       setTitle(suggested);
     }
+    if (!brandId && snapshot.brands.length === 1) setBrandId(snapshot.brands[0]!.id);
   }
 
   function openCreate(presetKind: Project['kind']) {
@@ -270,9 +271,9 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
     <>
       <div className="projects-heading">
       <PageHeading
-        eyebrow="WORKBENCH DE PRODUÇÃO · POSTNOW + VIDEOGO"
+        eyebrow="SEUS CONTEÚDOS"
         title="Projetos"
-        description="Sua biblioteca de imagens e vídeos, organizada por projeto. Escolha uma trilha para começar ou retome uma criação."
+        description="Suas imagens e vídeos, organizados por projeto. Comece um conteúdo novo ou retome um que já existe."
         actions={
           <>
             <button type="button" className="button secondary" onClick={() => { void importProject(); }} disabled={busy.has('import-project')}>
@@ -380,7 +381,7 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
                   <h2>{project.title}</h2>
                   <p>{project.brief || 'Sem briefing cadastrado.'}</p>
                   <div className="project-footer">
-                    <span>{project.sourceProjectId ? 'Projeto derivado' : 'Projeto nativo'}</span>
+                    <span>{project.sourceProjectId ? 'Baseado em outro projeto' : 'Projeto original'}</span>
                     <span className="open-studio-label">Abrir <ArrowRight size={13} /></span>
                   </div>
                 </div>
@@ -585,6 +586,8 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
                             ? { dim: '1080 × 1350', badge: 'Recomendado', use: 'Feed Instagram e LinkedIn' }
                             : option.aspect === '1:1'
                             ? { dim: '1080 × 1080', badge: 'Quadrado', use: 'Feed clássico' }
+                            : option.aspect === '4:3'
+                            ? { dim: '1440 × 1080', badge: 'Horizontal', use: 'Fotos e slides em paisagem' }
                             : { dim: '1080 × 1920', badge: 'Vertical', use: 'Stories e tela cheia' };
                           return (
                             <button
@@ -598,6 +601,7 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
                                   {option.aspect === '4:5' && <Square size={13} style={{ transform: 'scale(0.85, 1.1)' }} />}
                                   {option.aspect === '1:1' && <Square size={14} />}
                                   {option.aspect === '9:16' && <Smartphone size={14} />}
+                                  {option.aspect === '4:3' && <RectangleHorizontal size={14} />}
                                 </span>
                                 <span className="format-card-badge">{details.badge}</span>
                                 <span className={`radio-dot ${isSelected ? 'is-checked' : ''}`} />
@@ -791,11 +795,21 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
                     <label className="field-group">
                       <span className="field-title">Marca vinculada</span>
                       <select value={brandId} onChange={event => setBrandId(event.target.value)}>
-                        <option value="">Sem marca por enquanto</option>
+                        <option value="">{kind === 'image' ? 'Escolher depois (obrigatória para gerar)' : 'Sem marca por enquanto'}</option>
                         {snapshot.brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
                       </select>
                     </label>
                   </div>
+                  {kind === 'image' && !selectedBrand && (
+                    <p className="field-help inline-warning" role="status">
+                      {snapshot.brands.length === 0
+                        ? 'Cadastre uma marca em Marcas antes de gerar imagens: a logo da marca é obrigatória.'
+                        : 'Escolha a marca: sem ela as imagens não podem ser geradas. Você também pode vincular depois, na etapa Definir a pauta.'}
+                    </p>
+                  )}
+                  {kind === 'image' && selectedBrand && !selectedBrand.logo?.toLowerCase().endsWith('.png') && (
+                    <p className="field-help inline-warning" role="status">Esta marca ainda não tem logo PNG. Cadastre a logo em Marcas antes de gerar imagens.</p>
+                  )}
                 </div>
 
                 <div className="form-section">

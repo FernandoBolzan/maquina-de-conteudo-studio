@@ -44,7 +44,7 @@ export function getProjectJourney(input: ProjectJourneyInput): ProjectJourney {
         { id: 'brief', title: 'Definir a pauta' },
         { id: 'texts', title: 'Textos' },
         { id: 'images', title: 'Gerar imagens' },
-        { id: 'review', title: 'Revisar imagem a imagem' },
+        { id: 'review', title: 'Revisar imagens' },
         { id: 'export', title: 'Entregar' },
       ]
     : [

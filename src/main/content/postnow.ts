@@ -127,7 +127,34 @@ function engineHome(env: Record<string, string>, services: Services): string {
 export async function postnowHome(services: Services): Promise<string> {
   return engineHome(await toolEnvironment(services), services);
 }
-/** Retrato aprovado da marca (`brand.owner_portrait` no perfil do motor, relativo a `references/`); undefined sem perfil ou sem retrato. */
+/** `brand.owner_portrait` do perfil do motor (relativo a `references/`), se o perfil existir e for legível. */
+async function engineOwnerPortrait(home: string, brand: Brand): Promise<string | undefined> {
+  const profilePath = join(home, 'clients', engineClientId(brand), 'profile.json');
+  if (!(await lstat(profilePath).catch(() => undefined))?.isFile()) return undefined;
+  try {
+    const owner = object(await readJson(profilePath), 'Perfil PostNow').brand;
+    const portrait = owner && typeof owner === 'object' && 'owner_portrait' in owner ? owner.owner_portrait : undefined;
+    return typeof portrait === 'string' && portrait.trim() ? portrait : undefined;
+  } catch { return undefined; }
+}
+/** Foto da marca que o perfil do motor já usa como retrato (gravada por versões anteriores): aparece como retrato em Marcas, para ser mantida ou desmarcada. */
+export async function withMirroredPortrait(home: string, brand: Brand): Promise<Brand> {
+  if (brand.references.some(r => r.portrait)) return brand;
+  const owner = await engineOwnerPortrait(home, brand);
+  const match = owner ? brand.references.find(r => r.kind === 'image' && basename(r.path) === basename(owner)) : undefined;
+  return match ? { ...brand, references: brand.references.map(r => r === match ? { ...r, portrait: true } : r) } : brand;
+}
+/** Remove do perfil do motor o retrato que é cópia de uma foto da marca; retrato cadastrado fora da marca (`postnow client set-portrait`) fica. */
+export async function clearMirroredPortrait(home: string, brand: Brand): Promise<void> {
+  const profilePath = join(home, 'clients', engineClientId(brand), 'profile.json');
+  const owner = await engineOwnerPortrait(home, brand);
+  if (!owner || !brand.references.some(r => basename(r.path) === basename(owner))) return;
+  const profile = object(await readJson(profilePath), 'Perfil PostNow');
+  const brandProfile = profile.brand && typeof profile.brand === 'object' && !Array.isArray(profile.brand) ? profile.brand as Record<string, unknown> : {};
+  const { owner_portrait: _removed, ...rest } = brandProfile;
+  await atomicJson(profilePath, { ...profile, brand: { ...rest, reference_images: Array.isArray(rest.reference_images) ? rest.reference_images.filter(item => item !== owner) : rest.reference_images } });
+}
+/** Retrato aprovado da marca: a foto da marca marcada como retrato da cliente (vale mais que o perfil do motor) ou, sem marcação, `brand.owner_portrait` do perfil do motor; undefined sem nenhum dos dois. */
 export async function approvedPortraitAt(home: string, brand: Brand): Promise<string | undefined> {
   const profileDir = join(home, 'clients', engineClientId(brand));
   const profilePath = join(profileDir, 'profile.json');
@@ -140,9 +167,10 @@ export async function approvedPortraitAt(home: string, brand: Brand): Promise<st
       profile = object(await readJson(profilePath), 'Perfil PostNow');
       brandProfile = record(profile.brand);
       if (typeof brandProfile.owner_portrait === 'string' && brandProfile.owner_portrait.trim()) portrait = brandProfile.owner_portrait;
-    } catch { /* Fallback para fotos cadastradas da marca */ }
+    } catch { /* Sem perfil legível: usa a foto marcada como retrato na marca */ }
   }
-  const portraitRef = portrait ? undefined : brand.references?.find(r => r.kind === 'image' && /portrait|rosto|perfil|foto|whatsapp/i.test(r.name));
+  const previousPortrait = portrait;
+  const portraitRef = brand.references?.find(r => r.kind === 'image' && r.portrait === true);
   if (portraitRef) {
     try {
       const relPath = `references/${basename(portraitRef.path)}`;
@@ -165,9 +193,9 @@ export async function approvedPortraitAt(home: string, brand: Brand): Promise<st
   const post = record(formats.post);
   const story = record(formats.story);
   const positiveInteger = (value: unknown, fallback: number): number => Number.isInteger(value) && Number(value) > 0 ? Number(value) : fallback;
-  const referenceImages = Array.isArray(brandProfile.reference_images) && brandProfile.reference_images.every(item => typeof item === 'string')
+  const referenceImages = (Array.isArray(brandProfile.reference_images) && brandProfile.reference_images.every(item => typeof item === 'string')
     ? brandProfile.reference_images as string[]
-    : [];
+    : []).filter(item => item !== previousPortrait || item === portrait);
   const normalizedProfile = {
     ...profile,
     schema_version: profile.schema_version ?? 1,

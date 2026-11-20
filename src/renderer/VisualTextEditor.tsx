@@ -87,8 +87,8 @@ export const VisualTextEditor = forwardRef<TextEditorHandle, VisualTextEditorPro
   return (
     <section className="text-editor" aria-labelledby="visual-text-title">
       <header className="text-editor-head">
-        <h3 id="visual-text-title">Textos das páginas</h3>
-        <p className="text-editor-note">Revise o título e o subtítulo que aparecem na arte, a copy de publicação e quem aparece. Ao continuar, os textos são salvos e aprovados.</p>
+        <h3 id="visual-text-title" className="sr-only">Textos das páginas</h3>
+        <p className="text-editor-note">O título e o subtítulo aparecem na imagem. A legenda acompanha a publicação e não é desenhada na arte. Ao continuar, os textos são salvos e aprovados.</p>
         {hasGeneratedImages ? <p className="text-editor-note">As imagens já geradas não mudam sozinhas. Gere uma nova versão depois de salvar.</p> : null}
         {disabled && disabledReason ? <p className="text-editor-note" role="note">{disabledReason}</p> : null}
       </header>
@@ -129,13 +129,13 @@ export const VisualTextEditor = forwardRef<TextEditorHandle, VisualTextEditorPro
               {bodyMessages.errors.map(message => <p className="text-editor-error" id={`${pageId}-body-errors`} key={message}>{message}</p>)}
             </div>
             <div className="text-editor-field">
-              <label htmlFor={`${pageId}-copy`}>Copy para publicação/legenda · não imprimir na arte</label>
+              <label htmlFor={`${pageId}-copy`}>Legenda da publicação · não aparece na imagem</label>
               <textarea id={`${pageId}-copy`} className="text-editor-input" rows={5} value={draft.copy} disabled={disabled || busy}
                 aria-invalid={copyMessages.errors.length > 0}
                 aria-describedby={`${pageId}-copy-meta${copyMessages.errors.length ? ` ${pageId}-copy-errors` : ''}`}
                 onChange={event => update(index, { copy: event.target.value })} />
               <div className="text-editor-meta" id={`${pageId}-copy-meta`}>
-                <span>Lista, dica e detalhes ficam aqui; acompanham a publicação, não são desenhados na imagem.</span>
+                <span>Lista, dica e detalhes ficam aqui. Termine com uma linha de 5 hashtags relacionadas.</span>
                 <span>{draft.copy.trim().length}/{VISUAL_TEXT_LIMITS.copy}</span>
               </div>
               {copyMessages.errors.map(message => <p className="text-editor-error" id={`${pageId}-copy-errors`} key={message}>{message}</p>)}

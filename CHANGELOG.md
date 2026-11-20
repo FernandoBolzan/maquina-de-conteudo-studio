@@ -4,8 +4,45 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 
 ## 2026-11-20
 
-### Publicado — v0.3.1
-- Reempacote sem mudança de código em relação à v0.3.0. Existe para que o atualizador automático entregue a build publicada a partir desta tag.
+### Corrigido — a IA ignorava o que a pessoa pediu (ex.: a logo de outra marca)
+- O gerador de imagens recebia um veto genérico a logos ("não desenhe nem aplique a logo", "nunca invente logos"), que também barrava a logo de uma marca de terceiros pedida pela pessoa (ex.: o post era sobre o Claude e a logo do Claude saiu como uma fita abstrata). Agora o veto vale só para a logo oficial da marca vinculada, que o PostNow aplica depois. Logos, produtos e marcas de terceiros pedidos ou que são o assunto da arte devem aparecer.
+- O pedido que a pessoa escreve ao preparar os textos fica gravado no projeto e volta ao contexto da geração e das revisões. Antes ele só valia na sessão de textos, e a geração seguia só a direção visual que a IA tinha gravado (que podia dizer o contrário).
+- A aba "Observações" virou "Instruções para a IA" e passa a chegar à IA na preparação dos textos, na geração e nas revisões (antes não chegava a nenhuma). Mudar as instruções depois de aprovar os textos pede nova aprovação, porque elas entram no hash da aprovação.
+- Regra de prioridade no prompt: o que a pessoa pediu de forma explícita (briefing, pedido, instruções, notas de revisão) vale mais que a direção visual sugerida, a biblioteca de estilos e a função visual gravada, e a IA deve avisar o que não conseguiu cumprir em vez de trocar em silêncio por algo mais genérico. A função visual gravada entra no contexto como "sugestão".
+- As imagens anexadas ao gerador agora são numeradas e nomeadas por papel no contexto: ARTE DE REFERÊNCIA DA MARCA (o nosso padrão visual), FOTO DA PESSOA (só identidade) e ELEMENTO PARA USAR NA ARTE (ex.: logo de outra marca). Antes elas chegavam sem nome e as 10 primeiras da lista eram escolhidas sem critério.
+- Em Marcas, cada imagem tem "Usar como retrato" e "Usar na arte" (um papel exclui o outro; PDFs e documentos não têm papel). Sem marcação, a imagem é arte de referência, e isso aparece escrito. O gerador recebe até 10 imagens: primeiro o retrato e os elementos, depois as artes na ordem da lista. A tela avisa quando a marca tem mais de 10.
+- Limite conhecido: a logo oficial da marca é aplicada pelo PostNow como foi cadastrada. Pedir "logo toda branca" no prompt não a recolore; é preciso cadastrar a logo na cor desejada em Marcas.
+
+### Melhorado — fluxo e linguagem para quem não é técnico
+- Novo projeto: se existe uma única marca, ela já vem selecionada; sem marca, o assistente avisa que a logo é obrigatória para gerar imagens.
+- O card 4:3 mostrava "1080 × 1920 · Stories e tela cheia" (legenda do 9:16); agora mostra 1440 × 1080. Os títulos dos cards de proporção não repetem mais as dimensões.
+- Etapa Definir a pauta: o texto sobre o conteúdo vem antes das preferências visuais. "Salvar e continuar" também salva as preferências visuais alteradas; antes o botão avançava com a tela diferente do projeto salvo (ex.: a tela mostrava "Não usar fotos" e o projeto continuava usando). Aviso quando o projeto não tem marca.
+- Etapas Textos, Gerar e Revisar não repetem mais o título e a frase de abertura. "Copy" virou "legenda" e "headline" virou "título" nas mensagens, "claims" virou "fontes e afirmações", "Revisar imagem a imagem" virou "Revisar imagens" (o título aparecia cortado). A opção "Automático (a IA decide)" não fica mais cortada.
+- Marcas: a logo salva aparece como "Logo salva na marca" em vez do nome interno; o botão de retrato é um botão com texto, não um ícone solto.
+- A biblioteca de projetos usa "Projeto original" e "Baseado em outro projeto" no lugar de "nativo" e "derivado".
+
+### Corrigido — vínculo de marca em projeto existente
+- Projetos criados sem marca não tinham como receber uma depois: o bloqueio dizia "Cadastre uma logo oficial PNG na marca", mas nenhuma marca estava vinculada. A etapa Pauta agora tem o campo "Marca vinculada" (Sem marca ou uma marca cadastrada), salvo junto com as preferências visuais. Sem marca, o bloqueio passa a ser "Vincule uma marca ao projeto antes de gerar."
+- Trocar a marca muda a logo usada na geração; a aprovação da revisão visual é recalculada pelo hash da logo, então a revisão anterior deixa de valer.
+
+### Corrigido — retrato da cliente sem adivinhação por nome de arquivo
+- O app não usa mais o nome do arquivo para escolher o retrato da cliente. Antes, a palavra "whatsapp" ou "foto" no nome de uma referência da marca fazia um slide de carrossel virar retrato aprovado, e o projeto ficava bloqueado com "com retrato aprovado" mesmo sem nenhuma foto de rosto.
+- Em Marcas, cada foto de imagem tem o botão "Usar como retrato da cliente" (uma por marca; marcar outra desmarca a anterior). PDFs e documentos não podem ser retrato. A marca salva a escolha em `portrait: true` no cadastro.
+- A marca é a fonte da verdade: a foto marcada vale mais que o `owner_portrait` do perfil PostNow e é copiada para ele. Desmarcar e salvar a marca remove do perfil o retrato que era cópia de uma foto da marca; retrato cadastrado fora da marca (`postnow client set-portrait`) é preservado.
+- Retratos que versões anteriores já tinham gravado no perfil (inclusive o slide escolhido por nome de arquivo) aparecem marcados em Marcas, para você mantê-los ou desmarcá-los. Sem isso, o bloqueio "com retrato aprovado" ficava sem saída na interface.
+- Mensagens de "Cliente (retrato aprovado)" sem retrato agora mandam marcar a foto em Marcas, em vez de citar o comando `postnow client set-portrait`, que o Studio não executa.
+
+### Novo — toda legenda termina com 5 hashtags
+- Toda legenda (campo "Legenda da publicação" de cada página e a legenda da entrega de vídeo) precisa terminar com uma última linha de exatamente 5 hashtags relacionadas ao tema, diferentes entre si. A IA recebe essa regra ao preparar os textos e ao escrever a legenda do vídeo.
+- A regra também é conferida: na etapa Textos o campo mostra o erro e o botão de aprovar fica bloqueado; a revisão visual lista a página. Na entrega de vídeo, uma legenda sem as 5 hashtags não é publicada.
+- Projetos já existentes cujas legendas não têm as hashtags ficam bloqueados na aprovação até a legenda ser editada em Textos (ou refeita com Preparar textos).
+
+### Novo — legenda do vídeo com plano B de modelo
+- A legenda da entrega de vídeo é escrita pelo Claude Opus 5.5 quando ele está disponível. Se ele não estiver instalado, atingir o limite da conta ou entregar uma legenda inválida, o Codex Luna escreve no lugar, automaticamente, e a mensagem final diz quem escreveu. A capa já paga nunca é descartada por falha na legenda. Se os dois falharem, o erro cita cada modelo e "Gerar só a legenda" tenta de novo sem refazer a capa.
+- Os botões da entrega passaram a se chamar "Gerar capa e legenda", "Gerar só a capa" e "Gerar só a legenda".
+
+### Publicado — v0.3.2
+- Reúne todas as correções e melhorias desta data. A v0.3.1 foi preparada, mas não chegou a ser publicada: quem está na v0.3.0 recebe a v0.3.2 direto pelo atualizador automático. Pacote `.deb` não usa o atualizador: baixe o novo `.deb` na página de releases.
 
 ## 2026-11-19
 

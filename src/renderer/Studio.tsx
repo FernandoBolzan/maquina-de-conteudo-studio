@@ -62,8 +62,8 @@ function Media({ projectId, asset, large = false }: { projectId: string; asset: 
 
 const STEP_DESCRIPTION: Record<JourneyStepId, string> = {
   brief: 'Defina o assunto, o público e a direção antes de produzir.',
-  texts: 'Revise a headline e a copy de cada página, confira as fontes e aprove esta versão para liberar a geração das imagens.',
-  images: 'O Codex gera as artes a partir dos textos aprovados. O PostNow ajusta formato e logo e prepara a rodada para revisão.',
+  texts: 'Confira o título, a legenda e as fontes de cada página. As imagens só são geradas depois que você aprovar.',
+  images: 'As artes são geradas a partir dos textos aprovados, com a logo e o formato da marca. Depois você revisa uma por uma.',
   script: 'O agente prepara o roteiro e as cenas do vídeo. Revise antes de seguir para a narração.',
   voice: 'A narração é opcional. Se usar voz ElevenLabs, aprove o texto e a voz antes de qualquer chamada paga.',
   render: 'O VideoGo monta o vídeo a partir do roteiro e das imagens. A renderização só começa quando você clica.',
@@ -147,7 +147,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const [adaptationStarting, setAdaptationStarting] = useState(false);
   const [adaptationError, setAdaptationError] = useState('');
   const adaptationLock = useRef(false);
-  const [imagePreferenceDraft, setImagePreferenceDraft] = useState<{ backgroundMode: ImageBackgroundMode; useBrandImages: boolean; logoPolicy: LogoPolicy; depictedPersonPolicy: DepictedPersonPolicy }>({ backgroundMode: 'light', useBrandImages: true, logoPolicy: 'cover-closing', depictedPersonPolicy: 'auto' });
+  const [imagePreferenceDraft, setImagePreferenceDraft] = useState<{ brandId: string; backgroundMode: ImageBackgroundMode; useBrandImages: boolean; logoPolicy: LogoPolicy; depictedPersonPolicy: DepictedPersonPolicy }>({ brandId: '', backgroundMode: 'light', useBrandImages: true, logoPolicy: 'cover-closing', depictedPersonPolicy: 'auto' });
   const rootPromptRef = useRef('');
   const narrationRef = useRef<{ saved: NarrationState | null; draft: NarrationState | null }>({ saved: null, draft: null });
   narrationRef.current = { saved: narration, draft: narrationDraft };
@@ -331,6 +331,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
     if (!detail) return;
     const linkedBrand = snapshot.brands.find(item => item.id === detail.brandId);
     setImagePreferenceDraft({
+      brandId: detail.brandId ?? '',
       backgroundMode: detail.imageBackgroundMode ?? defaultImageBackgroundMode(linkedBrand?.colors ?? []),
       useBrandImages: detail.useBrandImages ?? true,
       logoPolicy: detail.logoPolicy ?? (linkedBrand?.logo?.toLowerCase().endsWith('.png') ? 'cover-closing' : 'none'),
@@ -375,17 +376,18 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const dirty = brief !== project.brief || notes !== project.notes;
   const brand = snapshot.brands.find(item => item.id === project.brandId);
   const savedVisualPreferences = {
+    brandId: project.brandId ?? '',
     backgroundMode: project.imageBackgroundMode ?? defaultImageBackgroundMode(brand?.colors ?? []),
     useBrandImages: project.useBrandImages ?? true,
     logoPolicy: project.logoPolicy ?? (brand?.logo?.toLowerCase().endsWith('.png') ? 'cover-closing' : 'none'),
     depictedPersonPolicy: project.depictedPersonPolicy ?? 'auto',
   };
-  const visualPreferencesDirty = project.kind === 'image'
+  const visualPreferencesDirty = imagePreferenceDraft.brandId !== savedVisualPreferences.brandId || (project.kind === 'image'
     ? imagePreferenceDraft.backgroundMode !== savedVisualPreferences.backgroundMode
       || imagePreferenceDraft.useBrandImages !== savedVisualPreferences.useBrandImages
       || imagePreferenceDraft.logoPolicy !== savedVisualPreferences.logoPolicy
       || imagePreferenceDraft.depictedPersonPolicy !== savedVisualPreferences.depictedPersonPolicy
-    : imagePreferenceDraft.useBrandImages !== savedVisualPreferences.useBrandImages;
+    : imagePreferenceDraft.useBrandImages !== savedVisualPreferences.useBrandImages);
   const narrationDirty = narrationChanged(narration, narrationDraft);
   const narrationBlocked = isNarrationBlocked(narration, narrationDirty);
   const expectedImageCount = visualReview?.pages.length ?? 0;
@@ -500,13 +502,13 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const redoCount = reviewItems.filter(item => item.decision === 'redo').length;
   const pendingCount = reviewItems.filter(item => item.decision === 'pending').length;
   const canGenerateImages = !visualPreferencesDirty && !running && !adaptationStarting && !project.formatAdaptation && !visualTextDirty && !busy.has('image-generation') && Boolean(visualReview?.ready && visualReview.approved);
-  const imageGenerationMessage = visualPreferencesDirty ? 'Salve as preferências visuais do projeto antes de gerar imagens.' : project.formatAdaptation || adaptationStarting ? 'Adapte e revise os textos na etapa anterior antes de gerar imagens.' : visualTextDirty ? 'Salve ou descarte as alterações em Textos antes de gerar imagens.' : running ? 'Há um processo em andamento. Acompanhe-o antes de gerar imagens.' : !visualReview?.approved ? 'Aprove os textos na etapa anterior para liberar a geração.' : latestBatch?.status?.state === 'failed' ? (latestBatch.status.message ?? 'A última rodada está incompleta. Gere as imagens novamente.') : 'O Codex gera as artes a partir dos textos aprovados. O PostNow aplica formato e logo. Nenhum vídeo é iniciado.';
+  const imageGenerationMessage = visualPreferencesDirty ? 'Salve as preferências visuais do projeto antes de gerar imagens.' : project.formatAdaptation || adaptationStarting ? 'Adapte e revise os textos na etapa anterior antes de gerar imagens.' : visualTextDirty ? 'Salve ou descarte as alterações em Textos antes de gerar imagens.' : running ? 'Há um processo em andamento. Acompanhe-o antes de gerar imagens.' : !visualReview?.approved ? 'Aprove os textos na etapa anterior para liberar a geração.' : latestBatch?.status?.state === 'failed' ? (latestBatch.status.message ?? 'A última rodada está incompleta. Gere as imagens novamente.') : 'Textos aprovados. Ao gerar, a IA cria as artes; isso pode levar vários minutos.';
   const visibleImageItems = visibleAssets.map(toReviewItem);
   const batchState = classifyBatch(latestBatch, legacyAssets.length > 0);
   const textAgentRunning = projectJobs.some(job => job.status === 'running' && job.agentSession);
   const imageAction = project.kind === 'image' ? imageFooterAction({
     step: activeStep.id as 'brief' | 'texts' | 'images' | 'review' | 'export',
-    brief: { dirty, empty: !project.brief.trim() && !brief.trim() },
+    brief: { dirty: dirty || visualPreferencesDirty, empty: !project.brief.trim() && !brief.trim() },
     texts: {
       present: hasTextContent(visualReview?.pages ?? []),
       ready: Boolean(visualReview?.ready),
@@ -537,7 +539,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const voiceAssets = voiceScenes.map(scene => scene.audioPath ? project.assets.find(asset => asset.kind === 'audio' && asset.name === scene.audioPath) : undefined).filter((asset): asset is Asset => Boolean(asset));
   const videoAction = project.kind === 'video' ? videoFooterAction({
     step: activeStep.id as 'brief' | 'script' | 'voice' | 'render' | 'review' | 'export',
-    brief: { dirty, empty: !project.brief.trim() && !brief.trim() },
+    brief: { dirty: dirty || visualPreferencesDirty, empty: !project.brief.trim() && !brief.trim() },
     script: {
       available: project.storyboardAvailable === true,
       dirty: storyboardDirty,
@@ -634,7 +636,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
     if (state) { setNarration(state); setNarrationDraft(state); await refresh(); }
   }
 
-  async function save(): Promise<boolean> {
+  async function save(options?: { preferencesJustSaved?: boolean }): Promise<boolean> {
     const previousBrief = project.brief;
     const result = await run('save-notes', async () => {
       await invoke('projects.notes', { id, notes, brief });
@@ -645,13 +647,14 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
     if (!result) return false;
     // Pauta nova prepara os textos sozinha; o botão "Preparar textos" continua pedindo confirmação.
     if (!project.formatAdaptation && !adaptationStarting && shouldAutoStartTextGeneration({ kind: project.kind, previousBrief, nextBrief: brief, pages: visualReview?.pages ?? [], sessionRunning: Boolean(running) || busy.has('agent') })) {
-      await startAgent({ request: imageRequestFor(brief), confirmed: true });
+      await startAgent({ request: imageRequestFor(brief), confirmed: true, preferencesJustSaved: options?.preferencesJustSaved });
     }
     return true;
   }
-  async function saveVisualPreferences() {
+  async function saveVisualPreferences(): Promise<boolean> {
     const updated = await run('visual-preferences', () => invoke<ProjectDetail>('projects.visualPreferences', {
       id,
+      brandId: imagePreferenceDraft.brandId,
       useBrandImages: imagePreferenceDraft.useBrandImages,
       ...(project.kind === 'image' ? {
         imageBackgroundMode: imagePreferenceDraft.backgroundMode,
@@ -659,7 +662,10 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
         depictedPersonPolicy: imagePreferenceDraft.depictedPersonPolicy,
       } : {}),
     }), 'Preferências visuais salvas no projeto.');
-    if (updated) { setDetail(updated); await refresh(); }
+    if (!updated) return false;
+    setDetail(updated);
+    await refresh();
+    return true;
   }
   async function importAsset() {
     await run('import-asset', async () => {
@@ -807,8 +813,8 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   function imageRequestFor(briefText: string) { return [...new Set([prompt.trim(), briefText.trim()])].filter(Boolean).join('\n\n'); }
   const imageRequest = imageRequestFor(project.brief);
   const agentRequest = project.kind === 'image' ? imageRequest : prompt.trim();
-  async function startAgent(options?: { request?: string; confirmed?: boolean }) {
-    if (visualPreferencesDirty) return;
+  async function startAgent(options?: { request?: string; confirmed?: boolean; preferencesJustSaved?: boolean }) {
+    if (visualPreferencesDirty && !options?.preferencesJustSaved) return;
     const request = options?.request ?? agentRequest;
     if (!options?.confirmed) {
       const modelLabel = ` usando ${selectedModel}${provider === 'codex' ? ' · xhigh' : ''}`;
@@ -817,7 +823,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
         : 'O agente prepara roteiro e arquivos do projeto; a renderização VideoGo continua separada e explícita.';
       if (!await confirm(`Iniciar ${provider === 'codex' ? 'Codex' : 'Claude Code'}${modelLabel}`, description, 'Autorizar sessão')) return;
     }
-    const job = await run('agent', () => invoke<Job>('agents.start', { id, provider, model: selectedModel || undefined, prompt: request, confirm: true }), 'Sessão de IA iniciada.');
+    const job = await run('agent', () => invoke<Job>('agents.start', { id, provider, model: selectedModel || undefined, prompt: request, confirm: true, ...(project.kind === 'image' && prompt.trim() ? { directive: prompt.trim() } : {}) }), 'Sessão de IA iniciada.');
     if (job) { rootPromptRef.current = request; setPrompt(''); setSelectedPath(null); trackJob(job); }
   }
 
@@ -881,7 +887,12 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
     const next = project.kind === 'image' ? 'texts' : 'script';
     switch (action.kind) {
       case 'save-brief':
-        if (await save()) selectStep(next);
+        {
+          // Escolhas visuais ainda não salvas valem para o projeto só depois de salvas: salva junto, em vez de avançar com a tela diferente do projeto.
+          const preferencesJustSaved = visualPreferencesDirty;
+          if (preferencesJustSaved && !(await saveVisualPreferences())) break;
+          if (!dirty || await save({ preferencesJustSaved })) selectStep(next);
+        }
         break;
       case 'continue':
         if (activeStep.id === 'brief') selectStep(next);
@@ -1074,14 +1085,14 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
     const photoDirection = imagePreferenceDraft.useBrandImages
       ? 'com fotos autorizadas da marca quando forem pertinentes'
       : 'sem usar fotos nem retratos da marca';
-    if (!await confirm(`Gerar ${what} para ${label}`, `O Codex ImageGen cria a capa com o título, ${photoDirection} e as cores da marca; o Studio aplica a logo oficial por cima.${coverOnly ? ' A copy atual é mantida.' : ' Depois, o Claude Opus 5.5 escreve a copy.'} A geração pode consumir créditos. Arquivos anteriores deste formato, inclusive os aprovados, serão substituídos e precisarão de nova aprovação.`, `Gerar ${what}`)) return;
-    const job = await run('video-delivery', () => invoke<Job>('agents.generateVideoDelivery', { id, format: deliveryFormat, coverOnly, confirm: true }), coverOnly ? 'Gerando capa no Codex ImageGen…' : 'Gerando capa no Codex ImageGen e copy no Claude…');
+    if (!await confirm(`Gerar ${what} para ${label}`, `O Codex ImageGen cria a capa com o título, ${photoDirection} e as cores da marca; o Studio aplica a logo oficial por cima.${coverOnly ? ' A legenda atual é mantida.' : ' Depois, o Claude Opus 5.5 escreve a legenda; se ele não estiver disponível, o Codex Luna escreve no lugar.'} A legenda termina com 5 hashtags. A geração pode consumir créditos. Arquivos anteriores deste formato, inclusive os aprovados, serão substituídos e precisarão de nova aprovação.`, `Gerar ${what}`)) return;
+    const job = await run('video-delivery', () => invoke<Job>('agents.generateVideoDelivery', { id, format: deliveryFormat, coverOnly, confirm: true }), coverOnly ? 'Gerando capa no Codex ImageGen…' : 'Gerando capa no Codex ImageGen e legenda…');
     if (job) trackJob(job);
   }
   async function generateVideoCopy() {
     const label = deliveryFormat === 'youtube' ? 'YouTube' : deliveryFormat === 'reels' ? 'Reels' : 'Feed quadrado';
-    if (!await confirm(`Gerar só a copy para ${label}`, 'O Claude Opus 5.5 escreve a copy a partir do briefing e do storyboard. A capa atual é mantida. A copy anterior deste formato, se houver, será substituída e precisará de nova aprovação.', 'Gerar copy')) return;
-    const job = await run('video-copy', () => invoke<Job>('agents.generateVideoCopy', { id, format: deliveryFormat, confirm: true }), 'Gerando copy no Claude…');
+    if (!await confirm(`Gerar só a legenda para ${label}`, 'O Claude Opus 5.5 escreve a legenda a partir do briefing e do storyboard; se ele não estiver disponível, o Codex Luna escreve no lugar. A legenda termina com 5 hashtags. A capa atual é mantida. A legenda anterior deste formato, se houver, será substituída e precisará de nova aprovação.', 'Gerar legenda')) return;
+    const job = await run('video-copy', () => invoke<Job>('agents.generateVideoCopy', { id, format: deliveryFormat, confirm: true }), 'Gerando legenda…');
     if (job) trackJob(job);
   }
   async function answerAgent(answers: AgentAnswer[]): Promise<boolean> {
@@ -1359,8 +1370,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
             </section>
           )}
           {project.kind === 'image' && activeStep.id === 'images' && (
-            <section className="generation-panel" aria-labelledby="generation-title">
-              <h2 id="generation-title">Gerar as imagens</h2>
+            <section className="generation-panel" aria-label="Gerar as imagens">
               <p className="muted">{imageGenerationMessage}</p>
               <label className="asset-version-select">
                 Formato das imagens
@@ -1372,7 +1382,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
                 >
                   {project.unsupportedFormat && <option value="" disabled>Formato removido: {project.unsupportedFormat}</option>}
                   {Object.keys(POSTNOW_FORMATS).filter(isPostNowFormat).map(id => (
-                    <option key={id} value={id}>{`${POSTNOW_FORMATS[id].label} · ${POSTNOW_FORMATS[id].aspect} · ${POSTNOW_FORMATS[id].width}×${POSTNOW_FORMATS[id].height}`}</option>
+                    <option key={id} value={id}>{`${POSTNOW_FORMATS[id].label} · ${POSTNOW_FORMATS[id].width}×${POSTNOW_FORMATS[id].height}`}</option>
                   ))}
                 </select>
               </label>
@@ -1383,9 +1393,8 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
             </section>
           )}
           {project.kind === 'image' && activeStep.id === 'review' && (
-            <section className="image-review-panel" aria-labelledby="image-review-title">
+            <section className="image-review-panel" aria-label="Revisar imagens">
               <div className="section-heading">
-                <h2 id="image-review-title">Revisar imagem a imagem</h2>
                 <p className="field-help">{keptCount} para manter · {redoCount} para refazer · {pendingCount} sem decisão</p>
               </div>
               {!reviewEditable && reviewBlockMessage && <p className="field-help" role="status">{reviewBlockMessage}</p>}
@@ -1474,17 +1483,11 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
             </section>
           )}
           {project.kind === 'image' && visualReview && (
-            <section className="editorial-review" aria-labelledby="editorial-review-title" hidden={activeStep.id !== 'texts'}>
-              <div className="section-heading">
-                <div>
-                  <h2 id="editorial-review-title">Revisão editorial antes das imagens</h2>
-                  <p className="muted">Revise a headline e a copy de cada página e confira as fontes. A geração de imagens só começa depois da sua aprovação.</p>
-                </div>
-              </div>
+            <section className="editorial-review" aria-label="Revisão dos textos" hidden={activeStep.id !== 'texts'}>
               {hasTextContent(visualReview.pages) ? <>
               <VisualTextEditor ref={visualTextEditorRef} key={id} pages={visualReview.pages} storyInteraction={project.visualStyle?.id === 'story-interaction-image'} disabled={Boolean(running) || adaptationStarting || Boolean(project.formatAdaptation)} disabledReason={project.formatAdaptation ? 'Conclua a adaptação antes de editar os textos; o conteúdo original está preservado para novas tentativas.' : running || adaptationStarting ? 'Aguarde o processo em andamento terminar.' : undefined} hasGeneratedImages={Boolean(latestBatch)} onStateChange={state => { setVisualTextDirty(state.dirty); setVisualTextInvalid(state.invalid); }} onSave={saveVisualText} />
               <details className="editorial-review-group">
-                <summary>Afirmações e fontes · {visualReview.claims.length} claims</summary>
+                <summary>Fontes e afirmações · {visualReview.claims.length} {visualReview.claims.length === 1 ? 'item' : 'itens'}</summary>
                 {visualReview.claims.map(claim => (
                   <article className="editorial-claim" key={claim.id}>
                     <strong>{claim.claim}</strong>
@@ -1528,14 +1531,14 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
               </label>
               {visualPreferencesDirty && <p className="field-help" role="status">Salve as preferências visuais do projeto antes de gerar a capa.</p>}
               <button type="button" className="button secondary" disabled={Boolean(running) || visualPreferencesDirty || busy.has('video-delivery')} onClick={() => { void generateVideoDelivery(); }}>
-                <Sparkles size={16} />Gerar capa (Codex) e copy (Claude)
+                <Sparkles size={16} />Gerar capa e legenda
               </button>
               <button type="button" className="button secondary" disabled={Boolean(running) || visualPreferencesDirty || busy.has('video-delivery')} onClick={() => { void generateVideoDelivery(true); }}>
-                <Image size={16} />Gerar só a capa (Codex)
+                <Image size={16} />Gerar só a capa
               </button>
               {deliveryAssets.some(asset => asset.name === `delivery/cover-${deliveryFormat}.png`) && (
                 <button type="button" className="button secondary" disabled={Boolean(running) || busy.has('video-copy')} onClick={() => { void generateVideoCopy(); }}>
-                  <FileText size={16} />Gerar só a copy (Claude)
+                  <FileText size={16} />Gerar só a legenda
                 </button>
               )}
               {deliveryAssets.length === 0 && <p className="muted">Nenhuma copy ou capa gerada ainda.</p>}
@@ -1603,9 +1606,27 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
           )}
 
           {activeStep.id === 'brief' && (
+          <section className="editor-panel">
+            <div className="editor-tabs">
+              <button className={editor === 'brief' ? 'active' : ''} onClick={() => setEditor('brief')} aria-pressed={editor === 'brief'}>Sobre o conteúdo</button>
+              <button className={editor === 'notes' ? 'active' : ''} onClick={() => setEditor('notes')} aria-pressed={editor === 'notes'}>Instruções para a IA</button>
+            </div>
+            <label className="sr-only" htmlFor="project-editor">{editor === 'brief' ? 'Sobre o conteúdo' : 'Instruções para a IA'}</label>
+            <textarea
+              id="project-editor"
+              className="project-editor"
+              rows={8}
+              value={editor === 'brief' ? brief : notes}
+              onChange={event => editor === 'brief' ? setBrief(event.target.value) : setNotes(event.target.value)}
+              placeholder={editor === 'brief' ? 'Sobre o que é este conteúdo? Escreva o assunto, para quem é e o que a pessoa deve fazer depois de ver.' : 'Ex.: usar a logo do Claude em 3D, fundo escuro, estilo minimalista. A IA lê isto na preparação dos textos, na geração e nas revisões. Mudar isto depois de aprovar os textos pede uma nova aprovação.'}
+              maxLength={50000}
+            />
+          </section>
+          )}
+          {activeStep.id === 'brief' && (
             <section className="preview-panel" aria-labelledby="visual-preferences-title">
               <div className="panel-heading"><h2 id="visual-preferences-title">Preferências visuais do projeto</h2></div>
-              <p className="field-help">Escolha no início se o agente pode usar fotos da marca e quem aparece na arte. Esta preferência fica salva e vale para geração, revisão e renderização.</p>
+              <p className="field-help">Defina como as artes devem ficar. Estas escolhas valem para o projeto todo e não serão perguntadas de novo a cada geração.</p>
               <div className="form-row-2col">
                 {project.kind === 'image' && (
                   <label className="field-group">
@@ -1615,6 +1636,13 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
                     </select>
                   </label>
                 )}
+                <label className="field-group">
+                  <span className="field-title">Marca vinculada</span>
+                  <select value={imagePreferenceDraft.brandId} onChange={event => setImagePreferenceDraft(value => ({ ...value, brandId: event.target.value }))}>
+                    <option value="">Sem marca</option>
+                    {snapshot.brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+                  </select>
+                </label>
                 <label className="field-group">
                   <span className="field-title">Fotos e referências da marca</span>
                   <select value={imagePreferenceDraft.useBrandImages ? 'yes' : 'no'} onChange={event => setImagePreferenceDraft(value => ({ ...value, useBrandImages: event.target.value === 'yes' }))}>
@@ -1641,33 +1669,18 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
               </div>
               <p className="field-help">
                 {imagePreferenceDraft.useBrandImages
-                  ? 'Fotos só serão usadas quando disponíveis, pertinentes e autorizadas.'
-                  : 'Fotos da marca não serão anexadas ao agente. Paleta e documentos textuais continuam disponíveis.'}
-                {project.kind === 'image' && !imagePreferenceDraft.useBrandImages ? ' Páginas configuradas para retrato do cliente precisam ser revisadas para “Ninguém” ou “Outra pessoa”.' : ''}
-                {project.kind === 'image' && imagePreferenceDraft.logoPolicy === 'none' ? ' Sem logo nas artes; ainda é obrigatório cadastrar uma logo oficial PNG no PostNow.' : ''}
+                  ? 'Fotos da marca só serão usadas quando forem pertinentes e autorizadas.'
+                  : 'As fotos da marca não serão usadas. A paleta e os documentos de texto continuam valendo.'}
+                {project.kind === 'image' && !imagePreferenceDraft.useBrandImages ? ' Sem fotos da marca, as páginas não podem mostrar a cliente: em Textos, escolha “Ninguém” ou “Outra pessoa”.' : ''}
+                {project.kind === 'image' && imagePreferenceDraft.logoPolicy === 'none' ? ' Mesmo sem logo nas artes, a marca precisa ter uma logo PNG cadastrada em Marcas.' : ''}
               </p>
+              {project.kind === 'image' && !imagePreferenceDraft.brandId && (
+                <p className="field-help inline-warning" role="status">Escolha a marca em “Marca vinculada” e salve: sem marca as imagens não podem ser geradas, porque a logo é obrigatória.</p>
+              )}
               <button type="button" className="button secondary" disabled={!visualPreferencesDirty || Boolean(running) || busy.has('visual-preferences')} onClick={() => { void saveVisualPreferences(); }}>
                 Salvar preferências
               </button>
             </section>
-          )}
-          {activeStep.id === 'brief' && (
-          <section className="editor-panel">
-            <div className="editor-tabs">
-              <button className={editor === 'brief' ? 'active' : ''} onClick={() => setEditor('brief')} aria-pressed={editor === 'brief'}>Briefing</button>
-              <button className={editor === 'notes' ? 'active' : ''} onClick={() => setEditor('notes')} aria-pressed={editor === 'notes'}>Notas de direção</button>
-            </div>
-            <label className="sr-only" htmlFor="project-editor">{editor === 'brief' ? 'Briefing do projeto' : 'Notas de direção'}</label>
-            <textarea
-              id="project-editor"
-              className="project-editor"
-              rows={8}
-              value={editor === 'brief' ? brief : notes}
-              onChange={event => editor === 'brief' ? setBrief(event.target.value) : setNotes(event.target.value)}
-              placeholder={editor === 'brief' ? 'Objetivo, público, formato e mensagem. Um bom briefing dá direção à criação.' : 'Registre ajustes, referências e decisões para a próxima sessão.'}
-              maxLength={50000}
-            />
-          </section>
           )}
 
           {project.kind === 'video' && activeStep.id === 'script' && (

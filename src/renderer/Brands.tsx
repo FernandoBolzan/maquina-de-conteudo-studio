@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
-import { ArrowRight, ExternalLink, FileImage, FileText, Image as ImageIcon, Palette, Pencil, Plus, Upload, X } from 'lucide-react';
+import { ArrowRight, ExternalLink, FileImage, FileText, Image as ImageIcon, Palette, Pencil, Plus, Shapes, Upload, User, X } from 'lucide-react';
+import { IMAGEGEN_REFERENCE_LIMIT } from '../shared/brand-references';
 import type { Brand, BrandReference } from '../shared/contracts';
 import { Empty, Modal, PageHeading } from './components';
 import { invoke, type ScreenProps } from './state';
@@ -10,6 +11,8 @@ interface DraftReference {
   path: string;
   kind: BrandReference['kind'];
   url?: string;
+  portrait?: boolean;
+  element?: boolean;
 }
 
 const initialColors = ['#F97316', '#121110', '#FAFAFA'];
@@ -23,6 +26,12 @@ function inferKind(path: string): BrandReference['kind'] {
 
 function fileName(path: string): string {
   return path.split(/[\\/]/).pop() || path;
+}
+
+/** Logo salva no cofre tem nome UUID; mostra um rótulo legível em vez dele. */
+function logoLabel(path: string): string {
+  const name = fileName(path);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\./i.test(name) ? 'Logo salva na marca' : name;
 }
 
 export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
@@ -48,6 +57,8 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
         path: ref.path,
         kind: ref.kind,
         url: ref.url,
+        portrait: ref.portrait === true,
+        element: ref.element === true,
       })) ?? [],
     );
   }
@@ -92,7 +103,7 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
           tone,
           colors,
           logo: logo ?? '',
-          references: references.map(ref => ({ id: ref.id, name: ref.name, path: ref.path })),
+          references: references.map(ref => ({ id: ref.id, name: ref.name, path: ref.path, portrait: ref.portrait === true, element: ref.element === true })),
         }),
       'Identidade e referências da marca salvas.',
     );
@@ -239,7 +250,7 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
                   <FileImage size={24} className="icon-ok" />
                 )}
                 <span>
-                  <strong>{logo ? fileName(logo) : 'Nenhuma logo selecionada'}</strong>
+                  <strong>{logo ? logoLabel(logo) : 'Nenhuma logo selecionada'}</strong>
                   <small>PNG, JPG, WebP ou SVG · cópia isolada no cofre da marca</small>
                 </span>
                 <button className="button small secondary" type="button" onClick={() => { void pickLogo(); }} disabled={busy.has('logo')}>
@@ -256,12 +267,26 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
                 <div className="references-header">
                   <div>
                     <div className="field-label">Fotos, PDFs e Referências Visuais ({references.length})</div>
-                    <small className="field-help">Adicione fotos do especialista, referências de carrossel/estilo, PDFs de manual da marca ou guias em texto.</small>
+                    <small className="field-help">Adicione fotos da pessoa da marca, referências de estilo, PDFs de manual ou guias em texto.</small>
                   </div>
                   <button type="button" className="button small secondary" onClick={() => { void pickReferences(); }} disabled={busy.has('brand-refs')}>
                     <Plus size={14} />Adicionar fotos ou PDFs
                   </button>
                 </div>
+                {references.some(ref => ref.kind === 'image') && (
+                  <div className="field-help references-roles-legend">
+                    <strong>Papel de cada imagem para a IA</strong>
+                    <ul>
+                      <li><b>Arte de referência</b> (sem marcação): o nosso padrão visual, que a IA segue ao criar.</li>
+                      <li><b>Usar como retrato</b>: a foto de rosto da pessoa. Só uma; com ela, a capa e o último slide mostram essa pessoa.</li>
+                      <li><b>Usar na arte</b>: algo que deve aparecer nas artes, como a logo de outra marca.</li>
+                    </ul>
+                    <span>
+                      O gerador recebe até {IMAGEGEN_REFERENCE_LIMIT} imagens por vez: primeiro o retrato e os elementos, depois as artes na ordem da lista.
+                      {references.filter(ref => ref.kind === 'image').length > IMAGEGEN_REFERENCE_LIMIT ? ` Esta marca tem ${references.filter(ref => ref.kind === 'image').length} imagens; as que não couberem ficam só como texto.` : ''}
+                    </span>
+                  </div>
+                )}
 
                 {references.length === 0 ? (
                   <div className="references-empty">
@@ -284,6 +309,29 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
                         <div className="reference-info">
                           <strong title={ref.name}>{ref.name}</strong>
                           <small>{ref.url ? 'Salvo na marca' : 'Novo arquivo · será copiado ao salvar'}</small>
+                          {ref.kind === 'image' && (
+                            <div className="reference-roles">
+                              {!ref.portrait && !ref.element && <small>Arte de referência</small>}
+                              <button
+                                type="button"
+                                className={`portrait-toggle${ref.portrait ? ' is-on' : ''}`}
+                                aria-pressed={ref.portrait === true}
+                                title={ref.portrait ? 'Clique para desmarcar este retrato' : 'Usar esta foto como retrato da cliente'}
+                                onClick={() => setReferences(current => current.map((item, i) => i === index ? { ...item, portrait: !item.portrait, element: false } : { ...item, portrait: false }))}
+                              >
+                                <User size={11} aria-hidden="true" />{ref.portrait ? 'Retrato da cliente' : 'Usar como retrato'}
+                              </button>
+                              <button
+                                type="button"
+                                className={`portrait-toggle${ref.element ? ' is-on' : ''}`}
+                                aria-pressed={ref.element === true}
+                                title={ref.element ? 'Clique para voltar a ser arte de referência' : 'Usar esta imagem dentro das artes (logo ou produto de outra marca)'}
+                                onClick={() => setReferences(current => current.map((item, i) => i === index ? { ...item, element: !item.element, portrait: false } : item))}
+                              >
+                                <Shapes size={11} aria-hidden="true" />{ref.element ? 'Elemento da arte' : 'Usar na arte'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                         <div className="reference-actions">
                           {ref.url && (
