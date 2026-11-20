@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { approvedPortraitAt, clearMirroredPortrait, composeEnginePrompt, engineClientId, postnowHome, preparePostNowGeneration, withMirroredPortrait } from '../src/main/content/postnow.js';
 import { Runtime } from '../src/main/runtime.js';
 import type { Brand, Project, ProjectDetail } from '../src/shared/contracts.js';
-import { brandImageOptOutIssues, portraitDiversityIssues, portraitPlanIssues, portraitRequiredPages } from '../src/shared/depicted-person.js';
+import { brandImageOptOutIssues, portraitDiversityIssues, portraitPlanIssues } from '../src/shared/depicted-person.js';
 
 const ONE_PIXEL_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p2sAAAAASUVORK5CYII=', 'base64');
 const ENGINE_MARKERS = [
@@ -122,6 +122,51 @@ test('a carousel with a valid depicted_person on every page is ready and exposes
   }
 });
 
+test('saving the project preference rewrites every prepared page and asks for a new approval', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mdc-depicted-person-'));
+  const { runtime, project } = await carouselWithIdentities(root, () => 'none');
+  try {
+    let detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
+    detail = await runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }) as ProjectDetail;
+    assert.equal(detail.visualReview?.approved, true);
+    detail = await runtime.invoke('projects.visualPreferences', { id: project.id, depictedPersonPolicy: 'other_person' }) as ProjectDetail;
+    assert.deepEqual(detail.visualReview?.pages.map((page) => page.depictedPerson), Array(5).fill('other_person'));
+    assert.equal(detail.visualReview?.approved, false);
+    const manual = detail.visualReview!.pages.map((page, index) => ({ page: page.page, headline: page.headline, body: page.body, copy: page.copy, depictedPerson: index === 0 ? 'none' : page.depictedPerson }));
+    detail = await runtime.invoke('projects.visual.save', { projectId: project.id, id: project.id, pages: manual }) as ProjectDetail;
+    assert.equal(detail.depictedPersonPolicy, 'auto', 'uma escolha página a página que contradiz a preferência a devolve para Automático');
+    detail = await runtime.invoke('projects.visualPreferences', { id: project.id, depictedPersonPolicy: 'other_person' }) as ProjectDetail;
+    await approveClientPortrait(root, project);
+    detail = await runtime.invoke('projects.visualPreferences', { id: project.id, depictedPersonPolicy: 'client_portrait' }) as ProjectDetail;
+    assert.deepEqual(detail.visualReview?.pages.map((page) => page.depictedPerson), Array(5).fill('client_portrait'));
+    assert.equal(detail.visualReview?.ready, true, detail.visualReview?.blocking.join(' | '));
+  } finally {
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('approving the texts copies a claim recorded as "sources" into the "source" key the PostNow engine validates', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mdc-depicted-person-'));
+  const { runtime, project } = await carouselWithIdentities(root, () => 'none');
+  try {
+    const claimsFile = join(project.path, 'research', 'claims.json');
+    const sources = [{ title: 'Best practices', publisher: 'Anthropic', url: 'https://example.org/bp' }];
+    await writeFile(claimsFile, `${JSON.stringify({ reviewed: false, claims: [{ id: 'c1', claim: 'Fato verificável.', status: 'approved', sources }] }, null, 2)}\n`);
+    let detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
+    assert.equal(detail.visualReview?.ready, true, detail.visualReview?.blocking.join(' | '));
+    detail = await runtime.invoke('projects.visual.approve', { id: project.id, approved: true, contentHash: detail.visualReview!.contentHash }) as ProjectDetail;
+    assert.equal(detail.visualReview?.approved, true);
+    const saved = JSON.parse(await readFile(claimsFile, 'utf8')) as { reviewed: boolean; claims: { source?: unknown; sources?: unknown }[] };
+    assert.equal(saved.reviewed, true);
+    assert.deepEqual(saved.claims[0]?.source, sources);
+    assert.deepEqual(saved.claims[0]?.sources, sources);
+  } finally {
+    await runtime.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('agents.generateImages stops before any PostNow round when a page has no depicted_person', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mdc-depicted-person-'));
   const { runtime, project } = await carouselWithIdentities(root, (index) => (index === 0 ? undefined : 'none'));
@@ -164,21 +209,14 @@ test('composeEnginePrompt injects the library visual direction once, before the 
   assert.equal(composeEnginePrompt(withDark, 'none'), composeEnginePrompt(editorial, 'none'));
 });
 
-test('portraitRequiredPages covers the carousel cover and closing page, or the single page of a post or story', () => {
-  assert.deepEqual(portraitRequiredPages('carousel', 6), [1, 6]);
-  assert.deepEqual(portraitRequiredPages('post', 1), [1]);
-  assert.deepEqual(portraitRequiredPages('story', 1), [1]);
-});
-
-test('portraitPlanIssues blocks client_portrait without an approved portrait and missing client pages when there is one', () => {
+test('portraitPlanIssues only blocks client_portrait when the brand has no approved portrait; having one never forces a page', () => {
   const none = ['none', 'none', 'none', 'none', 'none'];
-  assert.equal(portraitPlanIssues('carousel', ['client_portrait', ...none.slice(1)], false).length, 1);
-  assert.match(portraitPlanIssues('carousel', ['client_portrait', ...none.slice(1)], false)[0]!, /^Página 1: /);
-  assert.deepEqual(portraitPlanIssues('carousel', none, false), []);
-  assert.equal(portraitPlanIssues('carousel', none, true).length, 2);
-  assert.match(portraitPlanIssues('carousel', none, true)[0]!, /^Página 1: com retrato aprovado/);
-  assert.deepEqual(portraitPlanIssues('carousel', ['client_portrait', 'other_person', 'none', 'none', 'client_portrait'], true), []);
-  assert.deepEqual(portraitPlanIssues('post', ['client_portrait'], true), []);
+  assert.equal(portraitPlanIssues(['client_portrait', ...none.slice(1)], false).length, 1);
+  assert.match(portraitPlanIssues(['client_portrait', ...none.slice(1)], false)[0]!, /^Página 1: /);
+  assert.deepEqual(portraitPlanIssues(none, false), []);
+  assert.deepEqual(portraitPlanIssues(none, true), []);
+  assert.deepEqual(portraitPlanIssues(['client_portrait', 'none', 'client_portrait'], true), []);
+  assert.deepEqual(portraitPlanIssues(['other_person'], true), []);
 });
 
 test('approvedPortraitAt reads brand.owner_portrait from the engine profile and reports none when the profile has no portrait', async () => {
@@ -360,17 +398,15 @@ test('client_portrait without an approved portrait in the engine profile blocks 
   }
 });
 
-test('with an approved portrait, the carousel cover and closing page must show the client', async () => {
+test('with an approved portrait, choosing nobody on every page is accepted and kept as chosen', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mdc-depicted-person-'));
   const identities = ['none', 'none', 'none', 'none', 'none'];
   const { runtime, project } = await carouselWithIdentities(root, (index) => identities[index]);
   try {
     await approveClientPortrait(root, project);
     const detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
-    const blocking = detail.visualReview?.blocking ?? [];
-    assert.equal(detail.visualReview?.ready, false);
-    assert.ok(blocking.some((item) => item.startsWith('Página 1: com retrato aprovado')), blocking.join(' | '));
-    assert.ok(blocking.some((item) => item.startsWith('Página 5: com retrato aprovado')), blocking.join(' | '));
+    assert.equal(detail.visualReview?.ready, true, detail.visualReview?.blocking.join(' | '));
+    assert.deepEqual(detail.visualReview?.pages.map((page) => page.depictedPerson), identities);
   } finally {
     await runtime.dispose();
     await rm(root, { recursive: true, force: true });

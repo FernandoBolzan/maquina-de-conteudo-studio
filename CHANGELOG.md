@@ -4,6 +4,23 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 
 ## 2026-11-20
 
+### Publicado — v0.3.4
+- Inclui tudo que está abaixo nesta data, além da v0.3.3. Também corrige o motor: afirmações com a fonte em `sources` agora passam na geração (ao aprovar os textos, a fonte é copiada para `source`, a chave que o PostNow valida).
+
+### Novo — logo para fundo escuro
+- Em Marcas há o campo "Logo para fundo escuro (opcional)" (PNG, geralmente a versão branca). Nas artes de fundo escuro o PostNow aplica essa logo no lugar da oficial; antes a logo preta quase sumia no escuro. A escolha é automática pela cor do fundo no canto da logo, e sem a logo escura vale a oficial. O cadastro real do Fernando passou a usar `Bolzan-full-branca.png` nesse campo.
+
+### Melhorado — rosto reconhecível quando a pessoa aparece
+- A IA agora recebe a ordem de mostrar o rosto grande, de frente ou em três quartos, nunca de cabeça baixa, de costas ou pequeno e distante, mesmo que a função visual peça outra ação. Num teste real, a página que mostrava a pessoa olhando o celular saiu com um rosto pouco parecido.
+- "Preparar textos" instrui o agente a nunca deixar a lista de fontes vazia (um teste real com conteúdo de dicas voltou sem fontes e travou a aprovação), e a mensagem de bloqueio passou a dizer o que fazer.
+
+### Corrigido — o botão não liberava por causa das fontes (afirmações)
+- Quando o agente gravava a fonte de uma afirmação em `sources` (lista com título, editora e link) em vez de `source`, o app lia a fonte como vazia e bloqueava com "Claim N: afirmação e fonte são obrigatórias", mesmo com tudo preenchido. Agora as duas formas valem, e o título, a editora ou a organização da fonte aparecem em "Fontes e afirmações".
+
+### Alterado — quem aparece na arte é escolha sua
+- Ter foto da pessoa na marca deixa de obrigar o cliente na capa e no fechamento. A IA propõe o cliente na capa e no fechamento por padrão, mas "Ninguém" ou "Outra pessoa" valem em qualquer página e no projeto inteiro. Só "Cliente (retrato aprovado)" continua exigindo uma foto da pessoa na marca.
+- Ao salvar a preferência "Quem aparece na arte" (Ninguém, Outra pessoa ou Cliente) em um projeto que já tem textos, todas as páginas passam a seguir essa escolha na hora, e os textos precisam ser aprovados de novo. "Cliente" no projeto vale para todas as páginas; antes só a capa e o fechamento seguiam.
+
 ### Corrigido — a arte saía sem a pessoa
 - O prompt de geração não dizia qual página mostra a pessoa: listava título, subtítulo e função visual, mas não o "Quem aparece". Agora cada página diz quem aparece: a pessoa da marca (com os números dos anexos que são a foto dela), outra pessoa (sem usar o rosto da marca) ou ninguém. Sem foto da pessoa anexada, a IA deve avisar em vez de inventar o rosto.
 - A foto da pessoa deixa de ser confundida com arte de referência: pessoas que aparecem nas artes de referência nunca emprestam rosto, corpo ou roupa; elas servem só de layout e estilo.

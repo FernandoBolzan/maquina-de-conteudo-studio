@@ -46,6 +46,15 @@ test('claims with source as array of objects or object are extracted and do not 
             },
           ],
         },
+        {
+          id: 'claim-2',
+          claim: 'A documentação recomenda dar um critério de sucesso verificável.',
+          status: 'qualified',
+          qualification: 'Recomendação oficial; o efeito varia conforme a tarefa.',
+          sources: [
+            { title: 'Best practices for Claude Code', publisher: 'Anthropic', url: 'https://code.claude.com/docs/en/best-practices', accessed_on: '2026-11-20' },
+          ],
+        },
       ],
     };
     await writeFile(join(project.path, 'research', 'claims.json'), JSON.stringify(claimsJson, null, 2));
@@ -56,9 +65,11 @@ test('claims with source as array of objects or object are extracted and do not 
       !blocking.some(b => b.includes('afirmação e fonte são obrigatórias')),
       `Expected source not to be blocked, but got: ${blocking.join(', ')}`
     );
-    assert.equal(detail.visualReview?.claims.length, 1);
+    assert.equal(detail.visualReview?.claims.length, 2);
     assert.equal(detail.visualReview?.claims[0]?.source, 'Lei nº 13.105/2015 — CPC art. 733');
     assert.equal(detail.visualReview?.claims[0]?.sourceUrl, 'https://gov.br/lei-cpc');
+    assert.equal(detail.visualReview?.claims[1]?.source, 'Best practices for Claude Code');
+    assert.equal(detail.visualReview?.claims[1]?.sourceUrl, 'https://code.claude.com/docs/en/best-practices');
   } finally {
     await runtime.dispose();
     await rm(root, { recursive: true, force: true });

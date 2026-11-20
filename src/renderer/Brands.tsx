@@ -104,6 +104,8 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
   const [colors, setColors] = useState<string[]>(initialColors);
   const [logo, setLogo] = useState<string | undefined>();
   const [logoUrl, setLogoUrl] = useState<string | undefined>();
+  const [logoDark, setLogoDark] = useState<string | undefined>();
+  const [logoDarkUrl, setLogoDarkUrl] = useState<string | undefined>();
   const [references, setReferences] = useState<DraftReference[]>([]);
 
   function edit(brand?: Brand) {
@@ -113,6 +115,8 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
     setColors(brand?.colors.length ? [...brand.colors] : [...initialColors]);
     setLogo(brand?.logo);
     setLogoUrl(brand?.logoUrl);
+    setLogoDark(brand?.logoDark);
+    setLogoDarkUrl(brand?.logoDarkUrl);
     setReferences(
       brand?.references?.map(ref => ({
         id: ref.id,
@@ -131,6 +135,14 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
     if (path) {
       setLogo(path);
       setLogoUrl(undefined);
+    }
+  }
+
+  async function pickDarkLogo() {
+    const path = await run('logo-dark', () => invoke<string | undefined>('app.pick', { extensions: ['png'] }));
+    if (path) {
+      setLogoDark(path);
+      setLogoDarkUrl(undefined);
     }
   }
 
@@ -174,6 +186,7 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
           tone,
           colors,
           logo: logo ?? '',
+          logoDark: logoDark ?? '',
           references: references.map(ref => ({ id: ref.id, name: ref.name, path: ref.path, portrait: ref.portrait === true, element: ref.element === true })),
         }),
       'Identidade e referências da marca salvas.',
@@ -334,6 +347,27 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
                 )}
               </div>
 
+              <div className="field-label">Logo para fundo escuro (opcional)</div>
+              <div className="logo-picker logo-picker-dark">
+                {logoDarkUrl ? (
+                  <img className="brand-logo-thumb" src={logoDarkUrl} alt="Prévia da logo para fundo escuro" />
+                ) : (
+                  <FileImage size={24} className="icon-ok" />
+                )}
+                <span>
+                  <strong>{logoDark ? logoLabel(logoDark) : 'Nenhuma logo para fundo escuro'}</strong>
+                  <small>PNG, geralmente a versão branca. O app usa esta logo quando o fundo da arte é escuro; sem ela, usa a logo oficial.</small>
+                </span>
+                <button className="button small secondary" type="button" onClick={() => { void pickDarkLogo(); }} disabled={busy.has('logo-dark')}>
+                  <Upload size={14} />{logoDark ? 'Trocar logo' : 'Escolher logo'}
+                </button>
+                {logoDark && (
+                  <button className="icon-button" type="button" aria-label="Remover logo para fundo escuro" onClick={() => { setLogoDark(undefined); setLogoDarkUrl(undefined); }}>
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+
               <div className="references-section people-section">
                 <div className="references-header">
                   <div>
@@ -345,7 +379,7 @@ export function Brands({ snapshot, run, refresh, busy }: ScreenProps) {
                   </button>
                 </div>
                 <p className="field-help references-portrait-help">
-                  A primeira foto é o retrato oficial e a IA recebe até {PORTRAIT_ATTACH_LIMIT} fotos por vez. Com pelo menos uma foto da pessoa, a capa e o último slide passam a mostrar essa pessoa.
+                  A primeira foto é o retrato oficial e a IA recebe até {PORTRAIT_ATTACH_LIMIT} fotos por vez. Com fotos da pessoa, a IA propõe a pessoa na capa e no fechamento; em cada projeto, em &quot;Quem aparece na arte&quot;, você escolhe quem aparece.
                 </p>
                 {references.some(ref => ref.portrait) ? (
                   <div className="reference-grid">

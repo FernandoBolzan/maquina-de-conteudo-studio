@@ -239,8 +239,9 @@ async function ensureClient(services: Services, python: string, engineRoot: stri
   const exists = clients.split(/\r?\n/).some(line => line.split(/\s+/)[0] === clientId);
   if (exists) {
     await checkedCapture(services, python, engineRoot, env, ['client', 'set-logo', clientId, '--logo', brand.logo], 'PostNow não conseguiu sincronizar a logo oficial.', signal);
+    if (brand.logoDark) await checkedCapture(services, python, engineRoot, env, ['client', 'set-logo', clientId, '--logo', brand.logoDark, '--variant', 'dark'], 'PostNow não conseguiu sincronizar a logo para fundo escuro.', signal);
   } else {
-    await checkedCapture(services, python, engineRoot, env, ['client', 'add', '--non-interactive', '--name', clientName, '--logo', brand.logo, '--page-count', String(Math.max(3, pageCount))], 'PostNow não conseguiu cadastrar a marca.', signal);
+    await checkedCapture(services, python, engineRoot, env, ['client', 'add', '--non-interactive', '--name', clientName, '--logo', brand.logo, ...(brand.logoDark ? ['--logo-variant', `dark=${brand.logoDark}`] : []), '--page-count', String(Math.max(3, pageCount))], 'PostNow não conseguiu cadastrar a marca.', signal);
   }
   return clientId;
 }
@@ -257,7 +258,7 @@ async function synchronizeNativeProject(project: Project, format: PostNowFormatI
     if (issues.length) throw new Error(issues.join(' '));
   }
   const ownerPortrait = project.useBrandImages === false ? undefined : await approvedPortraitAt(home, brand);
-  const portraitIssues = portraitPlanIssues(type, identities, ownerPortrait !== undefined);
+  const portraitIssues = portraitPlanIssues(identities, ownerPortrait !== undefined);
   if (portraitIssues.length) throw new Error(portraitIssues.join(' '));
   const pages: Record<string, unknown>[] = sourcePages.map((source, index) => {
     const page = object(source, 'Página PostNow');
@@ -480,7 +481,7 @@ async function runFinalize(project: Project, brand: Brand, batchId: string, serv
   const profile = profileValue && typeof profileValue === 'object' && !Array.isArray(profileValue) ? profileValue as Record<string, unknown> : {};
   const logoConfig = profile.logo && typeof profile.logo === 'object' && !Array.isArray(profile.logo) ? profile.logo as Record<string, unknown> : {};
   const logoVariants = logoConfig.variants && typeof logoConfig.variants === 'object' && !Array.isArray(logoConfig.variants) ? logoConfig.variants as Record<string, unknown> : {};
-  const hasDarkLogoVariant = typeof logoVariants.dark === 'string';
+  const hasDarkLogoVariant = Boolean(brand.logoDark) && typeof logoVariants.dark === 'string';
 
   const mirrorGenerated = await directory(nativeProject, 'generated');
   for (let page = 1; page <= count; page++) {

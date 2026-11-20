@@ -36,25 +36,16 @@ export function brandImageOptOutIssues(identities: readonly unknown[]): string[]
     : [];
 }
 
-/** Páginas que mostram a cliente quando há retrato aprovado: capa e última página do carrossel; a única página de post ou Story. Números começam em 1. */
-export function portraitRequiredPages(kind: PostNowKind, pageCount: number): number[] {
-  if (pageCount < 1) return [];
-  return kind === 'carousel' && pageCount > 1 ? [1, pageCount] : [1];
-}
-
 /**
- * Bloqueios do plano de retratos. `identities[i]` é a escolha da página i+1. Escolhas ausentes ou inválidas
- * são bloqueadas por quem valida cada página; aqui entram só as regras de retrato.
+ * Bloqueio do plano de retratos. `identities[i]` é a escolha da página i+1. Escolhas ausentes ou inválidas
+ * são bloqueadas por quem valida cada página; aqui entra só a regra do retrato: `client_portrait` exige uma foto da pessoa na marca.
+ * Ter foto da pessoa não obriga nenhuma página a mostrá-la: a escolha é da pessoa, página a página (a IA propõe cliente na capa e no fechamento).
  */
-export function portraitPlanIssues(kind: PostNowKind, identities: readonly unknown[], portraitApproved: boolean): string[] {
-  const withoutPortrait = identities.flatMap((identity, index) => identity === 'client_portrait' && !portraitApproved
+export function portraitPlanIssues(identities: readonly unknown[], portraitApproved: boolean): string[] {
+  if (portraitApproved) return [];
+  return identities.flatMap((identity, index) => identity === 'client_portrait'
     ? [`Página ${index + 1}: Cliente (retrato aprovado) exige uma foto marcada como retrato da cliente na marca. Marque-a em Marcas ou escolha outra opção.`]
     : []);
-  if (!portraitApproved) return withoutPortrait;
-  const missingClient = portraitRequiredPages(kind, identities.length)
-    .filter(page => isDepictedPerson(identities[page - 1]) && identities[page - 1] !== 'client_portrait')
-    .map(page => `Página ${page}: com retrato aprovado, esta página precisa mostrar a cliente; escolha Cliente (retrato aprovado). Se não deve mostrar a cliente, desmarque o retrato em Marcas.`);
-  return [...withoutPortrait, ...missingClient];
 }
 
 /** Impede que a capa e o fechamento do carrossel usem a mesma cena, pose ou descrição idêntica da cliente. */
@@ -68,16 +59,10 @@ export function portraitDiversityIssues(kind: PostNowKind, pages: readonly { vis
   return [];
 }
 
-/**
- * Bloqueios da preferência de projeto ao salvar. Com retrato aprovado, capa e fechamento precisam mostrar a cliente,
- * então `none` e `other_person` ficam indisponíveis; `client_portrait` exige o retrato.
- */
+/** Bloqueios da preferência de projeto ao salvar: `client_portrait` exige foto da pessoa na marca; os demais valores valem com ou sem foto. */
 export function depictedPersonPolicyIssues(policy: DepictedPersonPolicy, portraitApproved: boolean): string[] {
   if (policy === 'client_portrait' && !portraitApproved) {
     return ['Cliente (retrato aprovado) exige uma foto marcada como retrato da cliente na marca. Marque-a em Marcas ou escolha outra opção.'];
-  }
-  if (portraitApproved && (policy === 'none' || policy === 'other_person')) {
-    return ['Com retrato aprovado, a capa e o fechamento precisam mostrar a cliente. Escolha Automático ou Cliente (retrato aprovado), ou desmarque o retrato da cliente em Marcas.'];
   }
   return [];
 }

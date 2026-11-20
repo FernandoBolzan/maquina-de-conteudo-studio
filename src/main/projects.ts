@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join, relative } from 'node:path';
 import { postNowFormatAcceptsPageCount, type Asset, type Brand, type BrandReference, type FormatAdaptation, type GenerationBatch, type LocalVoiceEngine, type LocalVoiceSelection, type NarrationMode, type NarrationProvider, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type VisualGenerationReview, type VisualStyle } from '../shared/contracts.js';
 import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, formatCanvas, isPostNowFormat, pagesRangeFor, type PostNowKind } from '../shared/formats.js';
-import { brandImageOptOutIssues, depictedPersonPolicyIssues, isDepictedPerson, isDepictedPersonPolicy, portraitDiversityIssues, portraitPlanIssues } from '../shared/depicted-person.js';
+import { brandImageOptOutIssues, depictedPersonPolicyIssues, isDepictedPerson, isDepictedPersonPolicy, type DepictedPerson, portraitDiversityIssues, portraitPlanIssues } from '../shared/depicted-person.js';
 import { applyArtText, captionHashtagIssue, captionMirror, onScreenItems, onScreenText, validateStoryboardScenes, validateVisualTextPages, type VisualTextEditPage, type VisualTextEditScene } from '../shared/visual-text.js';
 import { composeVideoStyle, visualStyleFor } from '../shared/prompt-library.js';
 import { isImageBackgroundMode, resolveImageBackgroundMode } from '../shared/image-background.js';
@@ -710,9 +710,21 @@ async function saveVisualPreferences(root: string, stored: StoredProject, payloa
     const issues = depictedPersonPolicyIssues(payload.depictedPersonPolicy, portraitApproved);
     if (issues.length) throw new Error(issues.join(' '));
     stored.project.depictedPersonPolicy = payload.depictedPersonPolicy;
+    if (payload.depictedPersonPolicy !== 'auto') await applyDepictedPersonPolicyToPages(stored, payload.depictedPersonPolicy);
   }
   await save(root, stored);
   return detail(root, stored, services);
+}
+/** Textos já preparados passam a seguir a preferência "Quem aparece na arte" do projeto; a aprovação dos textos precisa ser refeita. */
+async function applyDepictedPersonPolicyToPages(stored: StoredProject, policy: DepictedPerson): Promise<void> {
+  const projectFile = await localPath(stored.project.path, 'project.json');
+  const native = await readJson(projectFile).then(value => object(value, 'Projeto PostNow'), () => undefined);
+  if (!native || !Array.isArray(native.pages)) return;
+  const pages = native.pages.map((page, index) => object(page, `Página ${index + 1}`));
+  if (pages.every(page => page.depicted_person === policy)) return;
+  native.pages = pages.map(page => ({ ...page, depicted_person: policy }));
+  await atomicJson(projectFile, native);
+  stored.visualApproval = undefined;
 }
 async function saveVisualText(root: string, payload: Record<string, unknown>, services: Services): Promise<ProjectDetail> {
   const stored = await editableProject(root, services, payload, 'image');
@@ -745,6 +757,9 @@ async function saveVisualText(root: string, payload: Record<string, unknown>, se
     nextPages.push({ ...page, ...fields });
   }
   if (!textChanged) return detail(root, stored, services);
+  // Escolha página a página que contradiz a preferência do projeto: a preferência volta a "Automático" para não ficar desatualizada.
+  const policy = stored.project.depictedPersonPolicy;
+  if (policy && policy !== 'auto' && nextPages.some(page => page.depicted_person !== policy)) stored.project.depictedPersonPolicy = 'auto';
   if (native.editorial !== undefined) {
     const editorial = object(native.editorial, 'Aprovação editorial');
     if ('copy_approved' in editorial) editorial.copy_approved = false;
@@ -1249,6 +1264,12 @@ async function brandAt(root: string, id: string, services?: Services): Promise<B
     if (!(await lstat(brand.logo)).isFile()) throw new Error('Logo da marca não encontrada.');
     if (services) brand.logoUrl = services.assetUrl(brand.logo);
   }
+  if (value.logoDark !== undefined) {
+    if (typeof value.logoDark !== 'string') throw new Error('Logo para fundo escuro inválida.');
+    brand.logoDark = await localPath(join(root, 'brands', id), value.logoDark);
+    if (!(await lstat(brand.logoDark)).isFile()) throw new Error('Logo para fundo escuro não encontrada.');
+    if (services) brand.logoDarkUrl = services.assetUrl(brand.logoDark);
+  }
   if (Array.isArray(value.references)) {
     for (const raw of value.references) {
       const entry = object(raw, 'Referência da marca');
@@ -1332,27 +1353,22 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
   const rawClaims = Array.isArray(claimsDocument.claims) ? claimsDocument.claims : [];
   const claims = rawClaims.map((raw, index) => {
     const claim = object(raw, `Claim ${index + 1}`);
-    let source = '';
     let sourceUrl = typeof claim.source_url === 'string' ? claim.source_url : typeof claim.sourceUrl === 'string' ? claim.sourceUrl : '';
-    if (typeof claim.source === 'string') {
-      source = claim.source;
-    } else if (Array.isArray(claim.source) && claim.source.length > 0) {
-      const titles: string[] = [];
-      for (const item of claim.source) {
-        if (typeof item === 'string' && item.trim()) titles.push(item.trim());
-        else if (typeof item === 'object' && item !== null) {
-          const rec = item as Record<string, unknown>;
-          const t = typeof rec.title === 'string' ? rec.title.trim() : typeof rec.organization === 'string' ? rec.organization.trim() : '';
-          if (t) titles.push(t);
-          if (!sourceUrl && typeof rec.url === 'string' && rec.url.trim()) sourceUrl = rec.url.trim();
-        }
-      }
-      source = titles.join('; ');
-    } else if (typeof claim.source === 'object' && claim.source !== null) {
-      const srcRec = claim.source as Record<string, unknown>;
-      source = typeof srcRec.title === 'string' ? srcRec.title.trim() : typeof srcRec.organization === 'string' ? srcRec.organization.trim() : '';
-      if (!sourceUrl && typeof srcRec.url === 'string' && srcRec.url.trim()) sourceUrl = srcRec.url.trim();
+    // O agente grava a fonte em `source` (texto, objeto ou lista) ou em `sources` (lista de objetos com title/publisher/url).
+    const rawSource = claim.source !== undefined ? claim.source : claim.sources;
+    const sourceItems = Array.isArray(rawSource) ? rawSource : rawSource === undefined ? [] : [rawSource];
+    const titles: string[] = [];
+    for (const item of sourceItems) {
+      if (typeof item === 'string') { if (item.trim()) titles.push(item.trim()); continue; }
+      if (typeof item !== 'object' || item === null) continue;
+      const rec = object(item, `Fonte da afirmação ${index + 1}`);
+      const title = typeof rec.title === 'string' && rec.title.trim() ? rec.title.trim()
+        : typeof rec.organization === 'string' && rec.organization.trim() ? rec.organization.trim()
+        : typeof rec.publisher === 'string' && rec.publisher.trim() ? rec.publisher.trim() : '';
+      if (title) titles.push(title);
+      if (!sourceUrl && typeof rec.url === 'string' && rec.url.trim()) sourceUrl = rec.url.trim();
     }
+    const source = titles.join('; ');
     const qualification = typeof claim.qualification === 'string' ? claim.qualification : '';
     const value = {
       id: typeof claim.id === 'string' ? claim.id : `claim-${index + 1}`,
@@ -1366,7 +1382,7 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
     if (claim.status === 'qualified' && !value.qualification.trim()) blocking.push(`Claim ${index + 1}: informe a ressalva para a afirmação qualificada.`);
     return value;
   });
-  if (!claims.length) blocking.push('Inclua as afirmações e fontes usadas no conteúdo.');
+  if (!claims.length) blocking.push('Inclua as afirmações e fontes usadas no conteúdo. Use Preparar textos para o agente registrar as fontes.');
   let storyboardContent = '';
   try {
     if (!(await lstat(storyboardPath)).isFile()) blocking.push('O storyboard editorial está ausente.');
@@ -1412,7 +1428,7 @@ async function buildVisualReview(stored: StoredProject, services: Services): Pro
   if (pages.length !== Number(native.page_count) || pages.length < 1) blocking.push('A quantidade de páginas nativas não confere com o roteiro.');
   const portraitApproved = stored.project.useBrandImages === false ? false : brand ? (await approvedPortraitAt(await postnowHome(services), brand)) !== undefined : false;
   if (brand && !formatRemoved) {
-    blocking.push(...portraitPlanIssues(nativeType, pages.map(page => page.depictedPerson), portraitApproved));
+    blocking.push(...portraitPlanIssues(pages.map(page => page.depictedPerson), portraitApproved));
     blocking.push(...portraitDiversityIssues(nativeType, rawPages.map(p => ({ visualFunction: typeof (p as Record<string, unknown>).visual_function === 'string' ? (p as Record<string, unknown>).visual_function as string : undefined }))));
   }
   const projectForHash = { ...native };
@@ -1463,6 +1479,11 @@ async function approveVisualContent(root: string, stored: StoredProject, payload
   const editorial = object(native.editorial ?? {}, 'Aprovação editorial');
   native.editorial = { ...editorial, copy_approved: true, claims_reviewed: true };
   claims.reviewed = true;
+  // O motor PostNow só lê `source`; o agente às vezes grava `sources`. A fonte é copiada para a chave que o motor valida, sem perder a original.
+  if (Array.isArray(claims.claims)) claims.claims = claims.claims.map(raw => {
+    const claim = object(raw, 'Claim PostNow');
+    return claim.source === undefined && claim.sources !== undefined ? { ...claim, source: claim.sources } : claim;
+  });
   await atomicJson(nativePath, native);
   await atomicJson(claimsPath, claims);
   const approvedReview = await buildVisualReview(stored, services);
@@ -1876,6 +1897,21 @@ async function saveBrand(root: string, payload: Record<string, unknown>, service
       brand.logoUrl = services.assetUrl(brand.logo);
     }
   }
+  if (payload.logoDark === undefined) {
+    brand.logoDark = existing?.logoDark;
+    brand.logoDarkUrl = existing?.logoDarkUrl;
+  } else if (payload.logoDark !== '') {
+    const source = await safePath(text(payload, 'logoDark', 4000));
+    if (extname(source).toLowerCase() !== '.png') throw new Error('A logo para fundo escuro deve ser PNG.');
+    if (source === existing?.logoDark) {
+      brand.logoDark = source;
+      brand.logoDarkUrl = services.assetUrl(source);
+    } else {
+      brand.logoDark = await localPath(root, join('brands', id, `${randomUUID()}.png`));
+      await copyLocal(source, brand.logoDark);
+      brand.logoDarkUrl = services.assetUrl(brand.logoDark);
+    }
+  }
   if (payload.references === undefined) {
     brand.references = existing?.references ?? [];
   } else if (Array.isArray(payload.references)) {
@@ -1905,6 +1941,7 @@ async function saveBrand(root: string, payload: Record<string, unknown>, service
     tone: brand.tone,
     colors: brand.colors,
     ...(brand.logo ? { logo: brand.logo } : {}),
+    ...(brand.logoDark ? { logoDark: brand.logoDark } : {}),
     references: brand.references.map(ref => ({ id: ref.id, name: ref.name, path: ref.path, kind: ref.kind, ...(ref.portrait ? { portrait: true } : {}), ...(ref.element ? { element: true } : {}) })),
   });
   if (Array.isArray(payload.references) && !brand.references.some(ref => ref.portrait)) {
