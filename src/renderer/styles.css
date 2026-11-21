@@ -1982,6 +1982,49 @@ dialog.modal .choice-option small {
   color: var(--fg);
 }
 
+.job-toast-stack {
+  position: fixed;
+  right: 16px;
+  bottom: 76px;
+  z-index: 901;
+  display: grid;
+  gap: 8px;
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  pointer-events: none;
+}
+.job-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+  pointer-events: auto;
+}
+.job-toast > svg { flex: 0 0 auto; }
+.job-toast.is-succeeded { border-color: var(--accent); background: var(--ok-bg); }
+.job-toast.is-failed,
+.job-toast.is-interrupted { border-color: var(--danger); background: var(--danger-bg); }
+.job-toast.is-cancelled { border-color: var(--warn); background: var(--warn-bg); }
+.job-toast.is-succeeded > svg { color: var(--accent-strong); }
+.job-toast.is-failed > svg,
+.job-toast.is-interrupted > svg { color: var(--danger); }
+.job-toast.is-cancelled > svg { color: var(--warn); }
+.job-toast-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.job-toast-text strong { white-space: nowrap; }
+.job-toast .button { flex: 0 0 auto; white-space: nowrap; }
+
+@media (max-width: 560px) {
+  .job-toast-stack { right: 8px; bottom: 76px; width: calc(100vw - 16px); }
+  .job-toast { align-items: flex-start; flex-wrap: wrap; }
+}
+
 /* ==================== RESPONSIVE BREAKPOINTS (320px - 1440px) ==================== */
 @media (max-width: 920px) {
   .app-shell {
@@ -3829,6 +3872,36 @@ dialog.modal.game-modal .modal-heading h2 {
   box-shadow: 0 0 10px rgba(83, 219, 138, 0.75);
 }
 
+.game-modal-live.is-succeeded { color: #8fffe8; }
+.game-modal-live.is-failed,
+.game-modal-live.is-interrupted { color: var(--danger); }
+.game-modal-live.is-cancelled { color: var(--warn); }
+.game-completion-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.game-completion-notice > svg { margin-top: 1px; }
+.game-completion-notice > span { min-width: 0; overflow-wrap: anywhere; }
+.game-completion-notice strong { color: var(--fg); }
+.game-completion-notice.is-succeeded { border-color: #53db8a; background: rgba(83, 219, 138, 0.1); }
+.game-completion-notice.is-succeeded > svg { color: #8fffe8; }
+.game-completion-notice.is-failed,
+.game-completion-notice.is-interrupted { border-color: var(--danger); background: var(--danger-bg); }
+.game-completion-notice.is-failed > svg,
+.game-completion-notice.is-interrupted > svg { color: var(--danger); }
+.game-completion-notice.is-cancelled { border-color: var(--warn); background: var(--warn-bg); }
+.game-completion-notice.is-cancelled > svg { color: var(--warn); }
+
 .game-frame-shell {
   position: relative;
   flex: 1 1 auto;
@@ -3901,6 +3974,7 @@ dialog.modal.game-modal .modal-heading h2 {
   .game-modal-hint > svg:last-child {
     display: none;
   }
+  .game-completion-notice { padding: 9px; font-size: 11px; }
 }
 
 .caption-panel {
@@ -4043,6 +4117,12 @@ button.damas-cell.dark[aria-disabled='false'] { cursor: pointer; }
 .damas-status strong.over { color: #8fffe8; }
 .damas-status span { color: var(--muted); font-size: 13px; }
 .damas-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (min-width: 561px) and (max-width: 920px) {
+  .damas-main { flex-wrap: nowrap; }
+  .damas-board { width: min(100%, calc(100vh - 250px), calc(100% - 254px)); }
+  .damas-side { flex: 0 0 230px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .damas-piece, .arcade-card, .damas-mover { transition: none; }
   .arcade-card:hover { transform: none; }

@@ -77,6 +77,9 @@ export function getProjectJourney(input: ProjectJourneyInput): ProjectJourney {
           : 'upcoming';
     return { ...definition, status };
   });
-  const nextStep = steps.find(step => step.status === 'current' || step.status === 'blocked' || step.status === 'running') ?? steps.at(-1)!;
+  const firstPending = steps.find(step => step.status === 'current' || step.status === 'blocked' || step.status === 'running') ?? steps.at(-1)!;
+  // Projeto que já tem material (imagens geradas ou render do VideoGo) abre na prévia de revisão, não na primeira etapa pendente.
+  const hasMaterial = input.kind === 'image' ? completion.images : input.hasRender;
+  const nextStep = hasMaterial && !completion.review ? steps.find(step => step.id === 'review')! : firstPending;
   return { steps, nextStep, outputsReady, outputCount };
 }

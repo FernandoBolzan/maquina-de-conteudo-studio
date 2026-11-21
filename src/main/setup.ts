@@ -1,6 +1,6 @@
 import type { CliId, SetupStatus } from '../shared/contracts.js';
 import { consent, text, type CommandResult, type Services } from './context.js';
-import { engineId, engineStatuses, linkEngine, manageEngine, testEngine } from './setup/engines.js';
+import { checkEngineUpdates, engineId, engineStatuses, linkEngine, manageEngine, testEngine } from './setup/engines.js';
 import { captureTool, checkCliUpdates, installTool, manageCliTool, requireTool, toolEnvironment, toolStatus } from './setup/tools.js';
 export { resolveTool, toolEnvironment } from './setup/tools.js';
 
@@ -42,6 +42,7 @@ export async function handleSetup(action: string, payload: Record<string, unknow
   }
   if (action === 'setup.status') return status(services);
   if (action === 'setup.cliUpdates') return checkCliUpdates(services);
+  if (action === 'setup.engineUpdates') return checkEngineUpdates(services);
   if (!['setup.install', 'setup.login', 'setup.logout', 'setup.engine', 'setup.link', 'setup.cli', 'setup.engineTest'].includes(action)) throw new Error('Ação de configuração desconhecida.');
   consent(payload);
   if (action === 'setup.login') {

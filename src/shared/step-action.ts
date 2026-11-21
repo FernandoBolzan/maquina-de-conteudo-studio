@@ -7,7 +7,7 @@ export type FooterKind =
   | 'generate' | 'regenerate' | 'prepare-postnow' | 'go-review' | 'revise' | 'deliver'
   | 'prepare-script' | 'approve-script' | 'save-approve-script' | 'go-script'
   | 'save-voice' | 'generate-audio' | 'approve-audio'
-  | 'approve-render' | 'render' | 'go-render';
+  | 'produce-video' | 'approve-render' | 'render' | 'go-render';
 
 export interface FooterAction { kind: FooterKind; label: string; enabled: boolean; hint?: string }
 
@@ -113,6 +113,8 @@ export interface VideoFooterInput {
     voiceChosen: boolean; elevenConfigured: boolean; anyManualAudio: boolean;
   };
   storyboardReady: boolean;
+  /** A composição atual foi produzida por uma sessão concluída do Claude Opus 5.5 fixo. */
+  compositionAuthored: boolean;
   narrationBlocked: boolean;
   render: { hasRender: boolean; rendering: boolean; audioCheckUnavailable: boolean };
   videoRevisionRequested: boolean;
@@ -159,6 +161,7 @@ export function videoFooterAction(input: VideoFooterInput): FooterAction | undef
       if (input.anyJobRunning) return wait(WAIT_JOB);
       if (input.narrationBlocked) return wait('Volte à narração: ela não está pronta');
       if (render.audioCheckUnavailable) return wait('Não foi possível verificar o áudio do vídeo', 'Instale o FFprobe em Motores & Setup e tente de novo.');
+      if (!input.compositionAuthored) return act('produce-video', 'Produzir cenas com Claude Opus 5.5', !input.agentBlocked, 'O render só usa cenas e animação feitas pelo Claude Opus 5.5. Depois, aprove o roteiro e renderize.');
       if (!input.storyboardReady) return act('approve-render', 'Aprovar roteiro e renderizar');
       if (!render.hasRender) return act('render', 'Renderizar vídeo');
       if (input.videoRevisionRequested) return act('render', 'Renderizar o vídeo corrigido');
@@ -166,6 +169,7 @@ export function videoFooterAction(input: VideoFooterInput): FooterAction | undef
     case 'review':
       if (input.anyJobRunning) return wait(WAIT_JOB);
       if (input.videoRevisionRequested || !input.storyboardReady) return act('go-render', 'Ir para Renderizar', true, 'O roteiro mudou: aprove e renderize de novo. Para só entregar o vídeo já aprovado, abra Entrega pelas etapas acima.');
+      if (!input.compositionAuthored) return act('go-render', 'Ir para Renderizar', true, 'Este vídeo saiu sem as cenas do Claude Opus 5.5. Peça revisão aqui ou produza com o Opus em Renderizar antes de aprovar.');
       if (!input.review.latestApproved) return wait('Aprove o vídeo ou peça revisão');
       return act('deliver', 'Ir para Entrega');
     default:

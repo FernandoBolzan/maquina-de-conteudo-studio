@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Gamepad2, Keyboard, Sparkles } from 'lucide-react';
+import { Gamepad2, Keyboard } from 'lucide-react';
 import gameUrl from './ai-escape.html?url';
 import threeUrl from 'three/build/three.min.js?url';
 import rankingUrl from './ai-escape-ranking.js?url&no-inline';
@@ -28,10 +28,6 @@ export function AIEscapeGame() {
 
   return (
     <>
-      <div className="game-modal-meta">
-        <span className="game-modal-kicker"><Sparkles size={14} aria-hidden="true" /> PAUSA CRIATIVA</span>
-        <span className="game-modal-live"><i aria-hidden="true" />A geração continua em segundo plano</span>
-      </div>
       <div className="game-frame-shell">
         <iframe
           ref={iframeRef}

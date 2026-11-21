@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join, relative } from 'node:path';
-import { postNowFormatAcceptsPageCount, type Asset, type Brand, type BrandReference, type FormatAdaptation, type GenerationBatch, type LocalVoiceEngine, type LocalVoiceSelection, type NarrationMode, type NarrationProvider, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type VisualGenerationReview, type VisualStyle } from '../shared/contracts.js';
+import { isVideoSoundMood, postNowFormatAcceptsPageCount, VIDEO_AGENT_MODEL, type Asset, type Brand, type BrandReference, type FormatAdaptation, type GenerationBatch, type LocalVoiceEngine, type LocalVoiceSelection, type NarrationMode, type NarrationProvider, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type VisualGenerationReview, type VisualStyle } from '../shared/contracts.js';
 import { DEFAULT_POSTNOW_FORMAT, POSTNOW_FORMATS, formatCanvas, isPostNowFormat, pagesRangeFor, type PostNowKind } from '../shared/formats.js';
 import { brandImageOptOutIssues, depictedPersonPolicyIssues, isDepictedPerson, isDepictedPersonPolicy, type DepictedPerson, portraitDiversityIssues, portraitPlanIssues } from '../shared/depicted-person.js';
 import { carouselCoverIssue, singleImageCtaIssue } from '../shared/content-structure.js';
@@ -35,7 +35,9 @@ interface NarrationAudio { scenes: Record<string, NarrationAudioEntry>; history?
 interface LegacyNarrationAudio { hash: string; assetPaths: string[]; }
 interface VisualApproval { hash: string; approvedAt: string; }
 interface StoredFormatAdaptation extends FormatAdaptation { snapshotId: string; }
-interface StoredProject { project: Project; folderName: string; notes: string; /** Pedido que a pessoa escreveu ao preparar os textos; as etapas de gerar e refazer continuam obedecendo a ele. */ directive?: string; approvals: Record<string, string>; imagePageCount?: number; redo?: Record<string, { stamp: string; note: string }>; visualApproval?: VisualApproval; formatAdaptation?: StoredFormatAdaptation; narrationSchemaVersion?: 1; narrationProvider?: NarrationProvider; localVoice?: LocalVoiceSelection; narrationMode?: NarrationMode; narrationApproval?: NarrationApproval; narrationAudio?: NarrationAudio; legacyNarrationAudio?: LegacyNarrationAudio; }
+/** Composição autoral registrada ao fim de uma sessão concluída do agente de vídeo: modelo e hash do index.html naquele momento. */
+interface VideoCompositionRecord { model: string; sha256: string; recordedAt: string; }
+interface StoredProject { project: Project; folderName: string; notes: string; /** Pedido que a pessoa escreveu ao preparar os textos; as etapas de gerar e refazer continuam obedecendo a ele. */ directive?: string; approvals: Record<string, string>; imagePageCount?: number; redo?: Record<string, { stamp: string; note: string }>; visualApproval?: VisualApproval; formatAdaptation?: StoredFormatAdaptation; narrationSchemaVersion?: 1; narrationProvider?: NarrationProvider; localVoice?: LocalVoiceSelection; narrationMode?: NarrationMode; narrationApproval?: NarrationApproval; narrationAudio?: NarrationAudio; legacyNarrationAudio?: LegacyNarrationAudio; videoComposition?: VideoCompositionRecord; }
 interface MappedImagePage { page: number; input: string; output: string; native?: string; }
 interface AssetDeletionTarget { scope: 'project' | 'postnow'; path: string; }
 interface AssetDeletionJournal {
@@ -203,6 +205,11 @@ async function load(root: string, id: string): Promise<StoredProject> {
     if (typeof raw.id !== 'string' || raw.id.length > 100 || typeof raw.title !== 'string' || raw.title.length > 200 || typeof raw.direction !== 'string' || !raw.direction.trim() || raw.direction.length > 2000) throw new Error('Estilo visual do projeto inválido; original preservado.');
     project.visualStyle = { id: raw.id, title: raw.title, direction: raw.direction };
   }
+  if (item.videoSound !== undefined) {
+    const raw = object(item.videoSound, 'Som do vídeo');
+    if (kind !== 'video' || typeof raw.effects !== 'boolean' || typeof raw.music !== 'boolean' || !isVideoSoundMood(raw.mood)) throw new Error('Preferência de som do vídeo inválida; original preservado.');
+    project.videoSound = { effects: raw.effects, music: raw.music, mood: raw.mood };
+  }
   const rawApprovals = object(data.approvals, 'Aprovações');
   const approvals: Record<string, string> = Object.create(null) as Record<string, string>;
   for (const [path, stamp] of Object.entries(rawApprovals)) {
@@ -272,6 +279,12 @@ async function load(root: string, id: string): Promise<StoredProject> {
       legacyNarrationAudio = { hash: raw.hash, assetPaths };
     }
   }
+  let videoComposition: VideoCompositionRecord | undefined;
+  if (data.videoComposition !== undefined) {
+    const raw = object(data.videoComposition, 'Composição do vídeo');
+    if (typeof raw.model !== 'string' || !raw.model || typeof raw.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(raw.sha256) || typeof raw.recordedAt !== 'string') throw new Error('Registro da composição do vídeo inválido; original preservado.');
+    videoComposition = { model: raw.model, sha256: raw.sha256, recordedAt: raw.recordedAt };
+  }
   if (!(await lstat(project.path)).isDirectory()) throw new Error('Pasta do projeto não encontrada.');
   let imagePageCount: number | undefined;
   if (kind === 'image' && project.unsupportedFormat === undefined && isPostNowFormat(project.format)) {
@@ -288,7 +301,7 @@ async function load(root: string, id: string): Promise<StoredProject> {
         : POSTNOW_FORMATS[project.format].kind === 'carousel' ? 5 : 1;
     }
   }
-  return { project, folderName, notes: data.notes, directive: typeof data.directive === 'string' && data.directive.trim() ? data.directive : undefined, approvals, redo, visualApproval, formatAdaptation, imagePageCount, narrationSchemaVersion: 1, narrationProvider, localVoice, narrationMode, narrationApproval, narrationAudio, legacyNarrationAudio };
+  return { project, folderName, notes: data.notes, directive: typeof data.directive === 'string' && data.directive.trim() ? data.directive : undefined, approvals, redo, visualApproval, formatAdaptation, imagePageCount, narrationSchemaVersion: 1, narrationProvider, localVoice, narrationMode, narrationApproval, narrationAudio, legacyNarrationAudio, videoComposition };
 }
 async function save(root: string, stored: StoredProject): Promise<void> {
   const { legacyNarrationAudio, ...record } = stored;
@@ -314,13 +327,13 @@ async function narrationDocument(stored: StoredProject, path = join(stored.proje
   return { data, scenes };
 }
 
-/** Availability is editorial; render readiness remains the native explicit `ready` status. */
-async function storyboardStatus(projectPath: string): Promise<{ available: boolean; ready: boolean; compositionReady: boolean; issues: string[] }> {
+/** Availability is editorial; render readiness remains the native explicit `ready` status. `compositionSha256` só existe com index.html real dentro do projeto. */
+async function storyboardStatus(projectPath: string): Promise<{ available: boolean; ready: boolean; compositionSha256?: string; issues: string[] }> {
   let data: unknown;
   try {
     data = await readJson(await localPath(projectPath, 'storyboard.json'));
   } catch {
-    return { available: false, ready: false, compositionReady: false, issues: ['storyboard.json ausente ou ilegível.'] };
+    return { available: false, ready: false, issues: ['storyboard.json ausente ou ilegível.'] };
   }
   const record: Record<string, unknown> = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
   const scenes = Array.isArray(record.scenes) ? record.scenes : [];
@@ -333,15 +346,28 @@ async function storyboardStatus(projectPath: string): Promise<{ available: boole
   const composition = typeof record.composition === 'object' && record.composition !== null && !Array.isArray(record.composition)
     ? record.composition as Record<string, unknown>
     : undefined;
-  let compositionReady = false;
+  let compositionSha256: string | undefined;
   if (typeof composition?.path === 'string' && composition.path.trim()) {
     try {
       const htmlPath = await localPath(projectPath, join(composition.path, 'index.html'));
       const html = await lstat(htmlPath);
-      compositionReady = html.isFile() && !html.isSymbolicLink() && html.size > 0;
+      if (html.isFile() && !html.isSymbolicLink() && html.size > 0) compositionSha256 = (await fingerprint(htmlPath)).sha256;
     } catch { /* composition is absent or outside the project */ }
   }
-  return { available, ready, compositionReady, issues: [...storyboardContractIssues(data), ...storyboardDashIssues(data)] };
+  return { available, ready, ...(compositionSha256 ? { compositionSha256 } : {}), issues: [...storyboardContractIssues(data), ...storyboardDashIssues(data)] };
+}
+/** A composição atual é exatamente a que uma sessão concluída do Opus fixo deixou; edição posterior ou outro modelo invalida. */
+function compositionAuthored(stored: StoredProject, compositionSha256: string | undefined): boolean {
+  return compositionSha256 !== undefined && stored.videoComposition?.model === VIDEO_AGENT_MODEL && stored.videoComposition.sha256 === compositionSha256;
+}
+/** Registra a composição deixada por uma sessão concluída do agente de vídeo. Chame somente sob `serialized(root)`; não aninhe. */
+export async function recordVideoComposition(root: string, id: string, model: string): Promise<void> {
+  const stored = await load(root, safeId(id));
+  if (stored.project.kind !== 'video') return;
+  const { compositionSha256 } = await storyboardStatus(stored.project.path);
+  if (!compositionSha256) return;
+  stored.videoComposition = { model, sha256: compositionSha256, recordedAt: new Date().toISOString() };
+  await save(root, stored);
 }
 
 function narrationHash(scenes: NarrationDocument['scenes'], provider: NarrationProvider, voiceId: string | undefined, localVoice: LocalVoiceSelection | undefined): string {
@@ -873,23 +899,11 @@ async function generateNarration(root: string, stored: StoredProject, services: 
   };
   const workingStoryboardPath = join(stored.project.path, `.studio-narration-${randomUUID()}.json`);
   const originalStoryboard = await readFile(storyboardPath, 'utf8');
-  const expectedPaths = new Map<string, string>();
-  const outputDirectories = new Set<string>();
-  for (const scene of document.scenes) {
-    if (!scene.narration.trim()) continue;
-    const assetPath = `assets/audio/narration/${randomUUID()}/${scene.id}.mp3`;
-    expectedPaths.set(scene.id, assetPath);
-    outputDirectories.add(await directory(stored.project.path, dirname(assetPath)));
-    scene.audio.narration = { assetPath, startOffsetSeconds: 0, gain: 1 };
-    scene.raw.audio = scene.audio;
-  }
   await atomicJson(workingStoryboardPath, document.data);
   let storyboardCommitted = false;
   const cleanupFailedGeneration = async (): Promise<void> => {
     if (storyboardCommitted) await atomicText(storyboardPath, originalStoryboard);
     await rm(workingStoryboardPath, { force: true });
-    for (const assetPath of expectedPaths.values()) await rm(await localPath(stored.project.path, assetPath), { force: true });
-    for (const outputDirectory of outputDirectories) await rm(outputDirectory, { recursive: true, force: true });
   };
   let job;
   try {
@@ -909,11 +923,14 @@ async function generateNarration(root: string, stored: StoredProject, services: 
           if (narrationHash(latestDocument.scenes, 'elevenlabs', latest.project.voiceId, latest.localVoice) !== hash) throw new Error('A narração mudou durante a geração; os áudios não foram aprovados.');
           const generatedDocument = await narrationDocument(latest, workingStoryboardPath);
           const entries: Record<string, NarrationAudioEntry> = {};
+          const folders = new Set<string>();
           for (const scene of latestDocument.scenes) {
             if (!scene.narration.trim()) continue;
-            const assetPath = expectedPaths.get(scene.id);
             const generatedScene = generatedDocument.scenes.find(candidate => candidate.id === scene.id);
-            if (!assetPath || !generatedScene || storyboardAssetPath(generatedScene) !== assetPath) throw new Error('O VideoGo alterou o destino isolado do áudio; o original foi preservado.');
+            const assetPath = generatedScene ? storyboardAssetPath(generatedScene) : undefined;
+            const [assetsDir, audioDir, narrationDir, folder, file] = assetPath?.split('/') ?? [];
+            if (!assetPath || assetPath.split('/').length !== 5 || assetsDir !== 'assets' || audioDir !== 'audio' || narrationDir !== 'narration' || !/^[0-9a-f-]{36}$/i.test(folder ?? '') || file !== `${scene.id}.mp3`) throw new Error('O VideoGo não devolveu um áudio de narração válido para cada cena; nenhum áudio foi associado.');
+            folders.add(folder ?? '');
             const path = await localPath(latest.project.path, assetPath);
             if (!(await lstat(path)).isFile() || kinds[extname(path).toLowerCase()] !== 'audio') throw new Error('O VideoGo não produziu um asset de narração válido.');
             entries[scene.id] = {
@@ -923,6 +940,7 @@ async function generateNarration(root: string, stored: StoredProject, services: 
               provenance: { schema: 1, provider: 'elevenlabs', modelId: 'eleven_v4', voiceId: latest.project.voiceId! },
             };
           }
+          if (folders.size > 1) throw new Error('O VideoGo gravou os áudios em pastas diferentes; nenhum áudio foi associado.');
           if (!Object.keys(entries).length) throw new Error('O VideoGo não gerou áudios para o roteiro aprovado.');
           const previous = narrationEntries(latest, latestDocument);
           const history = [...(latest.narrationAudio?.history ?? [])];
@@ -1783,7 +1801,7 @@ async function detail(root: string, stored: StoredProject, services: Services): 
     const status = await storyboardStatus(stored.project.path);
     result.storyboardAvailable = status.available;
     result.storyboardReady = status.ready;
-    result.storyboardCompositionReady = status.compositionReady;
+    result.storyboardCompositionReady = compositionAuthored(stored, status.compositionSha256);
     if (status.issues.length) result.storyboardIssues = status.issues;
   }
   return result;
@@ -2118,15 +2136,8 @@ async function exportProject(root: string, stored: StoredProject, payload: Recor
     return output;
   } catch (error) { await rm(output, { recursive: true, force: true }); throw error; }
 }
-/** Writes the approved artifacts plus MANIFEST.json into one ZIP inside the picked folder; artifacts must stay unchanged until written. */
-async function exportZip(root: string, stored: StoredProject, payload: Record<string, unknown>, services: Services): Promise<{ path: string; files: number }> {
-  const view = await detail(root, stored, services);
-  const approved = view.assets.filter((asset) => asset.approved);
-  if (!approved.length) throw new Error('Aprove pelo menos um artefato antes de exportar.');
-  const folder = await safePath(text(payload, 'destination', 4000));
-  if (inside(join(root, 'projects'), folder)) throw new Error('Exporte para fora das pastas de projetos, para preservar os pacotes ao excluir um projeto.');
-  if (inside(stored.project.path, folder)) throw new Error('Exporte para fora da pasta do projeto.');
-  if (!(await lstat(folder)).isDirectory()) throw new Error('Escolha uma pasta de destino válida.');
+/** Writes the verified approved artifacts plus MANIFEST.json into one ZIP inside `folder`; artifacts must stay unchanged until written. */
+async function writeApprovedZip(stored: StoredProject, approved: Asset[], folder: string): Promise<{ path: string; files: number }> {
   const artifacts = await verifiedArtifacts(stored, approved);
   const sources: ZipSource[] = [
     { name: 'MANIFEST.json', data: Buffer.from(`${JSON.stringify(manifestFor(stored, artifacts), null, 2)}\n`) },
@@ -2143,6 +2154,31 @@ async function exportZip(root: string, stored: StoredProject, payload: Record<st
     }
   }
   return { path: destination, files: sources.length };
+}
+/** Writes the approved artifacts plus MANIFEST.json into one ZIP inside the picked folder. */
+async function exportZip(root: string, stored: StoredProject, payload: Record<string, unknown>, services: Services): Promise<{ path: string; files: number }> {
+  const view = await detail(root, stored, services);
+  const approved = view.assets.filter((asset) => asset.approved);
+  if (!approved.length) throw new Error('Aprove pelo menos um artefato antes de exportar.');
+  const folder = await safePath(text(payload, 'destination', 4000));
+  if (inside(join(root, 'projects'), folder)) throw new Error('Exporte para fora das pastas de projetos, para preservar os pacotes ao excluir um projeto.');
+  if (inside(stored.project.path, folder)) throw new Error('Exporte para fora da pasta do projeto.');
+  if (!(await lstat(folder)).isDirectory()) throw new Error('Escolha uma pasta de destino válida.');
+  return writeApprovedZip(stored, approved, folder);
+}
+/** Builds the delivery ZIP of a project into a caller-owned folder (used by the mobile download); a read, so it emits no `refresh`. */
+export async function exportApprovedZipTo(services: Services, projectId: string, destination: string): Promise<{ path: string; files: number }> {
+  const root = await workspace(services);
+  return serialized(root, async () => {
+    const stored = await load(root, safeId(projectId));
+    const view = await detail(root, stored, services);
+    const approved = view.assets.filter((asset) => asset.approved);
+    if (!approved.length) throw new Error('Aprove pelo menos um arquivo.');
+    const folder = await safePath(destination);
+    if (inside(join(root, 'projects'), folder) || inside(stored.project.path, folder)) throw new Error('Pasta de destino inválida.');
+    if (!(await lstat(folder)).isDirectory()) throw new Error('Escolha uma pasta de destino válida.');
+    return writeApprovedZip(stored, approved, folder);
+  });
 }
 async function runMedia(services: Services, projectId: string, title: string, args: string[], cwd: string): Promise<void> {
   const executable = await resolveTool('ffmpeg', services);
@@ -2420,6 +2456,9 @@ async function render(root: string, stored: StoredProject, payload: Record<strin
   }
   if (native.format !== format) throw new Error('O formato do storyboard difere do formato selecionado. Ajuste o roteiro antes de renderizar.');
   if (native.status !== 'ready') throw new Error('O storyboard está em rascunho. Complete e revise as cenas no VideoGo antes de renderizar.');
+  if (!compositionAuthored(stored, (await storyboardStatus(stored.project.path)).compositionSha256)) {
+    throw new Error(`As cenas e a animação deste vídeo não foram produzidas pelo Claude Opus 5.5 (${VIDEO_AGENT_MODEL}) na versão atual. Use “Produzir com Opus” (ou peça revisão do vídeo) antes de renderizar; o render sem a composição do Opus cairia no visual genérico do VideoGo.`);
+  }
   const env = await toolEnvironment(services);
   const ffprobe = await resolveTool('ffprobe', services);
   if (!ffprobe) throw new Error('FFprobe é necessário para verificar o vídeo final. Instale FFmpeg em Motores & Setup.');
@@ -2526,6 +2565,12 @@ export async function handleProjects(action: string, payload: Record<string, unk
         case 'projects.videoStyle': {
           if (stored.project.kind !== 'video') throw new Error('O estilo do vídeo só existe em projetos de vídeo.');
           stored.project.visualStyle = composeVideoStyle({ styleId: payload.styleId, custom: payload.custom });
+          await save(root, stored); result = await detail(root, stored, services); break;
+        }
+        case 'projects.videoSound': {
+          if (stored.project.kind !== 'video') throw new Error('O som do vídeo só existe em projetos de vídeo.');
+          if (typeof payload.effects !== 'boolean' || typeof payload.music !== 'boolean' || !isVideoSoundMood(payload.mood)) throw new Error('Escolha efeitos, trilha e clima do som do vídeo.');
+          stored.project.videoSound = { effects: payload.effects, music: payload.music, mood: payload.mood };
           await save(root, stored); result = await detail(root, stored, services); break;
         }
         case 'projects.notes':

@@ -127,13 +127,10 @@ test('MobileServer handles auth, serves SPA, streams media, and supports HTTP Ra
     assert.ok(htmlText.includes('detailStepBar'));
     assert.ok(htmlText.includes('detailStepShell'));
     assert.ok(htmlText.includes('createRecipe'));
-
-    // 2. GET /api/qr.svg returns SVG
+    // 2. GET /api/qr.svg sem sessão é negado
     const qrRes = await fetch(`${baseUrl}/api/qr.svg`);
-    assert.equal(qrRes.status, 200);
-    assert.equal(qrRes.headers.get('content-type')?.includes('image/svg+xml'), true);
-    const qrSvg = await qrRes.text();
-    assert.ok(qrSvg.includes('<svg'));
+    assert.equal(qrRes.status, 401);
+
 
     // 3. GET /api/projects without auth returns 401
     const unauthProjects = await fetch(`${baseUrl}/api/projects`);
@@ -163,9 +160,18 @@ test('MobileServer handles auth, serves SPA, streams media, and supports HTTP Ra
       headers: { 'Authorization': `Bearer ${sessionToken}` },
     });
     assert.equal(statusRes.status, 200);
-    const statusData = (await statusRes.json()) as { authenticated: boolean; token?: string; workspace: string };
+    const statusData = (await statusRes.json()) as { authenticated: boolean; token?: string; pin?: string; workspace: string; version: string };
     assert.equal(statusData.authenticated, true);
-    assert.equal(statusData.token, 'M7K9X2');
+    assert.equal(typeof statusData.workspace, 'string');
+    assert.equal(typeof statusData.version, 'string');
+    assert.ok(!JSON.stringify(statusData).includes('M7K9X2'), 'o PIN nunca aparece em /api/status');
+    assert.equal(statusData.token, undefined);
+
+    // 6b. GET /api/qr.svg exige sessão
+    const qrAuthed = await fetch(`${baseUrl}/api/qr.svg`, { headers: { Authorization: `Bearer ${sessionToken}` } });
+    assert.equal(qrAuthed.status, 200);
+    assert.equal(qrAuthed.headers.get('content-type')?.includes('image/svg+xml'), true);
+    assert.ok((await qrAuthed.text()).includes('<svg'));
 
     // 7. GET /api/projects with session returns project list
     const projectsRes = await fetch(`${baseUrl}/api/projects`, {

@@ -18,6 +18,11 @@ const ENGINE_MARKERS = [
 const NONE_INSTRUCTION = 'Não mostre pessoas nem rostos nesta arte.';
 const OTHER_PERSON_INSTRUCTION = 'A pessoa retratada é outra pessoa, não o cliente; não use o retrato do cliente para representá-la.';
 
+test('engineClientId normalizes accents like PostNow slugify', () => {
+  assert.equal(engineClientId({ id: 'studio-id', name: 'Clínica Horizonte' } as Brand), 'studio-studio-id-clinica-horizonte');
+  assert.equal(engineClientId({ id: 'studio-id', name: 'AÇÃO & Saúde' } as Brand), 'studio-studio-id-acao-saude');
+});
+
 test('composeEnginePrompt writes each engine policy marker once and a single identity line', () => {
   const studioPrompt = [
     'Copy: Acorda com dor?',

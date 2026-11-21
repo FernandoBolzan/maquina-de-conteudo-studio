@@ -28,6 +28,7 @@ import type {
   CliUpdateStatus,
   EngineId,
   EngineStatus,
+  EngineUpdateStatus,
   Job,
   Project,
   Provider,
@@ -92,6 +93,7 @@ export function Setup({
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [loadError, setLoadError] = useState('');
   const [cliUpdates, setCliUpdates] = useState<CliUpdateStatus[]>([]);
+  const [engineUpdates, setEngineUpdates] = useState<EngineUpdateStatus[]>([]);
   const [updatesLoading, setUpdatesLoading] = useState(false);
   const [updatesError, setUpdatesError] = useState('');
   const [guideOpen, setGuideOpen] = useState(!snapshot.settings.onboardingCompleted);
@@ -134,13 +136,12 @@ export function Setup({
   const checkCliVersions = useCallback(async () => {
     setUpdatesLoading(true);
     setUpdatesError('');
-    try {
-      setCliUpdates(await invoke<CliUpdateStatus[]>('setup.cliUpdates'));
-    } catch (error) {
-      setUpdatesError(errorMessage(error));
-    } finally {
-      setUpdatesLoading(false);
-    }
+    const [cli, engines] = await Promise.allSettled([invoke<CliUpdateStatus[]>('setup.cliUpdates'), invoke<EngineUpdateStatus[]>('setup.engineUpdates')]);
+    if (cli.status === 'fulfilled') setCliUpdates(cli.value);
+    if (engines.status === 'fulfilled') setEngineUpdates(engines.value);
+    const failure = cli.status === 'rejected' ? cli.reason : engines.status === 'rejected' ? engines.reason : undefined;
+    if (failure) setUpdatesError(errorMessage(failure));
+    setUpdatesLoading(false);
   }, []);
 
   const load = useCallback(async () => {
@@ -613,6 +614,10 @@ export function Setup({
                     <h2>Motores de conteúdo</h2>
                     <p className="field-help">Instale os motores quando quiser criar imagens ou vídeos. Você também pode vincular uma instalação existente.</p>
                   </div>
+                  <button type="button" className="button small" disabled={updatesLoading} onClick={() => { void run('cli-version-check', checkCliVersions, 'Versões verificadas.'); }}>
+                    <RefreshCw size={14} className={updatesLoading ? 'spin' : ''} />
+                    {updatesLoading ? 'Consultando versões…' : 'Verificar versões'}
+                  </button>
                 </div>
                 {(Object.values(accessDenied).some(Boolean) || (!githubReady && status.engines.some(engine => !engine.installed))) && (
                   <div className="notice" role="status">
@@ -625,12 +630,14 @@ export function Setup({
                 <div className="engine-grid">
                   {status.engines.map(engine => {
                     const meta = engineLabels[engine.id];
+                    const update = engineUpdates.find(item => item.id === engine.id);
+                    const updatable = engine.installed && update?.state === 'update-available';
                     return (
                       <article className="setup-card" key={engine.id}>
                         <div className="setup-card-head">
                           <strong>{meta.title}</strong>
-                          <span className={`status-pill ${engine.installed && engine.dependencies.every(dependency => dependency.installed) ? 'ok' : 'warn'}`}>
-                            {engine.installed ? engine.dependencies.every(dependency => dependency.installed) ? 'Pronto' : 'Precisa de atenção' : 'Não instalado'}
+                          <span className={`status-pill ${engine.installed && !updatable && engine.dependencies.every(dependency => dependency.installed) ? 'ok' : 'warn'}`}>
+                            {updatable ? 'Atualização disponível' : engine.installed ? engine.dependencies.every(dependency => dependency.installed) ? 'Pronto' : 'Precisa de atenção' : 'Não instalado'}
                           </span>
                         </div>
                         {engine.version && <span className="status-pill" aria-label={`Versão ${engine.version}`}>v{engine.version}</span>}
@@ -643,14 +650,17 @@ export function Setup({
                               : `Faltam dependências: ${engine.dependencies.filter(dependency => !dependency.installed).map(dependency => dependency.name).join(', ')}.`}
                         </p>
                         <p className="field-help">{meta.access}</p>
+                        {engine.installed && update && <p className="field-help">{update.detail}</p>}
+                        {engine.installed && updatesLoading && !update && <p className="field-help">Consultando a release estável no GitHub…</p>}
                         <div className="card-actions">
-                          {!engine.installed ? (
+                          {!engine.installed && (
                             <button type="button" className="button small primary" disabled={busy.has(`engine-${engine.id}-install`)} onClick={() => { void manage(engine, 'install'); }}>
                               <CloudDownload size={14} />Instalar motor
                             </button>
-                          ) : (
-                            <button type="button" className="button small" disabled={busy.has(`engine-${engine.id}-update`)} onClick={() => { void manage(engine, 'update'); }}>
-                              <RefreshCw size={14} />Atualizar
+                          )}
+                          {updatable && (
+                            <button type="button" className="button small primary" disabled={busy.has(`engine-${engine.id}-update`)} onClick={() => { void manage(engine, 'update'); }}>
+                              <RefreshCw size={14} />Atualizar para v{update.latestVersion}
                             </button>
                           )}
                           {engine.installed && (
@@ -698,13 +708,14 @@ export function Setup({
                       <article className="setup-card" key="cloudflared">
                         <div className="setup-card-head">
                           <strong>Cloudflare Tunnel</strong>
-                          <span className={`status-pill ${active ? 'ok' : tool?.installed ? 'ok' : 'warn'}`}>
-                            {active ? 'Túnel ativo' : tool?.installed ? 'Pronto' : 'Não instalado'}
+                          <span className={`status-pill ${active ? 'ok' : mobile?.error ? 'warn' : tool?.installed ? 'ok' : 'warn'}`}>
+                            {active ? 'Túnel ativo' : mobile?.error ? 'Erro no túnel' : tool?.installed ? 'Pronto' : 'Não instalado'}
                           </span>
                         </div>
                         {tool?.version && <span className="status-pill" aria-label={`Versão ${tool.version}`}>v{tool.version}</span>}
                         <p>Túnel seguro para acesso mobile e monitoramento remoto de tarefas e arquivos pelo celular.</p>
                         <p className="field-help">Gera QR Code e token alfanumérico de 6 dígitos sem abrir portas no roteador.</p>
+                        {mobile?.error && <p className="field-help" role="alert" style={{ color: '#ef4444' }}>{mobile.error}</p>}
                         <div className="card-actions">
                           {!tool?.installed ? (
                             <button type="button" className="button small primary" disabled={busy.has('install-cloudflared')} onClick={() => { if (tool) void install(tool); }}>

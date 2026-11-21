@@ -10,6 +10,13 @@ import { ActivityCard } from './Console';
 import { PROMPT_RECIPES, composeProjectBrief, composePrompt, interpolatePrompt, loadPromptLibrary, promptRecipesFor, suggestProjectTitle, type PromptInputs } from './prompt-library';
 import './projects-cards.css';
 
+/** Proporção (largura ÷ altura) do formato do projeto: valor inicial da capa até o arquivo carregar. */
+function formatAspectRatio(project: Project): number {
+  if (isPostNowFormat(project.format)) return POSTNOW_FORMATS[project.format].width / POSTNOW_FORMATS[project.format].height;
+  if (project.kind === 'video') return project.format === 'youtube' ? 16 / 9 : project.format === 'feed-square' ? 1 : 9 / 16;
+  return POSTNOW_FORMATS[DEFAULT_POSTNOW_FORMAT].width / POSTNOW_FORMATS[DEFAULT_POSTNOW_FORMAT].height;
+}
+
 type CreateStep = 'engine' | 'briefing';
 
 interface DeletionPreview {
@@ -56,6 +63,7 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
   const [baseProject, setBaseProject] = useState<Project | null>(null);
   const [cloneTitle, setCloneTitle] = useState('');
   const [cloneKind, setCloneKind] = useState<Project['kind']>('image');
+  const [coverRatios, setCoverRatios] = useState<Record<string, number>>({});
   const titleSuggestion = useRef('');
   const promptLibrary = useMemo(() => loadPromptLibrary(window.localStorage), []);
   const jobs = useJobs();
@@ -367,8 +375,8 @@ export function Projects({ snapshot, run, refresh, busy, openJob, onOpen, initia
             return (
               <div key={project.id} className="projects-item">
               <button type="button" className="project-card projects-card" onClick={() => onOpen(project.id)}>
-                <div className={`project-cover ${project.kind}`}>
-                  {project.coverUrl && <img key={project.coverUrl} className="project-cover-image" src={project.coverUrl} alt="" onError={event => { event.currentTarget.hidden = true; }} />}
+                <div className={`project-cover ${project.kind}`} style={{ aspectRatio: (project.coverUrl && coverRatios[project.coverUrl]) || formatAspectRatio(project) }}>
+                  {project.coverUrl && <img key={project.coverUrl} className="project-cover-image" src={project.coverUrl} alt="" onLoad={event => { const { naturalWidth, naturalHeight } = event.currentTarget; if (naturalWidth && naturalHeight) setCoverRatios(current => ({ ...current, [project.coverUrl!]: naturalWidth / naturalHeight })); }} onError={event => { event.currentTarget.hidden = true; }} />}
                   <span className="cover-symbol" aria-hidden="true">{project.kind === 'image' ? <Image size={24} strokeWidth={1.5} /> : <Film size={24} strokeWidth={1.5} />}<span>Capa ainda não disponível</span></span>
                   <span className="post-type-tag">{project.kind === 'image' ? 'POSTNOW · IMAGEM' : 'VIDEOGO · VÍDEO'}</span>
                 </div>

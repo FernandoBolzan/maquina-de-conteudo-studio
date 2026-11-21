@@ -3,12 +3,14 @@ import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, relative, isAbsolute, extname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { MEDIA_TYPES } from '../shared/media-types.js';
 import type { AppEvent, LocalVoiceOperationEvent, Settings, Snapshot } from '../shared/contracts.js';
 import type { Services } from './context.js';
 import { text } from './context.js';
 import { Supervisor, capture } from './supervisor.js';
 import { handleProjects } from './projects.js';
 import { handleAgents } from './agents.js';
+import { handleFeedback } from './feedback.js';
 import { handleSetup } from './setup.js';
 import { cloneElevenLabsVoice, deleteElevenLabsClone, listElevenLabsVoices, validateElevenLabsKey } from './elevenlabs.js';
 import { MobileService } from './mobile/service.js';
@@ -18,7 +20,7 @@ export interface Host {
   assetPrefix: string; secureStorageAvailable(): boolean; encryptSecret(value: string): string; decryptSecret(value: string): string;
   update(action: string, payload: Record<string, unknown>): Promise<unknown>;
 }
-const MEDIA: Record<string, true> = { '.png': true, '.jpg': true, '.jpeg': true, '.webp': true, '.gif': true, '.avif': true, '.svg': true, '.mp4': true, '.webm': true, '.mov': true, '.mkv': true, '.m4v': true, '.mp3': true, '.wav': true, '.ogg': true, '.m4a': true, '.aac': true, '.flac': true, '.pdf': true, '.txt': true, '.md': true, '.json': true, '.srt': true, '.vtt': true, '.ass': true };
+const MEDIA = MEDIA_TYPES;
 export function within(root: string, path: string): boolean { const part = relative(root, path); return part === '' || (!part.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && part !== '..' && !isAbsolute(part)); }
 export class Runtime {
   readonly supervisor: Supervisor;
@@ -32,11 +34,15 @@ export class Runtime {
   private saving = Promise.resolve();
   private pickedDirectories: string[] = [];
   private localVoiceOperations = new Map<string, { voiceId: string; kind: 'install' | 'audition'; controller: AbortController }>();
-  constructor(readonly dataDir: string, private host: Host, private emit: (event: AppEvent) => void = () => {}, readonly version = '0.1.0') {
-    this.supervisor = new Supervisor(join(dataDir, 'history'), (event) => {
-      this.emit(event);
+  private emit: (event: AppEvent) => void;
+  constructor(readonly dataDir: string, private host: Host, hostEmit: (event: AppEvent) => void = () => {}, readonly version = '0.1.0') {
+    // Único ponto de saída de eventos: entrega ao host (janela do desktop) e ao celular, sem duplicar.
+    const emit = (event: AppEvent): void => {
+      hostEmit(event);
       this.mobile?.broadcast(event);
-    });
+    };
+    this.emit = emit;
+    this.supervisor = new Supervisor(join(dataDir, 'history'), emit);
     this.services = {
       dataDir, getSettings: () => structuredClone(this.settings), saveSettings: update => this.saveSettings(update),
       run: spec => this.supervisor.run(spec), capture, waitJob: id => this.supervisor.wait(id), jobs: () => this.supervisor.list(), emit,
@@ -45,9 +51,7 @@ export class Runtime {
       forgetProjectJobs: projectId => this.supervisor.forgetProject(projectId),
       revokeMedia: folder => { for (const [token, known] of this.media) if (within(folder, known)) this.media.delete(token); },
     };
-    this.mobile = new MobileService(this, this.services, (event) => {
-      this.emit(event);
-    }, version);
+    this.mobile = new MobileService(this, this.services, emit, version);
   }
   async init(): Promise<void> {
     await mkdir(this.dataDir, { recursive: true, mode: 0o700 });
@@ -227,14 +231,16 @@ export class Runtime {
     if (action === 'jobs.respond') { if (typeof payload.data !== 'string') throw new Error('Resposta inválida.'); return this.supervisor.respond(text(payload, 'id', 100), payload.data); }
     if (action === 'jobs.dismissInteraction') return this.supervisor.dismissInteraction(text(payload, 'id', 100));
     if (action === 'jobs.resize') return this.supervisor.resize(text(payload, 'id', 100), Number(payload.cols), Number(payload.rows));
-    if (action.startsWith('projects.') || action.startsWith('brands.')) { const result = await handleProjects(action, payload, this.services); if (!['projects.list','projects.detail','projects.readText','brands.list'].includes(action)) this.emit({ type: 'refresh' }); return result; }
+    if (action.startsWith('projects.') || action.startsWith('brands.')) { const result = await handleProjects(action, payload, this.services); if (!['projects.list','projects.detail','projects.readText','projects.storyboard','projects.narration','projects.deletePreview','brands.list'].includes(action)) this.emit({ type: 'refresh' }); return result; }
     if (action.startsWith('agents.')) return handleAgents(action, payload, this.services);
     if (action === 'app.onboarding.complete') return this.saveSettings({ onboardingCompleted: true });
+    if (action.startsWith('feedback.')) return handleFeedback(action, payload, this.services, { version: this.version });
     if (action.startsWith('setup.')) return handleSetup(action, payload, this.services);
     if (action === 'mobile.status') return this.mobile.getStatus();
-    if (action === 'mobile.start') return this.mobile.start(payload as { port?: number; tunnelToken?: string });
+    if (action === 'mobile.start') return this.mobile.start(payload as { port?: number });
     if (action === 'mobile.stop') { await this.mobile.stop(); return this.mobile.getStatus(); }
     if (action === 'mobile.regeneratePin') return { token: this.mobile.regeneratePin() };
+    if (action === 'mobile.revokeSessions') return this.mobile.revokeSessions();
     if (action === 'mobile.qr') return { svg: await this.mobile.getSvgQR(), terminal: await this.mobile.getTerminalQR() };
     throw new Error('Operação não suportada.');
   }

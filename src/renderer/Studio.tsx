@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, AudioLines, BookOpen, Check, CheckCheck, ChevronLeft, ChevronRight, Film, FileText, FolderOpen, Image, Layers, Mic2, Plus, Send, Sparkles, TerminalSquare } from 'lucide-react';
-import { VIDEO_AGENT_EFFORT, VIDEO_AGENT_MODEL, postNowFormatAcceptsPageCount, type Asset, type ElevenLabsVoice, type Job, type LocalVoiceCatalogState, type LocalVoiceOperationEvent, type LocalVoiceOption, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type Provider } from '../shared/contracts';
+import { DEFAULT_VIDEO_SOUND, VIDEO_AGENT_EFFORT, VIDEO_AGENT_MODEL, postNowFormatAcceptsPageCount, type Asset, type ElevenLabsVoice, type Job, type LocalVoiceCatalogState, type LocalVoiceOperationEvent, type LocalVoiceOption, type NarrationState, type PostNowFormatId, type Project, type ProjectDetail, type ProjectFormatId, type Provider, type VideoSound, type VideoSoundMood } from '../shared/contracts';
 import { Empty, ErrorNotice, Loading } from './components';
 import { api, errorMessage, invoke, useJobs, type ScreenProps } from './state';
 import { ActivityCard } from './Console';
@@ -136,6 +136,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const [localOperation, setLocalOperation] = useState<LocalVoiceOperationEvent | null>(null);
   const [localOperationError, setLocalOperationError] = useState('');
   const [trackedJobId, setTrackedJobId] = useState<string | null>(null);
+  const [arcadeJobId, setArcadeJobId] = useState<string | null>(null);
   const [arcadeOpen, setArcadeOpen] = useState(false);
   const [storyboardScenes, setStoryboardScenes] = useState<StoryboardSceneText[] | null>(null);
   const [storyboardError, setStoryboardError] = useState('');
@@ -161,12 +162,10 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const lastRunningJobId = useRef<string | undefined>(undefined);
   const narrationJobStatus = projectJobs.find(job => job.id === narrationJobId)?.status;
   const trackedJob = running ?? projectJobs.find(job => job.id === trackedJobId);
+  const arcadeJob = projectJobs.find(job => job.id === arcadeJobId) ?? trackedJob;
   const recommendedModel = detail?.kind === 'video' ? VIDEO_AGENT_MODEL : provider === 'codex' ? 'gpt-6-luna' : 'sonnet';
   const selectedModel = model === 'custom' ? customModel.trim() : model || recommendedModel;
   const selectedModelInfo = MODEL_CATALOG[provider].find(option => option.id === selectedModel);
-  useEffect(() => {
-    if (!running) setArcadeOpen(false);
-  }, [running?.id]);
 
   useEffect(() => {
     let active = true;
@@ -396,7 +395,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   const expectedImageCount = visualReview?.pages.length ?? 0;
   const renderInputsReady = project.kind === 'image'
     ? Boolean(!visualPreferencesDirty && selectedBatch && expectedImageCount > 0 && selectedBatch.sourceCount === expectedImageCount && !insufficientCarousel && visualReview?.ready && visualReview.approved && selectedBatch.assets.length === 0)
-    : (project.storyboardReady === true || project.storyboardAvailable === true) && !narrationBlocked;
+    : (project.storyboardReady === true || project.storyboardAvailable === true) && !narrationBlocked && project.storyboardCompositionReady === true;
   const canDerive = project.kind === 'image'
     ? selectedBatchId !== 'all' && expectedImageCount > 0 && (selectedBatch
       ? selectedBatch.status?.state === 'ready' && selectedBatch.sourceCount === expectedImageCount && selectedBatch.assets.length === expectedImageCount && selectedBatch.assets.every(asset => asset.approved)
@@ -413,6 +412,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
       : ''
     : !project.storyboardReady ? (project.storyboardIssues?.length ? `Storyboard inválido: ${project.storyboardIssues[0]}` : 'Conclua e aprove o storyboard no VideoGo antes de renderizar.')
       : narrationBlocked ? 'Salve e aprove a narração e os áudios das cenas antes de renderizar o vídeo.'
+      : !project.storyboardCompositionReady ? 'Produza as cenas com o Claude Opus 5.5 antes de renderizar: sem a composição dele, o VideoGo cai no visual genérico.'
       : '';
   const deriveBlockMessage = project.kind === 'image'
     ? selectedBatchId === 'all' ? 'Escolha uma versão específica: não misturamos rodadas diferentes num mesmo projeto de vídeo.'
@@ -485,6 +485,8 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
     </div>
   ) : null;
   const basicPostVideo = project.kind === 'video' && Boolean(project.sourceProjectId) && !project.storyboardCompositionReady;
+  const videoSound = project.videoSound ?? DEFAULT_VIDEO_SOUND;
+  const videoSoundBusy = Boolean(running) || busy.has('video-sound');
   const productionBusy = Boolean(running) || busy.has('agent') || !project.storyboardAvailable;
   const postVideoCard = project.kind === 'video' && project.sourceProjectId ? (
     <section className="video-production" aria-labelledby="video-production-title">
@@ -565,6 +567,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
       anyManualAudio: voiceScenes.some(scene => ['upload', 'recording', 'local'].includes(scene.audioSource ?? '')),
     },
     storyboardReady: project.storyboardReady === true,
+    compositionAuthored: project.storyboardCompositionReady === true,
     narrationBlocked,
     render: { hasRender: hasVideoGoRenderValue, rendering: busy.has('render'), audioCheckUnavailable: audioUnavailable && narration?.mode === 'narrated' },
     videoRevisionRequested: Boolean(videoRevisionRequested),
@@ -741,14 +744,19 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   async function requestVideoCorrection() {
     const request = videoCorrection.trim();
     if (!request || !latestVideo) return;
-    if (!await confirm('Pedir revisão ao agente?', 'O Claude Opus 5.5 altera o roteiro e a animação conforme o pedido e confere uma prévia. Depois, renderize de novo; se o roteiro voltar a rascunho, aprove-o antes. A narração já gerada não é refeita.', 'Pedir revisão')) return;
+    if (!await confirm('Pedir revisão ao Claude Opus 5.5?', project.storyboardCompositionReady
+      ? 'O Claude Opus 5.5 altera o roteiro e a animação conforme o pedido e confere uma prévia. Depois, renderize de novo; se o roteiro voltar a rascunho, aprove-o antes. A narração já gerada não é refeita.'
+      : 'Este vídeo saiu sem as cenas do Claude Opus 5.5. O Opus vai produzir as cenas, a animação e o som do zero, atendendo também ao seu pedido, e conferir uma prévia. Depois, aprove o roteiro e renderize de novo. A narração já gerada não é refeita.', 'Pedir revisão')) return;
     if (latestVideo.approved) {
       const updated = await run('approve', () => invoke<ProjectDetail>('projects.approve', { id, path: latestVideo.path, approved: false }));
       if (!updated) return;
       setDetail(updated);
     }
     const contactSheet = project.assets.find(asset => /^renders\/(?:review|final)\/folha-contato\.png$/i.test(asset.name.replace(/\\/g, '/')))?.path;
-    const job = await run('agent', () => invoke<Job>('agents.start', { id, provider, model: selectedModel || undefined, prompt: videoRevisionPrompt(request, { contactSheet }), confirm: true }), 'Revisão enviada ao agente.');
+    const job = await run('agent', () => invoke<Job>('agents.start', {
+      id, provider: 'claude', model: VIDEO_AGENT_MODEL, confirm: true,
+      prompt: videoRevisionPrompt(request, { contactSheet, ...(project.storyboardCompositionReady ? {} : { produce: { fromPost: Boolean(project.sourceProjectId) } }) }),
+    }), 'Revisão enviada ao Claude Opus 5.5.');
     if (job) {
       setVideoRevisionRequested({ path: latestVideo.path, stale: true });
       setVideoCorrection('');
@@ -760,7 +768,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
   }
 
   async function approveLatestVideo() {
-    if (!latestVideo || !project.storyboardReady || videoRevisionRequested?.path === latestVideo.path) return;
+    if (!latestVideo || !project.storyboardReady || videoRevisionRequested?.path === latestVideo.path || (!latestVideo.approved && !project.storyboardCompositionReady)) return;
     for (const older of reviewVideos.slice(1).filter(asset => asset.approved)) {
       const updated = await run('approve', () => invoke<ProjectDetail>('projects.approve', { id, path: older.path, approved: false }));
       if (!updated) return;
@@ -795,14 +803,20 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
     if (!updated?.visualStyle) return;
     setDetail(updated);
     const contactSheet = project.assets.find(asset => /^renders\/(?:review|final)\/folha-contato\.png$/i.test(asset.name.replace(/\\/g, '/')))?.path;
-    const job = await run('agent', () => invoke<Job>('agents.start', { id, provider, model: selectedModel || undefined, prompt: videoStylePrompt(updated.visualStyle!, { contactSheet }), confirm: true }), 'Mudança de estilo enviada ao agente.');
+    const job = await run('agent', () => invoke<Job>('agents.start', { id, provider: 'claude', model: VIDEO_AGENT_MODEL, prompt: videoStylePrompt(updated.visualStyle!, { contactSheet }), confirm: true }), 'Mudança de estilo enviada ao Claude Opus 5.5.');
     if (job) { setRevisionOpen(false); setSelectedPath(null); setAfterJob({ jobId: job.id, step: 'render' }); trackJob(job); }
+  }
+  async function saveVideoSound(next: VideoSound) {
+    const updated = await run('video-sound', () => invoke<ProjectDetail>('projects.videoSound', { id, ...next }), project.storyboardCompositionReady
+      ? 'Som do vídeo salvo. Para aplicar no vídeo já produzido, peça revisão ou produza de novo com o Claude Opus 5.5.'
+      : 'Som do vídeo salvo. O Claude Opus 5.5 aplica esta escolha ao produzir as cenas.');
+    if (updated) setDetail(updated);
   }
   const videoStylePanel = project.kind === 'video' && project.storyboardAvailable ? (
     <VideoStylePanel current={project.visualStyle} disabled={Boolean(running) || busy.has('agent') || busy.has('video-style')} defaultOpen={activeStep.id === 'render'} onApply={choice => { void applyVideoStyle(choice); }} />
   ) : null;
   async function produceVideoWithAi() {
-    if (!await confirm('Produzir vídeo com Claude Opus 5.5', 'Claude Opus 5.5 vai criar as cenas 3D e a composição HTML/Three.js, renderizar e conferir uma prévia no VideoGo. A produção não chama Codex/ImageGen para criar frames. O roteiro fica em rascunho para sua revisão; o render final continua sendo uma ação separada.', 'Produzir com Opus')) return;
+    if (!await confirm('Produzir vídeo com Claude Opus 5.5', 'Claude Opus 5.5 vai criar as cenas 3D e a composição HTML/Three.js, aplicar os efeitos e a trilha escolhidos na etapa de áudio, renderizar e conferir uma prévia no VideoGo. A produção não chama Codex/ImageGen nem outro modelo para criar frames. O roteiro fica em rascunho para sua revisão; o render final continua sendo uma ação separada.', 'Produzir com Opus')) return;
     const job = await run('agent', () => invoke<Job>('agents.start', {
       id, provider: 'claude', model: VIDEO_AGENT_MODEL,
       prompt: motionDirectorPrompt({ fromPost: Boolean(project.sourceProjectId) }), confirm: true,
@@ -956,6 +970,9 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
         break;
       case 'approve-audio':
         if (await acceptNarrationAudio()) selectStep('render');
+        break;
+      case 'produce-video':
+        await produceVideoWithAi();
         break;
       case 'approve-render':
         await approveAndRenderVideo();
@@ -1117,7 +1134,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
 
   return (
     <>
-      {arcadeOpen && <ArcadeDialog onClose={() => setArcadeOpen(false)} />}
+      {arcadeOpen && arcadeJob && <ArcadeDialog job={arcadeJob} onClose={() => { setArcadeOpen(false); setArcadeJobId(null); }} />}
       {agentQuestionsOpen && agentQuestionsJob && (
         <AgentQuestionsDialog
           key={agentQuestionsJob.id}
@@ -1163,7 +1180,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
           )}
         >
           {trackedJob && (
-            <GenerationProgress title={trackedJob.title} job={trackedJob} state={progressStateFor(trackedJob)} onOpenTerminal={() => onOpenTerminal(trackedJob)} onOpenGame={() => setArcadeOpen(true)} onCancel={() => { void cancelJob(trackedJob); }} cancelling={busy.has(`cancel-${trackedJob.id}`)} />
+            <GenerationProgress title={trackedJob.title} job={trackedJob} state={progressStateFor(trackedJob)} onOpenTerminal={() => onOpenTerminal(trackedJob)} onOpenGame={() => { setArcadeJobId(trackedJob.id); setArcadeOpen(true); }} onCancel={() => { void cancelJob(trackedJob); }} cancelling={busy.has(`cancel-${trackedJob.id}`)} />
           )}
           {project.kind === 'video' && activeStep.id === 'review' && (
           <section className="preview-panel" id="project-preview">
@@ -1217,7 +1234,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
                   <span>{reviewSelected.path !== latestVideo?.path ? 'Versão anterior — não bloqueia a entrega.' : reviewSelected.approved ? 'Aprovado para exportação' : 'Assista ao vídeo e decida: aprovar ou pedir revisão.'}</span>
                 </div>
                 <div className="heading-actions">
-                  <DecisionToggle kind="approve" active={Boolean(reviewSelected.approved)} label={reviewSelected.approved ? 'Aprovado' : 'Aprovar'} ariaLabel={`Aprovar vídeo ${reviewSelected.name}`} title={reviewSelected.approved ? 'Clique para desfazer' : undefined} disabled={busy.has('approve') || Boolean(running) || reviewSelected.path !== latestVideo?.path || !project.storyboardReady || videoRevisionRequested?.path === latestVideo?.path} onClick={() => { void approveLatestVideo(); }} />
+                  <DecisionToggle kind="approve" active={Boolean(reviewSelected.approved)} label={reviewSelected.approved ? 'Aprovado' : 'Aprovar'} ariaLabel={`Aprovar vídeo ${reviewSelected.name}`} title={reviewSelected.approved ? 'Clique para desfazer' : !project.storyboardCompositionReady ? 'Vídeo sem as cenas do Claude Opus 5.5: peça revisão' : undefined} disabled={busy.has('approve') || Boolean(running) || reviewSelected.path !== latestVideo?.path || !project.storyboardReady || videoRevisionRequested?.path === latestVideo?.path || (!reviewSelected.approved && !project.storyboardCompositionReady)} onClick={() => { void approveLatestVideo(); }} />
                   <DecisionToggle kind="revision" active={videoRevisionRequested?.path === latestVideo?.path} label={videoRevisionRequested?.path === latestVideo?.path ? 'Revisão solicitada' : 'Pedir revisão'} ariaLabel={`Pedir revisão do vídeo ${reviewSelected.name}`} title={videoRevisionRequested?.path === latestVideo?.path ? 'Pedido enviado ao agente' : undefined} disabled={Boolean(running) || busy.has('agent') || reviewSelected.path !== latestVideo?.path || videoRevisionRequested?.path === latestVideo?.path} onClick={() => setRevisionOpen(open => !open)} />
                   <button type="button" className="button small secondary" onClick={() => selectStep('script')}>Editar cenas</button>
                 </div>
@@ -1263,6 +1280,18 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
                     <label><input type="radio" name="narration-mode" checked={narration?.mode === 'silent'} disabled={Boolean(running) || narrationDirty || busy.has('narration-mode') || busy.has('local-voice')} onChange={() => { void setNarrationMode('silent'); }} /> Seguir sem narração</label>
                     <p className="field-help">Sem narração, os textos e áudios ficam guardados para você reativar depois. Esta escolha não aprova o roteiro nem os arquivos.</p>
                     {narrationDirty && <p className="field-help">Salve as alterações antes de mudar esta escolha.</p>}
+                  </fieldset>
+                  <fieldset className="narration-mode video-sound">
+                    <legend>Efeitos e trilha de fundo</legend>
+                    <label><input type="checkbox" checked={videoSound.effects} disabled={videoSoundBusy} onChange={event => { void saveVideoSound({ ...videoSound, effects: event.target.checked }); }} /> Efeitos sonoros nas transições, entradas de texto e destaques</label>
+                    <label><input type="checkbox" checked={videoSound.music} disabled={videoSoundBusy} onChange={event => { void saveVideoSound({ ...videoSound, music: event.target.checked }); }} /> Trilha de fundo</label>
+                    <label className="narration-voice">Clima do som<select value={videoSound.mood} disabled={videoSoundBusy || (!videoSound.effects && !videoSound.music)} onChange={event => { void saveVideoSound({ ...videoSound, mood: event.target.value as VideoSoundMood }); }}>
+                      <option value="auto">Automático · pelo tema do vídeo</option>
+                      <option value="calm">Calmo · temas sérios e acolhimento</option>
+                      <option value="tech">Tecnologia · dados e ferramentas</option>
+                      <option value="energetic">Energético · dicas rápidas e listas</option>
+                    </select></label>
+                    <p className="field-help">Vai no pedido do Claude Opus 5.5 ao produzir ou revisar o vídeo. Efeitos e trilha são originais, gerados no computador pelo VideoGo, sem custo e sem direitos de terceiros; ficam sempre abaixo da voz.</p>
                   </fieldset>
                   <fieldset className="voice-provider">
                     <legend>Motor de voz</legend>
@@ -1357,12 +1386,17 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
                       narrationDraft.provider === 'local' && selectedLocalVoice && !selectedLocalVoice.supported ? selectedLocalVoice.unsupportedReason ?? 'Esta voz não é compatível com a plataforma atual.' :
                       narrationDraft.provider === 'local' && selectedLocalVoice && !localCatalog?.installedIds.includes(selectedLocalVoice.id) ? 'Instale a voz local selecionada antes de gerar.' :
                       narrationDraft.provider === 'elevenlabs' && !narrationDraft.voiceId ? 'Selecione uma voz ElevenLabs para gerar áudio.' :
+                      narration?.audioReady && !narration.audioApproved ? 'Áudios associados às cenas. Ouça e aprove cada um antes do render.' :
                       !narration.ready ? 'Há cenas narradas sem áudio válido. Gere, envie ou grave o áudio de cada cena; revise e aprove antes do render.' :
                       'Áudios das cenas prontos para revisão antes do render.'}
                   </div>
                   <div className="narration-controls">
                     <button type="button" className="button secondary" disabled={!narrationDirty || Boolean(running) || busy.has('save-narration')} onClick={() => { void saveNarration(); }}>Salvar voz e narração</button>
+                    {narration?.mode === 'narrated' && narration.audioReady && !narrationDirty ? (
+                      <button type="button" className="button primary" disabled={Boolean(running) || busy.has('approve') || busy.has('narration-refresh') || narration.audioApproved} onClick={() => { void acceptNarrationAudio(); }}>{narration.audioApproved ? 'Áudios aprovados' : 'Aprovar áudios'}</button>
+                    ) : (
                     <button type="button" className="button primary" disabled={narrationDirty || narration?.mode !== 'narrated' || Boolean(running) || localOperationBusy || busy.has('local-voice') || busy.has('generate-narration') || (narrationDraft.provider === 'local' ? !selectedLocalVoice?.supported || !localCatalog?.platformSupported || !localCatalog?.installedIds.includes(selectedLocalVoice.id) : !narrationDraft.voiceId)} onClick={() => { void generateNarration(); }}>{narrationDraft.provider === 'local' ? 'Gerar narração local' : 'Gerar narração ElevenLabs'}</button>
+                    )}
                   </div>
                 </>
               )}

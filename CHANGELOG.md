@@ -2,7 +2,52 @@
 
 Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas por tag (`v*.*.*`) pelo workflow `release.yml`.
 
+## 2026-11-21
+### Release v0.4.0
+- Release minor com Acesso Mobile revisado, Damas Brasileiras, refinamentos no fluxo de vídeo/narração e sistema de feedback com issues, labels e anexos no GitHub.
+- O Studio consulta releases estáveis do PostNow, VideoGo e Maestro para detectar e instalar atualizações verificadas; nenhum código ou tag dos repositórios dos motores é alterado por esta release.
+- Corrigido: IDs de clientes PostNow com acentos agora usam a mesma normalização Unicode do motor (por exemplo, “Clínica” → `clinica`); isso evita erro ao renderizar projetos de marcas com acento.
+
+
+### Novo — aviso de conclusão dentro dos jogos
+- A geração continua mostrando o andamento durante a partida. Quando termina, falha, é cancelada ou interrompida, o aviso aparece sobre qualquer jogo e permanece até ser fechado; a janela do jogo não se fecha automaticamente.
+- O Studio também mostra avisos visíveis fora do jogo para cada processo concluído, com acesso direto ao projeto.
+
+### Corrigido — narração ElevenLabs associada e aprovação
+- **Áudios pagos não eram associados.** O VideoGo escolhe a própria pasta de saída (`assets/audio/narration/<uuid>/`), mas o Studio exigia outra pasta pré-calculada e descartava o resultado com "O VideoGo alterou o destino isolado do áudio". Agora o Studio aceita a pasta escolhida pelo motor, desde que cada cena narrada tenha um MP3 `<cena>.mp3` numa única pasta válida.
+- **Falha depois da geração não apaga áudio pago.** Ao falhar, só o storyboard é restaurado; os MP3 gerados permanecem no projeto.
+- **Botão principal avança quando o áudio já está associado.** Com todas as cenas narradas com áudio atual, o botão vira "Aprovar áudios" (ou "Áudios aprovados") em vez de "Gerar narração ElevenLabs", evitando nova geração paga.
+
+### Corrigido — vídeo só renderiza com cenas feitas pelo Claude Opus 5.5
+- **Causa do vídeo feio:** o roteiro foi escrito pelo Claude Opus 5.5, mas as cenas e a animação nunca foram produzidas. O render rodou direto com o visual genérico de template do VideoGo, sem composição autoral de nenhum modelo.
+- O Studio passa a registrar a composição (`index.html`) deixada ao fim de cada sessão concluída do agente de vídeo, que roda sempre no `claude-opus-5-5` fixo. Sem esse registro da versão atual, o render é recusado (desktop e celular). Composição escrita à mão, por outro modelo ou editada depois da sessão não conta.
+- Na etapa Renderizar, o botão principal vira **Produzir cenas com Claude Opus 5.5** enquanto faltar a composição. Na revisão, um vídeo sem as cenas do Opus não pode ser aprovado.
+- **Pedir revisão** de um vídeo que saiu sem as cenas do Opus manda o Opus produzir o vídeo inteiro e atender ao pedido junto. Revisão e troca de estilo enviam sempre `claude` + `claude-opus-5-5`, mesmo com o Codex como agente padrão.
+
+### Novo — efeitos sonoros e trilha de fundo
+- Na etapa de áudio, **Efeitos e trilha de fundo**: efeitos sonoros e trilha vêm ligados por padrão, com clima Automático (o Opus escolhe calmo, tecnologia ou energético pelo tema do vídeo) ou fixo. A escolha vai no pedido do Opus ao produzir ou revisar e define o comando `project sound` do VideoGo (efeitos e trilha originais, locais e sem custo).
+
 ## 2026-11-20
+
+### Corrigido — Acesso Mobile em paridade com o desktop
+- **Imagens, carrosséis e reels aparecem no celular.** A etapa Gerar imagens deixou de esconder a prévia quando os textos não estão aprovados; a prévia vem da rodada mais recente (ou dos slides antigos `generated/slide-NN.png`), com o estado da rodada. Há um visualizador de carrossel em tela cheia (deslizar, n/N, pontos, baixar) usado em Imagens, Revisão e Entrega. O vídeo mostra o render mais recente (mesma regra do desktop), com versões anteriores marcadas como "não bloqueia a entrega".
+- **Fluxo completo no celular:** gerar e refazer imagens funcionava só no papel (faltava a confirmação que o servidor exige); agora toda ação com custo (agente, gerar/refazer imagens, pedir revisão de vídeo, renderizar) pede confirmação na tela e o servidor recusa sem ela. Roteiro de vídeo não quebra mais, narração por cena com áudio, aprovar áudios, aprovar/pedir revisão do vídeo (só um vídeo fica aprovado), marca do projeto, legenda, Baixar ZIP dos aprovados e capa/texto de entrega de vídeo.
+- **Sincronia com o computador:** mudanças feitas no app (aprovar, editar, excluir) chegam ao celular. O quick tunnel da Cloudflare não entrega eventos em tempo real; o celular detecta isso em 20 s ("Sem tempo real") e passa a consultar mudanças a cada 4 s sem recarregar o que você está digitando (aparece "Atualizado no computador — toque para recarregar").
+- **Sessão e conexão:** sessão expirada volta para a tela do token; computador/túnel fora mostra faixa de conexão; link antigo depois de reiniciar o app avisa para escanear o QR novo. O token de 6 dígitos não é mais exibido no celular. "Desconectar celulares" e novo token derrubam as sessões abertas. O túnel só fica ativo depois de responder de verdade, e uma queda do `cloudflared` aparece como erro no app.
+- **Segurança e robustez do servidor:** limite de tentativas por IP real do túnel (o cabeçalho `x-forwarded-for` é ignorado), `/api/status` anônimo sem dados do computador, corpo limitado a 64 KB, textos do celular escapados, cabeçalhos `no-store`/`nosniff`, vídeo com `Range` completo (sufixo, 416, HEAD, ETag/304), imagem regerada não fica velha no celular, tipos `.m4v/.avif/.flac/.md/.srt/.vtt` com MIME correto.
+- Removido o parâmetro `--token` do `npm run mobile` (túnel nomeado nunca informava a URL).
+- Fora do escopo desta rodada (registrado em ADR-040): render e geração de narração pelo celular além do que já existia, gerar capa/copy de vídeo, trocar formato, excluir/importar arquivos, editar legenda e cenas, PIN persistente.
+
+### Novo — enviar feedback como issue do GitHub
+- Novo botão **Enviar feedback** na barra lateral. Escolha Bug, Sugestão ou Dúvida, escreva o resumo e os detalhes e, se quiser, anexe até 4 imagens (PNG, JPG, GIF ou WebP, até 5 MB cada) pelo botão, arrastando ou colando um print. O envio abre um issue em `FernandoBolzan/maquina-de-conteudo-studio` **com a conta do GitHub que já está conectada** em Motores & Setup; sem conta conectada, o envio fica bloqueado e o diálogo leva até lá.
+- O GitHub não aceita upload de imagem pela API de issues. As imagens vão para um **gist secreto da sua conta** (só quem tem o link as vê) e o issue aponta para elas; se o issue falhar, o gist é apagado. O app continua sem ler o token: tudo passa pelo `gh` e pelo credential helper dele. Conexões antigas do GitHub sem a permissão `gist` mostram como reconectar.
+- Antes de enviar, o diálogo avisa que o issue é público. "Incluir versão do Studio, sistema operacional e agente padrão" vem marcado e pode ser desligado; nenhum log ou arquivo de projeto é anexado.
+
+### Alterado — projeto com material abre na prévia
+- Ao abrir um projeto que já tem material, ele abre direto em **Revisar imagens** (imagens prontas) ou **Revisar o vídeo** (render do VideoGo), em vez da primeira etapa pendente. Em projeto sem material, a abertura continua na etapa atual. Vale também para o editor do celular.
+
+### Alterado — biblioteca de projetos em masonry
+- A grade de projetos deixou de usar linhas de altura igual. Cada capa usa a proporção real do arquivo gerado (Story 9:16, carrossel 4:5, post 1:1 ou o que o modelo devolver; vídeo 9:16, 1:1 ou 16:9), então stories ficam altos e posts quadrados ficam baixos, em colunas como o Pinterest. Enquanto a imagem não carrega, vale o formato do projeto. Os botões "Usar como base" e "Excluir" continuam abaixo do próprio card.
 
 ### Novo — Damas Brasileiras contra a máquina
 - "Jogar enquanto aguarda" agora abre uma escolha entre **AI Escape 3D** e **Damas Brasileiras**. "Trocar de jogo" volta à escolha e fecha o jogo atual.
@@ -24,6 +69,11 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 - Editar a legenda depois de gerar as imagens não pede nova aprovação dos textos: a legenda não entra mais na aprovação. Aprovações feitas antes continuam valendo e passam para o novo formato sozinhas.
 - O motor PostNow exige a legenda em cada página; por isso o app grava o mesmo texto em todas as páginas e nos arquivos de arte ao salvar. Projetos antigos com legendas diferentes por página continuam como estão até você salvar a legenda; a legenda mostrada é a da página 1.
 - O editor do celular também deixou de mostrar a legenda por página. Ela ainda não aparece no celular depois da geração (só no app do computador).
+
+### Corrigido — motores VideoGo, PostNow e Maestro nunca mostravam atualização
+- O Studio comparava o motor com o último commit da branch principal e não mostrava nada antes do clique: o botão "Atualizar" aparecia sempre, e ao clicar só dizia "operação concluída" mesmo quando nada mudava. Como o PostNow v0.3.0 foi publicado a partir de uma branch que a `main` ainda não recebeu, a `main` continuava na 0.2.0 e a atualização nunca aparecia.
+- Agora os motores seguem a última **release estável** do GitHub (tag resolvida para um commit imutável). Em Motores & Setup, cada motor mostra "Atualização disponível" e o botão "Atualizar para vX.Y.Z" só aparece quando a release é mais nova que a versão instalada; "Verificar versões" consulta CLIs e motores juntos. A consulta não instala nada (nem o GitHub CLI).
+- A instalação recusa uma release cujo manifesto declara versão diferente da tag, e uma atualização sem versão nova não toca em nenhum pacote do sistema.
 
 ### Novo — onde fica o conteúdo: carrossel e imagem única
 - **Carrossel:** a capa nunca traz o conteúdo. Ela só tem o gancho (título e, no máximo, uma frase de promessa). Todo o conteúdo é distribuído nas páginas entre a capa e a última, e a última fecha com a chamada final. A regra vai no pedido ao agente, nas receitas da biblioteca de prompts e no editor de Textos (dica no subtítulo da capa). Se o subtítulo da capa trouxer lista, passos ou números enumerados ("1)", "2)", marcadores), a aprovação dos textos é bloqueada com a mensagem "a capa do carrossel não pode trazer o conteúdo".

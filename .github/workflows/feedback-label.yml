@@ -1,0 +1,29 @@
+name: Rotular feedback
+
+# O GitHub ignora labels pedidas por quem não tem permissão de triagem (todo usuário comum do app).
+# O Studio prefixa o título com [Bug], [Sugestão] ou [Dúvida]; aqui o prefixo vira a label.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aplicar label pelo prefixo do título
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ github.event.issue.title }}
+          NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          case "$TITLE" in
+            "[Bug] "*) label=bug ;;
+            "[Sugestão] "*) label=enhancement ;;
+            "[Dúvida] "*) label=question ;;
+            *) exit 0 ;;
+          esac
+          gh api --method POST "repos/$REPO/issues/$NUMBER/labels" -f "labels[]=$label" --silent

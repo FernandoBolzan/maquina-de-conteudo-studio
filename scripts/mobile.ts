@@ -4,13 +4,12 @@ import { readFile } from 'node:fs/promises';
 import { Runtime } from '../src/main/runtime.js';
 import type { AppEvent } from '../src/shared/contracts.js';
 
-function parseArgs(): { port?: number; pin?: string; tunnelToken?: string } {
+function parseArgs(): { port?: number; pin?: string } {
   const args = process.argv.slice(2);
-  const options: { port?: number; pin?: string; tunnelToken?: string } = {};
+  const options: { port?: number; pin?: string } = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--port' && args[i + 1]) options.port = Number(args[++i]);
     if (args[i] === '--pin' && args[i + 1]) options.pin = args[++i];
-    if (args[i] === '--token' && args[i + 1]) options.tunnelToken = args[++i];
   }
   return options;
 }
@@ -65,7 +64,6 @@ async function main(): Promise<void> {
   try {
     const status = await runtime.mobile.start({
       port: options.port || 4180,
-      tunnelToken: options.tunnelToken,
     });
 
     const qrText = await runtime.mobile.getTerminalQR();

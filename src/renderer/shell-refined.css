@@ -1036,3 +1036,87 @@ html, body, #root {
     display: none;
   }
 }
+
+/* ---- Enviar feedback ---- */
+dialog.modal.feedback-modal .feedback-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+dialog.modal.feedback-modal .feedback-form > .consent-description {
+  margin: 0;
+}
+
+.feedback-drop {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.feedback-drop.is-dragging {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+}
+
+.feedback-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.feedback-thumbs li {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.feedback-thumbs img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.feedback-thumbs .icon-button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: #000000b3;
+}
+
+dialog.modal.feedback-modal label.feedback-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+dialog.modal.feedback-modal label.feedback-check input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.feedback-done {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

@@ -33,11 +33,20 @@ export interface Asset { name: string; path: string; kind: 'image' | 'video' | '
 export interface GenerationBatch { id: string; assets: Asset[]; sourceCount: number; format?: PostNowFormatId; status?: { state: 'generating' | 'processing' | 'ready' | 'failed'; stage?: string; message?: string; updatedAt: string }; revision?: { of: string; keptPages: number[]; redonePages: number[] }; }
 /** Direção visual escolhida na biblioteca de prompts; snapshot gravado no projeto e injetado direto na geração e no prompt do PostNow. */
 export interface VisualStyle { id: string; title: string; direction: string; }
-export interface Project { id: string; title: string; kind: 'image' | 'video'; format?: ProjectFormatId; unsupportedFormat?: string; brandId?: string; createdAt: string; path: string; brief: string; sourceProjectId?: string; voiceId?: string; coverUrl?: string; visualStyle?: VisualStyle; imageBackgroundMode?: ImageBackgroundMode; useBrandImages?: boolean; logoPolicy?: LogoPolicy; depictedPersonPolicy?: DepictedPersonPolicy; }
+/** Clima de efeitos e trilha do vídeo; `auto` deixa o Opus escolher pelo tema e tom do vídeo. */
+export type VideoSoundMood = 'auto' | 'calm' | 'tech' | 'energetic';
+/** Preferência de som do vídeo, injetada em toda sessão do agente de vídeo. */
+export interface VideoSound { effects: boolean; music: boolean; mood: VideoSoundMood; }
+export const DEFAULT_VIDEO_SOUND: VideoSound = { effects: true, music: true, mood: 'auto' };
+export function isVideoSoundMood(value: unknown): value is VideoSoundMood {
+  return value === 'auto' || value === 'calm' || value === 'tech' || value === 'energetic';
+}
+export interface Project { id: string; title: string; kind: 'image' | 'video'; format?: ProjectFormatId; unsupportedFormat?: string; brandId?: string; createdAt: string; path: string; brief: string; sourceProjectId?: string; voiceId?: string; coverUrl?: string; visualStyle?: VisualStyle; videoSound?: VideoSound; imageBackgroundMode?: ImageBackgroundMode; useBrandImages?: boolean; logoPolicy?: LogoPolicy; depictedPersonPolicy?: DepictedPersonPolicy; }
 export interface GenerationPageReview { page: number; headline: string; body: string; copy: string; depictedPerson: string; }
 export interface GenerationClaimReview { id: string; claim: string; source: string; sourceUrl: string; qualification: string; }
 export interface VisualGenerationReview { ready: boolean; approved: boolean; approvedAt?: string; contentHash: string; blocking: string[]; format: PostNowFormatId; width: number; height: number; /** Legenda única da publicação (a mesma em todas as páginas); aparece depois de gerar as imagens. */ caption: string; pages: GenerationPageReview[]; claims: GenerationClaimReview[]; }
 export interface FormatAdaptation { sourceFormat: PostNowFormatId; targetFormat: PostNowFormatId; pageCount: number; }
+/** `storyboardCompositionReady`: a composição autoral atual (index.html) foi escrita numa sessão concluída do Claude Opus 5.5 fixo; sem ela o render é recusado. */
 export interface ProjectDetail extends Project { assets: Asset[]; notes: string; batches?: GenerationBatch[]; visualReview?: VisualGenerationReview; formatAdaptation?: FormatAdaptation; storyboardAvailable?: boolean; storyboardReady?: boolean; storyboardCompositionReady?: boolean; storyboardIssues?: string[]; }
 export interface ToolStatus { id: string; name: string; installed: boolean; version?: string; authenticated?: boolean; account?: string; detail?: string; source?: 'managed' | 'external'; }
 export type CliId = 'codex' | 'claude';
@@ -45,6 +54,7 @@ export interface CliUpdateStatus { id: CliId; currentVersion?: string; latestVer
 export interface CliOperationResult { job?: Job; message: string; version?: string; }
 export interface EngineDependency { id: string; name: string; required: string; installed: boolean; version?: string; guidance: string; }
 export interface EngineStatus { id: EngineId; installed: boolean; path?: string; version?: string; repository: string; dependencies: EngineDependency[]; }
+export interface EngineUpdateStatus { id: EngineId; currentVersion?: string; latestVersion?: string; state: 'missing' | 'current' | 'update-available' | 'unavailable' | 'unverified'; detail: string; }
 export interface SetupStatus { tools: ToolStatus[]; engines: EngineStatus[]; github?: { authenticated: boolean; login?: string }; platform: string; }
 export interface ElevenLabsVoice { id: string; name: string; category: string; language?: string; previewUrl?: string; isClone: boolean; }
 export interface ElevenLabsStatus { configured: boolean; secureStorageAvailable: boolean; error?: string; warning?: string; }

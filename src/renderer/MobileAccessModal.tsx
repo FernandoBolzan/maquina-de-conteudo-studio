@@ -17,22 +17,27 @@ export function MobileAccessModal({ snapshot, refresh, run, busy, onClose }: Mob
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedPin, setCopiedPin] = useState(false);
+  const [copyError, setCopyError] = useState('');
   const mobile = snapshot?.mobile;
   const active = Boolean(mobile?.active && mobile?.url);
 
   useEffect(() => {
-    if (active && mobile?.url) {
-      qrcode.toDataURL(mobile.url, {
-        margin: 1,
-        width: 220,
-        color: {
-          dark: '#000000',
-          light: '#ffffff',
-        },
-      })
-        .then(url => setQrDataUrl(url))
-        .catch(() => {});
+    if (!active || !mobile?.url) {
+      setQrDataUrl('');
+      return;
     }
+    let current = true;
+    qrcode.toDataURL(mobile.url, {
+      margin: 1,
+      width: 220,
+      color: {
+        dark: '#000000',
+        light: '#ffffff',
+      },
+    })
+      .then(url => { if (current) setQrDataUrl(url); })
+      .catch(() => { if (current) setQrDataUrl(''); });
+    return () => { current = false; };
   }, [active, mobile?.url]);
 
   async function startTunnel() {
@@ -56,9 +61,17 @@ export function MobileAccessModal({ snapshot, refresh, run, busy, onClose }: Mob
     }, 'Novo token gerado.');
   }
 
+  async function revokeSessions() {
+    await run('mobile-revoke', async () => {
+      await invoke<MobileTunnelStatus>('mobile.revokeSessions');
+      await refresh();
+    }, 'Celulares desconectados.');
+  }
+
   async function copyText(text: string, type: 'url' | 'pin') {
     try {
       await navigator.clipboard.writeText(text);
+      setCopyError('');
       if (type === 'url') {
         setCopiedUrl(true);
         setTimeout(() => setCopiedUrl(false), 2000);
@@ -67,7 +80,7 @@ export function MobileAccessModal({ snapshot, refresh, run, busy, onClose }: Mob
         setTimeout(() => setCopiedPin(false), 2000);
       }
     } catch {
-      /* Ignora falha de clipboard */
+      setCopyError('Não foi possível copiar automaticamente. Selecione o texto e copie manualmente.');
     }
   }
 
@@ -202,22 +215,44 @@ export function MobileAccessModal({ snapshot, refresh, run, busy, onClose }: Mob
               </div>
             </div>
 
+            {mobile?.error && (
+              <div role="alert" style={{ color: '#ef4444', fontSize: '12px', padding: '8px', background: 'rgba(239,68,68,0.1)', borderRadius: '8px' }}>
+                {mobile.error}
+              </div>
+            )}
+            {copyError && (
+              <div role="alert" style={{ color: '#ef4444', fontSize: '12px' }}>{copyError}</div>
+            )}
+            <p style={{ fontSize: '12px', color: 'var(--muted)', lineHeight: '1.5', margin: 0 }}>
+              Atenção: qualquer pessoa com o link e o token controla o estúdio. Compartilhe só com quem você confia e use &quot;Desconectar celulares&quot; se suspeitar de acesso indevido.
+            </p>
             {/* Status Footer */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: 'var(--muted)', paddingTop: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', fontSize: '12px', color: 'var(--muted)', paddingTop: '4px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 6px #10b981' }} />
-                <span>Túnel ativo · {mobile?.connectedClients ?? 0} celular(es) pareado(s)</span>
+                <span>Túnel ativo · {mobile?.connectedClients ?? 0} sessões</span>
               </div>
-              <button
-                type="button"
-                className="button small secondary"
-                disabled={busy.has('mobile-toggle')}
-                onClick={() => { void stopTunnel(); }}
-                style={{ color: '#ef4444' }}
-              >
-                <CircleStop size={13} />
-                <span>Parar Túnel</span>
-              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="button small secondary"
+                  disabled={busy.has('mobile-revoke')}
+                  onClick={() => { void revokeSessions(); }}
+                >
+                  <Smartphone size={13} />
+                  <span>Desconectar celulares</span>
+                </button>
+                <button
+                  type="button"
+                  className="button small secondary"
+                  disabled={busy.has('mobile-toggle')}
+                  onClick={() => { void stopTunnel(); }}
+                  style={{ color: '#ef4444' }}
+                >
+                  <CircleStop size={13} />
+                  <span>Parar Túnel</span>
+                </button>
+              </div>
             </div>
           </>
         )}

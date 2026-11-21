@@ -161,24 +161,22 @@
   outline-offset: 2px;
 }
 .projects-grid.project-grid {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr));
-  gap: 20px;
+  display: block;
+  column-width: 270px;
+  column-gap: 20px;
 }
 .projects-grid .projects-item {
-  display: flex;
+  break-inside: avoid;
+  margin-bottom: 20px;
   min-width: 0;
-  flex-direction: column;
 }
 .projects-grid .projects-card {
   width: 100%;
-  flex: 1;
   gap: 16px;
   padding: 12px;
 }
 .projects-grid .project-cover {
   height: auto;
-  min-height: 160px;
-  aspect-ratio: 16 / 9;
 }
 .projects-grid .project-cover .cover-symbol {
   position: absolute;

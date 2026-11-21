@@ -5,7 +5,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import { Runtime } from '../src/main/runtime.js';
 import { capture } from '../src/main/supervisor.js';
-import type { Brand, Project, ProjectDetail, SetupStatus, Snapshot } from '../src/shared/contracts.js';
+import { recordVideoComposition } from '../src/main/projects.js';
+import { serialized } from '../src/main/content/storage.js';
+import { VIDEO_AGENT_MODEL, type Brand, type Project, type ProjectDetail, type SetupStatus, type Snapshot } from '../src/shared/contracts.js';
 
 function smokePath(name: string, fallback?: string): string {
   const configured = process.env[name]?.trim();
@@ -147,6 +149,12 @@ async function main(): Promise<void> {
     await runtime.invoke('setup.link', { engine: 'videogo', path: videogoPath, confirm: true });
     await runtime.invoke('setup.link', { engine: 'maestro', path: maestroPath, confirm: true });
     await runtime.invoke('projects.narration.setMode', { id: derivedVideo.id, mode: 'silent' });
+    await assert.rejects(runtime.invoke('projects.render', { id: derivedVideo.id }), /Claude Opus 5\.5/, 'Render sem composição do Opus deve ser recusado.');
+    // O smoke não chama o Opus (pago): monta a base local da composição e registra como o fim de uma sessão do agente de vídeo faria.
+    const composition = await capture('node', [join(videogoPath, 'dist', 'cli', 'index.js'), 'project', 'composition', join(derivedVideo.path, 'storyboard.json'), '--path', '.videogo/composition'], { cwd: videogoPath });
+    assert.equal(composition.code, 0, composition.stderr || composition.stdout);
+    await serialized(workspace, () => recordVideoComposition(workspace, derivedVideo.id, VIDEO_AGENT_MODEL));
+    assert.equal((await runtime.invoke('projects.detail', { id: derivedVideo.id }) as ProjectDetail).storyboardCompositionReady, true);
     const renderJob = await runtime.invoke('projects.render', { id: derivedVideo.id }) as { id: string };
     const renderResult = await runtime.services.waitJob(renderJob.id);
     assert.equal(renderResult.status, 'succeeded', renderResult.log);

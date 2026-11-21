@@ -19,7 +19,7 @@ const video = (patch: Partial<Omit<VideoFooterInput, 'script' | 'voice' | 'rende
   script?: Partial<VideoFooterInput['script']>; voice?: Partial<VideoFooterInput['voice']>; render?: Partial<VideoFooterInput['render']>;
   review?: Partial<VideoFooterInput['review']>; busy?: Partial<VideoFooterInput['busy']>; brief?: Partial<VideoFooterInput['brief']>;
 } = {}): VideoFooterInput => ({
-  step: 'script', agentBlocked: false, storyboardReady: true, narrationBlocked: false, videoRevisionRequested: false, anyJobRunning: false,
+  step: 'script', agentBlocked: false, storyboardReady: true, compositionAuthored: true, narrationBlocked: false, videoRevisionRequested: false, anyJobRunning: false,
   ...patch,
   brief: { dirty: false, empty: false, ...patch.brief },
   script: { available: true, dirty: false, invalid: false, issuesCount: 0, textAgentRunning: false, promptPresent: true, ...patch.script },
@@ -145,6 +145,19 @@ test('video render: first render, corrected render, FFprobe missing never offers
   const corrected = at({ render: { hasRender: true }, videoRevisionRequested: true });
   shows(corrected, 'render', true);
   assert.equal(corrected?.label, 'Renderizar o vídeo corrigido');
+});
+
+test('video render: without an Opus-authored composition the only way forward is producing with Opus', () => {
+  const at = (patch: Parameters<typeof video>[0]) => videoFooterAction(video({ step: 'render', compositionAuthored: false, ...patch }));
+  shows(at({}), 'produce-video', true);
+  shows(at({ storyboardReady: false }), 'produce-video', true);
+  shows(at({ render: { hasRender: true }, videoRevisionRequested: true }), 'produce-video', true);
+  shows(at({ agentBlocked: true }), 'produce-video', false);
+  shows(at({ narrationBlocked: true }), 'wait', false);
+});
+
+test('video review: a render without Opus composition cannot be delivered', () => {
+  shows(videoFooterAction(video({ step: 'review', compositionAuthored: false, render: { hasRender: true }, review: { latestApproved: true } })), 'go-render', true);
 });
 
 test('video review: outdated video or requested correction routes to render; approval of the latest delivers', () => {

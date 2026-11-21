@@ -34,10 +34,10 @@ export async function nextImageBatchId(projectPath: string): Promise<string> {
 function slug(value: string): string {
   return value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 72).replace(/-+$/g, '') || 'projeto';
 }
-/** Mirrors postnow.clients.slugify exactly: the engine, not the Studio, owns client ids. */
+/** Mirrors postnow.clients.slugify, including NFKD/diacritic normalization. */
 function engineClientSlug(value: string): string {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  if (!normalized) throw new Error('O nome da marca precisa conter letras ou números não acentuados para o PostNow.');
+  const normalized = value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!normalized) throw new Error('O nome da marca precisa conter letras ou números para o PostNow.');
   return normalized;
 }
 

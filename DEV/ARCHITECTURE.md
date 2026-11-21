@@ -313,7 +313,11 @@ Permite monitorar renderizações e acessar arquivos do workspace pelo smartphon
 2. **Autenticação por PIN de 6 Dígitos**:
    - `MobileAuthManager` gera tokens alfanuméricos com expiração e bloqueio por rate limit após 5 tentativas incorretas.
 3. **Interface e Streaming de Mídia**:
-   - Servidor HTTP leve integrado servindo SPA mobile responsiva e streaming de vídeo/áudio com suporte completo a headers `Range`.
+   - Servidor HTTP leve integrado servindo SPA mobile responsiva e streaming de vídeo/áudio com suporte completo a headers `Range` (`media.ts`: sufixo, 416, HEAD, ETag/304).
+4. **Módulos (`src/main/mobile/`)**:
+   - `server.ts` (transporte: auth, SSE, jobs, status, cabeçalhos), `media.ts`, `project-routes.ts` (rotas de conteúdo), `project-view.ts` (`buildProjectView`: view-model calculado no servidor com as regras de `src/shared/*`), `actions.ts` (ações de etapa; ações com custo exigem `confirm:true` do cliente), `service.ts`/`tunnel.ts`/`token.ts`.
+   - Cliente: `client.ts` monta fragmentos de `client/*.ts` num único IIFE (HTML único, sem build). O JS embutido não passa por tipos nem lint.
+   - O emit do host é embrulhado uma vez no `Runtime`: todo evento (supervisor, `services.emit`) também chega ao `MobileServer.broadcastEvent`, que remove o `log` dos jobs e mantém `GET /api/rev` para o polling de contingência (quick tunnel não entrega SSE).
 
 ---
 

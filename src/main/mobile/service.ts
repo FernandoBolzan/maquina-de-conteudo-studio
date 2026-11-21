@@ -10,7 +10,8 @@ import { generateTerminalQR, generateSvgQR } from './qr.js';
 export interface MobileServiceOptions {
   port?: number;
   initialPin?: string;
-  tunnelToken?: string;
+  /** Substitui a verificação de que a URL pública alcança o servidor local (usado em testes). */
+  tunnelProbe?: (url: string) => Promise<boolean>;
 }
 
 export class MobileService {
@@ -19,6 +20,9 @@ export class MobileService {
   private tunnel?: CloudflareTunnel;
   private status: MobileTunnelStatus = { active: false };
   private stopping = false;
+  private starting?: Promise<MobileTunnelStatus>;
+
+  private tunnelProbe?: (url: string) => Promise<boolean>;
 
   constructor(
     private runtime: Runtime,
@@ -29,6 +33,7 @@ export class MobileService {
   ) {
     this.authManager = new MobileAuthManager(options?.initialPin);
     this.server = new MobileServer(this.authManager, runtime, services, version);
+    this.tunnelProbe = options?.tunnelProbe;
   }
 
   getStatus(): MobileTunnelStatus {
@@ -48,12 +53,23 @@ export class MobileService {
     this.server.broadcastEvent(event);
   }
 
-  async start(options: { port?: number; tunnelToken?: string } = {}): Promise<MobileTunnelStatus> {
-    if (this.status.active && this.status.url) {
-      return this.getStatus();
-    }
+  start(options: { port?: number } = {}): Promise<MobileTunnelStatus> {
+    if (this.starting) return this.starting;
+    if (this.status.active && this.status.url) return Promise.resolve(this.getStatus());
+    const starting = this.launch(options).finally(() => {
+      if (this.starting === starting) this.starting = undefined;
+    });
+    this.starting = starting;
+    return starting;
+  }
 
+  private async launch(options: { port?: number }): Promise<MobileTunnelStatus> {
     this.stopping = false;
+    if (this.tunnel) {
+      const previous = this.tunnel;
+      this.tunnel = undefined;
+      await previous.stop().catch(() => {});
+    }
     this.status = {
       active: true,
       token: this.authManager.getPin(),
@@ -73,20 +89,18 @@ export class MobileService {
       }
 
       // 3. Start Tunnel
-      this.tunnel = new CloudflareTunnel({
-        cloudflaredPath: cloudflared,
-        port,
-        tunnelToken: options.tunnelToken,
+      const tunnel = new CloudflareTunnel({ cloudflaredPath: cloudflared, port, probe: this.tunnelProbe });
+      this.tunnel = tunnel;
+
+      tunnel.onStatusChange((ts) => {
+        // Falha durante a partida é tratada pelo catch abaixo; aqui só a queda do túnel já conectado.
+        if (ts.state !== 'error' || this.stopping || this.tunnel !== tunnel || !this.status.url) return;
+        this.status = { ...this.status, active: false, url: undefined, error: ts.error };
+        this.server.setTunnelUrl('');
+        this.emitStatus();
       });
 
-      this.tunnel.onStatusChange((ts) => {
-        if (ts.state === 'error' && !this.stopping) {
-          this.status.error = ts.error;
-          this.emitStatus();
-        }
-      });
-
-      const publicUrl = await this.tunnel.start();
+      const publicUrl = await tunnel.start();
       this.server.setTunnelUrl(publicUrl);
       this.status.url = publicUrl;
       this.status.error = undefined;
@@ -95,10 +109,9 @@ export class MobileService {
       return this.getStatus();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.status.active = false;
-      this.status.error = msg;
-      this.emitStatus();
       await this.stop().catch(() => {});
+      this.status = { ...this.status, active: false, error: msg };
+      this.emitStatus();
       throw err;
     }
   }
@@ -120,6 +133,12 @@ export class MobileService {
     this.status.token = newPin;
     this.emitStatus();
     return newPin;
+  }
+
+  revokeSessions(): MobileTunnelStatus {
+    this.authManager.revokeAllSessions();
+    this.emitStatus();
+    return this.getStatus();
   }
 
   async getTerminalQR(): Promise<string> {

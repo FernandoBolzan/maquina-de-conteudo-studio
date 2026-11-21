@@ -2,10 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, mkdtemp, lstat, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, parse, resolve } from 'node:path';
-import type { EngineDependency, EngineId, EngineStatus, Settings } from '../../shared/contracts.js';
+import type { EngineDependency, EngineId, EngineStatus, EngineUpdateStatus, Settings } from '../../shared/contracts.js';
 import type { RunSpec, Services } from '../context.js';
 import { postnowRuntimeStatus } from '../content/postnow.js';
-import { environmentWithExecutables, installTool, requireTool, requireVersion, resolveTool, toolEnvironment, toolStatus } from './tools.js';
+import { compareVersions, environmentWithExecutables, installTool, requireTool, requireVersion, resolveTool, toolEnvironment, toolStatus } from './tools.js';
 import { ensureManagedLinuxNode } from './managed-node.js';
 
 export const repositories: Record<EngineId, string> = {
@@ -151,7 +151,7 @@ async function prepareTools(engine: EngineId, services: Services): Promise<void>
 }
 
 
-async function githubJson(endpoint: string, services: Services, privateRepository = false): Promise<Record<string, unknown>> {
+async function githubJson(endpoint: string, services: Services, privateRepository = false, installGh = true): Promise<Record<string, unknown>> {
   // Anonymous public access first; gh owns all private credentials. Neither tokens nor auth output are returned.
   try {
     const response = await fetch(`https://api.github.com/${endpoint}`, {
@@ -163,7 +163,7 @@ async function githubJson(endpoint: string, services: Services, privateRepositor
       if (body && typeof body === 'object' && !Array.isArray(body)) return body as Record<string, unknown>;
     }
   } catch { /* A private repository or network policy may require GitHub CLI authentication. */ }
-  if (privateRepository) await ensureTool('gh', services);
+  if (privateRepository && installGh) await ensureTool('gh', services);
   const gh = await resolveTool('gh', services);
   if (!gh) throw new Error('Não foi possível confirmar acesso ao GitHub. Verifique a conexão; para repositórios privados, instale GitHub CLI e faça login. Acesso público não comprova licença de uso.');
   const options = { timeoutMs: 30000, env: { GH_PROMPT_DISABLED: '1' } };
@@ -208,14 +208,49 @@ async function githubJson(endpoint: string, services: Services, privateRepositor
   return body as Record<string, unknown>;
 }
 
-async function sourceVersion(engine: EngineId, services: Services): Promise<{ sha: string; private: boolean }> {
+interface EngineRelease { tag: string; version: string; sha: string; }
+
+// Engines follow the latest stable GitHub Release, not the default branch: the branch moves between releases and can
+// diverge from the published version (PostNow v0.3.0 is tagged off a branch that main never merged).
+async function latestRelease(engine: EngineId, services: Services, installGh: boolean): Promise<EngineRelease> {
+  const repo = repositories[engine];
+  const release = await githubJson(`repos/${repo}/releases/latest`, services, false, installGh);
+  const tag = release.tag_name;
+  if (typeof tag !== 'string' || !/^v?\d+\.\d+\.\d+$/.test(tag)) throw new Error('A release estável mais recente não tem uma versão válida.');
+  // Resolve the tag to a concrete commit before any clone. Never update an existing checkout or pull a moving branch.
+  const commit = await githubJson(`repos/${repo}/commits/${encodeURIComponent(tag)}`, services, false, installGh);
+  if (typeof commit.sha !== 'string' || !/^[a-f0-9]{40}$/.test(commit.sha)) throw new Error('O GitHub não retornou um commit imutável válido.');
+  return { tag, version: tag.replace(/^v/, ''), sha: commit.sha };
+}
+
+async function sourceVersion(engine: EngineId, services: Services): Promise<EngineRelease & { private: boolean }> {
   const repo = repositories[engine];
   const metadata = await githubJson(`repos/${repo}`, services, engine !== 'maestro');
-  if (typeof metadata.full_name !== 'string' || metadata.full_name.toLowerCase() !== repo.toLowerCase() || typeof metadata.default_branch !== 'string') throw new Error('O repositório remoto não corresponde ao motor fixado.');
-  // Resolve a concrete commit before any clone. Never update an existing checkout or pull a moving branch.
-  const commit = await githubJson(`repos/${repo}/commits/${encodeURIComponent(metadata.default_branch)}`, services);
-  if (typeof commit.sha !== 'string' || !/^[a-f0-9]{40}$/.test(commit.sha)) throw new Error('O GitHub não retornou um commit imutável válido.');
-  return { sha: commit.sha, private: metadata.private === true };
+  if (typeof metadata.full_name !== 'string' || metadata.full_name.toLowerCase() !== repo.toLowerCase()) throw new Error('O repositório remoto não corresponde ao motor fixado.');
+  return { ...await latestRelease(engine, services, true), private: metadata.private === true };
+}
+
+export function classifyEngineUpdate(id: EngineId, currentVersion?: string, latestVersion?: string, unavailableReason?: string): EngineUpdateStatus {
+  if (!currentVersion) return { id, latestVersion, state: 'missing', detail: 'Motor não instalado.' };
+  if (!latestVersion) return { id, currentVersion, state: 'unavailable', detail: `${unavailableReason || 'Não foi possível consultar a release estável no GitHub.'} O motor instalado continua disponível.` };
+  const comparison = compareVersions(latestVersion, currentVersion);
+  if (comparison === undefined) return { id, currentVersion, latestVersion, state: 'unverified', detail: `A versão instalada (${currentVersion}) não pôde ser comparada com a release ${latestVersion}.` };
+  if (comparison > 0) return { id, currentVersion, latestVersion, state: 'update-available', detail: `Versão ${currentVersion} instalada; a release estável ${latestVersion} está disponível.` };
+  return { id, currentVersion, latestVersion, state: 'current', detail: comparison === 0 ? `Atualizado na release estável ${currentVersion}.` : `Versão ${currentVersion} é mais recente que a release estável ${latestVersion} (instalação de desenvolvimento).` };
+}
+
+export async function checkEngineUpdates(services: Services): Promise<EngineUpdateStatus[]> {
+  return Promise.all((Object.keys(repositories) as EngineId[]).map(async id => {
+    const path = services.getSettings().enginePaths[id];
+    if (!path) return classifyEngineUpdate(id);
+    let version: string;
+    try { version = await inspect(id, path, true); } catch {
+      return { id, state: 'unverified', detail: 'Não foi possível ler a versão instalada. Vincule a pasta de novo ou reinstale o motor.' } satisfies EngineUpdateStatus;
+    }
+    try { return classifyEngineUpdate(id, version, (await latestRelease(id, services, false)).version); } catch (error) {
+      return classifyEngineUpdate(id, version, undefined, (error instanceof Error ? error.message : '').replace(/^ENGINE_ACCESS_DENIED:\s*/, ''));
+    }
+  }));
 }
 
 async function health(engine: EngineId, root: string, services: Services): Promise<void> {
@@ -409,9 +444,16 @@ export async function manageEngine(engine: EngineId, operation: string, services
   }
   if (operation === 'install' && current) throw new Error('Motor já configurado. Use atualizar ou vincule outra instalação validada.');
   if (operation === 'update' && !current) throw new Error('Instale ou vincule o motor antes de atualizar.');
+  const source = await sourceVersion(engine, services);
+  if (operation === 'update' && current) {
+    // Same rule as checkEngineUpdates: a stable release that is not newer is never reinstalled, and no system package is touched.
+    const installed = await inspect(engine, current, true).catch(() => undefined);
+    if (installed && (compareVersions(source.version, installed) ?? 1) <= 0) {
+      return { message: `O motor já está na versão ${installed}; a release estável é ${source.version}. Nada a atualizar.`, path: current, version: installed };
+    }
+  }
   await prepareTools(engine, services);
   const git = await requireTool('git', services);
-  const source = await sourceVersion(engine, services);
   if (current && await exists(join(current, '.studio-install.json'))) {
     const active = await objectFile(join(current, '.studio-install.json'));
     if (active.commit === source.sha && active.ready === true) {
@@ -439,6 +481,7 @@ export async function manageEngine(engine: EngineId, operation: string, services
     const actual = await checkedCapture(services, git, ['-C', root, 'rev-parse', 'HEAD'], { env, timeoutMs: 15000 }, 'Não foi possível confirmar o commit instalado.');
     if (actual.trim() !== source.sha) throw new Error('O checkout não corresponde ao commit aprovado.');
     const version = await inspect(engine, root, false);
+    if (compareVersions(version, source.version) !== 0) throw new Error(`A release ${source.tag} declara a versão ${version} no manifesto; a instalação foi recusada e a versão ativa não foi alterada.`);
     if (engine === 'postnow') await installPython(root, services);
     else {
       await safePath(join(root, 'package-lock.json'), false);

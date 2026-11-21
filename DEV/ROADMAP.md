@@ -82,6 +82,7 @@ Estrutura organizada por prioridade: **Pendências & Backlog no topo**, seguidas
   - [x] Integração com Cloudflare Tunnel (`cloudflared`) sem necessidade de abrir portas no roteador.
   - [x] Modal com QR Code dinâmico e PIN alfanumérico de 6 dígitos com limitação de tentativas.
   - [x] Servidor HTTP local servindo SPA responsiva e streaming de mídia com suporte a HTTP Range.
+  - [x] Paridade com o desktop (ADR-040): prévia de carrossel/imagens/reels em qualquer etapa, visualizador em tela cheia, revisão e aprovação, ZIP dos aprovados, sincronia por `rev` com contingência para o quick tunnel e sessão/túnel robustos.
 
 ### Fase 5: Empacotamento Cross-Platform & CI/CD
 - [x] Linux x86_64: Pacotes AppImage e .deb gerados e testados em ambiente Linux real com auto-updater no formato AppImage.

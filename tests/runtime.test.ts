@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { Runtime } from '../src/main/runtime.js';
 import { capture } from '../src/main/supervisor.js';
-import { postNowFormatAcceptsPageCount, type NarrationState, type Project, type ProjectDetail } from '../src/shared/contracts.js';
-import { privateWorkspaceDirectory } from '../src/main/content/storage.js';
+import { postNowFormatAcceptsPageCount, VIDEO_AGENT_MODEL, type NarrationState, type Project, type ProjectDetail } from '../src/shared/contracts.js';
+import { privateWorkspaceDirectory, serialized } from '../src/main/content/storage.js';
+import { recordVideoComposition } from '../src/main/projects.js';
 
 test('Runtime enforces consent, path containment, symlink rejection, and hash-bound approvals', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mdc-test-'));
@@ -228,11 +229,14 @@ if (process.argv.includes('--help')) {
 } else {
   const input = process.argv[4];
   const storyboard = JSON.parse(fs.readFileSync(input, 'utf8'));
+  const generationId = require('node:crypto').randomUUID();
   for (const scene of storyboard.scenes) {
     if (!String(scene.narration || '').trim()) continue;
-    const output = path.resolve(path.dirname(input), scene.audio.narration.assetPath);
+    const assetPath = 'assets/audio/narration/' + generationId + '/' + scene.id + '.mp3';
+    const output = path.join(path.dirname(input), assetPath);
     fs.mkdirSync(path.dirname(output), { recursive: true });
     fs.writeFileSync(output, Buffer.from('new-eleven-audio'));
+    scene.audio = { ...(scene.audio || {}), narration: { assetPath, startOffsetSeconds: 0, gain: 1 } };
   }
   fs.writeFileSync(input, JSON.stringify(storyboard));
 }
@@ -312,7 +316,7 @@ if (process.argv.includes('--help')) {
   const storyboard = JSON.parse(fs.readFileSync(input, 'utf8'));
   for (const scene of storyboard.scenes) {
     if (!String(scene.narration || '').trim()) continue;
-    const output = path.resolve(path.dirname(input), scene.audio.narration.assetPath);
+    const output = path.join(path.dirname(input), 'assets', 'audio', 'narration', require('node:crypto').randomUUID(), scene.id + '.mp3');
     fs.mkdirSync(path.dirname(output), { recursive: true });
     fs.writeFileSync(output, Buffer.from('partial replacement'));
   }
@@ -738,7 +742,14 @@ test('roteiro draft preenchido fica disponível à edição e narração sem lib
     const detail = await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail;
     assert.equal(detail.storyboardAvailable, true);
     assert.equal(detail.storyboardReady, false);
-    assert.equal(detail.storyboardCompositionReady, true);
+    assert.equal(detail.storyboardCompositionReady, false, 'composição escrita fora de uma sessão do Opus não libera o render');
+    const workspaceRoot = join(root, 'workspace');
+    await serialized(workspaceRoot, () => recordVideoComposition(workspaceRoot, project.id, 'gpt-6-luna'));
+    assert.equal((await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail).storyboardCompositionReady, false, 'outro modelo não conta');
+    await serialized(workspaceRoot, () => recordVideoComposition(workspaceRoot, project.id, VIDEO_AGENT_MODEL));
+    assert.equal((await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail).storyboardCompositionReady, true);
+    await writeFile(join(compositionDir, 'index.html'), '<!doctype html><html><body>editado fora do Opus</body></html>');
+    assert.equal((await runtime.invoke('projects.detail', { id: project.id }) as ProjectDetail).storyboardCompositionReady, false, 'edição depois da sessão invalida a autoria');
     const scenes = await runtime.invoke('projects.storyboard', { id: project.id }) as { scenes: { onScreen: string }[] };
     assert.equal(scenes.scenes[0]!.onScreen, 'Texto na tela');
     const narrated = await runtime.invoke('projects.narration', { id: project.id }) as NarrationState;

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, readFile, rename, rm } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { consent, singleLine, text, type Services } from './context.js';
-import { commitImageRevision, completeFormatAdaptation, listBrands, postNowFormatOf, readFormatAdaptation, readPersonDirection, readProject, readRevisionSnapshot, recordPersonDirective, recoverPendingAssetDeletions, requireNoPendingAssetDeletion, requireVisualGenerationApproval, writeBrandProfile } from './projects.js';
+import { commitImageRevision, completeFormatAdaptation, listBrands, postNowFormatOf, readFormatAdaptation, readPersonDirection, readProject, readRevisionSnapshot, recordPersonDirective, recordVideoComposition, recoverPendingAssetDeletions, requireNoPendingAssetDeletion, requireVisualGenerationApproval, writeBrandProfile } from './projects.js';
 import { approvedPortraitAt, finalizePostNowBatch, nextImageBatchId, postnowHome, preparePostNowGeneration, readBatchStatus, readCarouselSlides, writeBatchStatus, type CarouselSlide } from './content/postnow.js';
 import { MAX_CROP_PERCENT_PER_SIDE } from './content/conform.js';
 import { logoPagesFor, type LogoPolicy } from '../shared/logo-policy.js';
@@ -12,13 +12,13 @@ import { resolveTool, toolEnvironment } from './setup.js';
 import { buildRevisionPrompt, reviewPlan } from '../shared/image-revision.js';
 import { atomicJson, atomicText, copyLocal, directory, fingerprint, localPath, requireIdle, safeId, serialized, workspace } from './content/storage.js';
 import { POSTNOW_FORMATS } from '../shared/formats.js';
-import { VIDEO_AGENT_EFFORT, VIDEO_AGENT_MODEL, type Brand, type PostNowFormatId, type VisualStyle } from '../shared/contracts.js';
+import { DEFAULT_VIDEO_SOUND, VIDEO_AGENT_EFFORT, VIDEO_AGENT_MODEL, type Brand, type PostNowFormatId, type VideoSound, type VisualStyle } from '../shared/contracts.js';
 import { personVarietyRule } from '../shared/pose-variety.js';
 import { effectiveDepictedPersonPolicy } from '../shared/depicted-person.js';
 import { WRITING_STYLE_RULE, removeDashes } from '../shared/writing-style.js';
 import { ELEMENT_ATTACH_LIMIT, IMAGEGEN_REFERENCE_LIMIT, PORTRAIT_ATTACH_LIMIT, imageGenerationReferences, referenceRole, type ImageGenerationReferences } from '../shared/brand-references.js';
 import { imageBackgroundRule, resolveImageBackgroundMode } from '../shared/image-background.js';
-import { videoStyleRule } from '../shared/video-production.js';
+import { videoSoundArgs, videoSoundRule, videoStyleRule } from '../shared/video-production.js';
 import { CAPTION_HASHTAG_RULE, captionHashtagIssue } from '../shared/visual-text.js';
 import { CAROUSEL_STRUCTURE_RULE, SINGLE_IMAGE_STRUCTURE_RULE } from '../shared/content-structure.js';
 /** Tells the engine where the PostNow logo lands; the engine never draws it, PostNow applies it afterwards. */
@@ -237,7 +237,7 @@ interface VideoGoAgentAccess { allowedTools: string[]; env: Record<string, strin
  * Sem isto o Claude escreve o storyboard às cegas: o modo `-p` nega leitura fora do projeto e todo comando sem regra.
  * Libera só leitura do motor e os comandos locais do VideoGo e do HyperFrames, por prefixo exato.
  */
-async function videoGoAgentAccess(engine: string, projectPath: string, brand: Brand | undefined, services: Services): Promise<VideoGoAgentAccess | undefined> {
+async function videoGoAgentAccess(engine: string, projectPath: string, brand: Brand | undefined, sound: VideoSound, services: Services): Promise<VideoGoAgentAccess | undefined> {
   const node = await resolveTool('node', services);
   const hyperframes = await resolveTool('hyperframes', services);
   const cli = join(engine, 'dist', 'cli', 'index.js');
@@ -247,9 +247,10 @@ async function videoGoAgentAccess(engine: string, projectPath: string, brand: Br
   const command = `${node} ${cli}`;
   const profile = brand ? await writeBrandProfile(projectPath, brand, services) : undefined;
   const style = profile ? ` --style ${profile.style}` : '';
+  const soundArgs = videoSoundArgs(sound);
   const commands = {
     validate: `${command} project validate storyboard.json`,
-    sound: `${command} project sound storyboard.json --density normal --mood calm --apply`,
+    ...(soundArgs ? { sound: `${command} project sound storyboard.json ${soundArgs}` } : {}),
     composition: `${command} project composition storyboard.json --path ${COMPOSITION_DIR}`,
     lint: `${hyperframes} lint ${COMPOSITION_DIR}`,
     snapshot: `${hyperframes} snapshot ${COMPOSITION_DIR} --review --output .studio-context/preview/snapshots`,
@@ -262,7 +263,7 @@ async function videoGoAgentAccess(engine: string, projectPath: string, brand: Br
   return {
     allowedTools: [
       `Read(/${engine.split('\\').join('/')}/**)`,
-      ...['validate', 'sound', 'composition', 'render', 'sheet'].map(sub => `Bash(${command} project ${sub}:*)`),
+      ...['validate', ...(soundArgs ? ['sound'] : []), 'composition', 'render', 'sheet'].map(sub => `Bash(${command} project ${sub}:*)`),
       ...['lint', 'snapshot', 'docs'].map(sub => `Bash(${hyperframes} ${sub}:*)`),
       `Bash(${commands.cleanup})`,
     ],
@@ -270,11 +271,13 @@ async function videoGoAgentAccess(engine: string, projectPath: string, brand: Br
     context: [
       `VIDEOGO NESTA SESSÃO: acesso liberado, use sem pedir permissão. Motor em ${engine}: somente leitura, não altere nada lá.`,
       `Antes de escrever, leia ${join(skill, 'SKILL.md')} (principalmente "Composição autoral"), ${join(skill, 'references', 'reels-regras.md')}, ${join(skill, 'references', 'dynamism.md')}, ${join(skill, 'references', 'audio-craft.md')} e o contrato em ${join(engine, 'src', 'services', 'production', 'storyboard.ts')}.`,
-      'Comandos liberados. Rode da pasta do projeto exatamente assim: sem cd, sem aspas, sem &&, ; ou |. Pode trocar --mood (calm, tech ou energetic) e o tópico de docs (gsap, compositions, data-attributes, rendering).',
+      `Comandos liberados. Rode da pasta do projeto exatamente assim: sem cd, sem aspas, sem &&, ; ou |. Pode trocar o tópico de docs (gsap, compositions, data-attributes, rendering)${soundArgs && sound.mood === 'auto' ? ' e o --mood do sound (calm, tech ou energetic)' : ''}.`,
       ...Object.values(commands).map(line => `    ${line}`),
       [
         'Ciclo obrigatório:',
-        '1. storyboard.json → validate até zero erros → sound (efeitos e trilha originais, locais e gratuitos) → validate.',
+        soundArgs
+          ? '1. storyboard.json → validate até zero erros → sound conforme a preferência de som do projeto (efeitos e trilha originais, locais e gratuitos) → validate.'
+          : '1. storyboard.json → validate até zero erros. Sem efeitos e sem trilha: não rode sound.',
         `2. composition: cria ${COMPOSITION_DIR} com timeline.json (início e duração reais de cada cena, já com a voz gravada), a mídia do projeto em assets/media, GSAP, Three.js e o kit 3D do VideoGo, e grava composition.path no storyboard. Leia ${COMPOSITION_DIR}/VIDEOGO.md e timeline.json.`,
         `3. Escreva ${COMPOSITION_DIR}/index.html: a animação de verdade deste vídeo, não um template. 2D com GSAP (tipografia cinética, recortes e ken burns nas fotos reais da marca, diagramas, números e marcas de tempo) e 3D com o kit do VideoGo ou Three.js próprio onde a ideia pede volume. Paleta e tom da marca, uma ideia por quadro, a palavra-chave entra quando é falada, nada parado por mais de 0,5 s, transições com intenção entre cenas, texto grande dentro da área segura. Sem áudio na composição: o VideoGo mistura voz, efeitos e trilha.`,
         '4. lint sem erros → snapshot → abra com Read as imagens de .studio-context/preview/snapshots e corrija o que estiver vazio, cortado, ilegível, genérico ou fora do tempo.',
@@ -293,7 +296,7 @@ function videoStoryboardRule(validated: boolean): string {
     'FOTOS: kind "image" exige visual.assetPath com o caminho relativo de um arquivo que existe no projeto (ex.: assets/brand/<arquivo>.jpeg). Foto citada só em visual.direction não aparece no vídeo. Use apenas fotos reais de assets/brand/; não invente arquivo.',
     `3D: kind "3d" exige visual.compositionId, um de ${JSON.stringify(VIDEOGO_3D_PRESETS)}, escolhido pela ideia da cena (justice para lei e direitos, timeline para datas, evidence para documentos e fontes, process para etapas).`,
     'DIREÇÃO: alterne famílias visuais entre cenas seguidas (foto, 3D, diagrama, tipografia); visual.direction descreve em uma ou duas frases o que a pessoa vê. onScreen: de 2 a 4 beats de 2 a 4 palavras; nunca cole a narração nem a pergunta inteira do gancho.',
-    `SOM: audio.sfxCues só aceita arquivos reais { asset, at, anchor, volume } dentro do projeto; audio.sfx é só nota de produção. Trilha em music: { assetPath, volume: 0.15, duckUnderVoice: true }.${validated ? ' Gere efeitos e trilha com o comando sound acima.' : ' Sem arquivo real, mantenha sfxCues [] e music sem assetPath.'}`,
+    `SOM: audio.sfxCues só aceita arquivos reais { asset, at, anchor, volume } dentro do projeto; audio.sfx é só nota de produção. Trilha em music: { assetPath, volume: 0.15, duckUnderVoice: true }.${validated ? ' Efeitos e trilha seguem a preferência de som do projeto.' : ' Sem arquivo real, mantenha sfxCues [] e music sem assetPath.'}`,
     'NARRAÇÃO: narration traz a fala; audio.spokenText tem as mesmas palavras com tags Eleven v4. Se a cena já tem audio.narration (voz gerada), NÃO altere narration, spokenText nem audio.narration: a voz é paga e a aprovação está presa ao texto. targetSeconds precisa caber a fala (até cerca de 2,8 palavras por segundo).',
     'STATUS: mantenha status "draft" em storyboard.json; a pessoa aprova no Studio. Não marque review nem QA. Transcrição e alinhamento de legendas usam faster-whisper local; nunca exija OPENAI_API_KEY.',
   ].join(' ');
@@ -445,7 +448,8 @@ export async function handleAgents(action: string, payload: Record<string, unkno
     }
     const slides = project.kind === 'image' && !adaptation ? await readCarouselSlides(project.path) : [];
     const engine = services.getSettings().enginePaths[project.kind === 'video' ? 'videogo' : 'postnow'];
-    const videoAccess = videoAgent && engine ? await videoGoAgentAccess(engine, project.path, brand, services) : undefined;
+    const videoSound = project.videoSound ?? DEFAULT_VIDEO_SOUND;
+    const videoAccess = videoAgent && engine ? await videoGoAgentAccess(engine, project.path, brand, videoSound, services) : undefined;
     const videoRule = videoStoryboardRule(videoAccess !== undefined);
     const coverLayout = deliveryFormat ? COVER_LAYOUT[deliveryFormat as DeliveryFormat] : undefined;
     const coverTitle = project.title.replace(/^\s*v[íi]deo\s*[:\u2014\u2013-]\s*/i, '').trim();
@@ -502,6 +506,7 @@ export async function handleAgents(action: string, payload: Record<string, unkno
       ...(project.kind === 'image' && project.visualStyle ? [visualStyleRule(project.visualStyle)] : []),
       ...(imageGeneration ? [imageBackgroundRule(imageBackgroundMode!)] : []),
       ...(videoAgent && project.visualStyle ? [videoStyleRule(project.visualStyle)] : []),
+      ...(videoAgent ? [videoSoundRule(videoSound)] : []),
       WRITING_STYLE_RULE,
     ].join('\n\n'));
     const contextPath = join(projectContextDir, `${session}.txt`);
@@ -592,6 +597,9 @@ export async function handleAgents(action: string, payload: Record<string, unkno
       } } : adaptation ? { onSuccess: async (signal: AbortSignal) => {
         await completeFormatAdaptation(root, id, adaptation.adaptation, signal);
         return 'Adaptação concluída; revise e aprove o conteúdo no Studio antes de gerar imagens.';
+      } } : videoAgent ? { onSuccess: async () => {
+        // Prova de autoria: só a composição gravada ao fim de uma sessão do Opus fixo libera o render. Sem texto no log: a resposta final do agente continua sendo a última mensagem.
+        await serialized(root, () => recordVideoComposition(root, id, effectiveModel));
       } } : {}),
     });
     void services.waitJob(job.id).then(async completed => {

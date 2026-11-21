@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 export type TunnelState = 'idle' | 'starting' | 'connected' | 'error' | 'stopped';
 
@@ -12,13 +13,40 @@ export interface TunnelStatus {
 export interface TunnelOptions {
   cloudflaredPath?: string;
   port: number;
-  tunnelToken?: string;
+  /** Confirma que a URL pública já chega ao servidor local. Padrão: GET `${url}/api/status` retornando 200. */
+  probe?: (url: string) => Promise<boolean>;
+  /** Quanto tempo o probe pode falhar depois do registro antes de o link ser entregue mesmo assim. Padrão: 12 s. */
+  probeGraceMs?: number;
 }
 
-const QUICK_TUNNEL_REGEX = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
+const QUICK_TUNNEL_REGEX = /https:\/\/([a-z0-9-]+)\.trycloudflare\.com/gi;
+const REGISTERED_REGEX = /Registered tunnel connection/i;
+const START_TIMEOUT_MS = 30000;
+const PROBE_INTERVAL_MS = 1000;
+const PROBE_REQUEST_TIMEOUT_MS = 4000;
+const PROBE_GRACE_MS = 12000;
+
+/** Primeira URL de túnel rápido no texto, ignorando o endpoint de API da Cloudflare (`api.trycloudflare.com`). */
+function findTunnelUrl(text: string): string | undefined {
+  for (const match of text.matchAll(QUICK_TUNNEL_REGEX)) {
+    if (match[1]!.toLowerCase() !== 'api') return match[0];
+  }
+  return undefined;
+}
+
+async function defaultProbe(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${url}/api/status`, { signal: AbortSignal.timeout(PROBE_REQUEST_TIMEOUT_MS) });
+    await response.body?.cancel().catch(() => {});
+    return response.status === 200;
+  } catch {
+    return false;
+  }
+}
 
 export class CloudflareTunnel {
   private child?: ChildProcess;
+  private starting?: Promise<string>;
   private status: TunnelStatus = { state: 'idle' };
   private listeners = new Set<(status: TunnelStatus) => void>();
   private logBuffer = '';
@@ -41,94 +69,104 @@ export class CloudflareTunnel {
     }
   }
 
-  async start(): Promise<string> {
-    if (this.child) {
-      if (this.status.url) return this.status.url;
-      await this.stop();
-    }
+  start(): Promise<string> {
+    if (this.starting) return this.starting;
+    if (this.child && this.status.url) return Promise.resolve(this.status.url);
+    const starting = this.launch().finally(() => {
+      if (this.starting === starting) this.starting = undefined;
+    });
+    this.starting = starting;
+    return starting;
+  }
+
+  private async launch(): Promise<string> {
+    if (this.child) await this.stop();
 
     const executable = this.options.cloudflaredPath || 'cloudflared';
-    const args = this.options.tunnelToken
-      ? ['tunnel', 'run', '--token', this.options.tunnelToken]
-      : ['tunnel', '--url', `http://127.0.0.1:${this.options.port}`, '--no-autoupdate'];
+    const args = ['tunnel', '--url', `http://127.0.0.1:${this.options.port}`, '--no-autoupdate'];
+    const probe = this.options.probe ?? defaultProbe;
 
-    this.setStatus({
-      state: 'starting',
-      url: undefined,
-      error: undefined,
-      startedAt: new Date().toISOString(),
-    });
+    this.setStatus({ state: 'starting', url: undefined, error: undefined, startedAt: new Date().toISOString() });
     this.logBuffer = '';
 
     const { promise, resolve, reject } = Promise.withResolvers<string>();
     let settled = false;
+    let registered = false;
+    let candidate: string | undefined;
+    let probing = false;
+    let child: ChildProcess;
+
+    const fail = (message: string): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      this.setStatus({ state: 'error', error: message });
+      if (this.child === child) this.child = undefined;
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+      reject(new Error(message));
+    };
+
+    const timeout = setTimeout(() => {
+      fail(candidate
+        ? `O túnel Cloudflare foi criado (${candidate}), mas a URL pública não respondeu em 30s. Tente novamente.`
+        : 'Tempo limite esgotado aguardando criação do túnel Cloudflare (30s).');
+    }, START_TIMEOUT_MS);
 
     try {
-      this.child = spawn(executable, args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env },
-      });
+      child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } });
     } catch (err) {
+      clearTimeout(timeout);
       const msg = err instanceof Error ? err.message : String(err);
       this.setStatus({ state: 'error', error: `Falha ao iniciar cloudflared: ${msg}` });
       throw new Error(`Falha ao iniciar cloudflared: ${msg}`);
     }
+    this.child = child;
 
-    const timeout = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        const err = 'Tempo limite esgotado aguardando criação do túnel Cloudflare (30s).';
-        this.setStatus({ state: 'error', error: err });
-        reject(new Error(err));
-      }
-    }, 30000);
-
-    const onData = (chunk: Buffer) => {
-      const text = chunk.toString('utf8');
-      this.logBuffer += text;
-      if (this.logBuffer.length > 32768) {
-        this.logBuffer = this.logBuffer.slice(-16384);
-      }
-
-      if (!settled) {
-        const match = text.match(QUICK_TUNNEL_REGEX) || this.logBuffer.match(QUICK_TUNNEL_REGEX);
-        if (match?.[0]) {
+    const verify = async (): Promise<void> => {
+      if (probing || settled || !registered || !candidate) return;
+      probing = true;
+      const url = candidate;
+      const probeStarted = Date.now();
+      while (!settled) {
+        // O probe parte deste computador: um DNS local que ainda não conhece o host novo (ou que guarda a falha em cache) não pode
+        // vetar um túnel que a Cloudflare já registrou. Passada a carência, o link é entregue e o celular resolve o nome pela rede dele.
+        const reachable = await probe(url);
+        if (reachable || Date.now() - probeStarted >= (this.options.probeGraceMs ?? PROBE_GRACE_MS)) {
+          if (settled) return;
           settled = true;
           clearTimeout(timeout);
-          const tunnelUrl = match[0];
-          this.setStatus({ state: 'connected', url: tunnelUrl });
-          resolve(tunnelUrl);
+          this.setStatus({ state: 'connected', url });
+          resolve(url);
+          return;
         }
+        await sleep(PROBE_INTERVAL_MS);
       }
     };
 
-    this.child.stdout?.on('data', onData);
-    this.child.stderr?.on('data', onData);
+    const onData = (chunk: Buffer): void => {
+      this.logBuffer += chunk.toString('utf8');
+      if (this.logBuffer.length > 32768) this.logBuffer = this.logBuffer.slice(-16384);
+      if (settled) return;
+      candidate ??= findTunnelUrl(this.logBuffer);
+      if (!registered && REGISTERED_REGEX.test(this.logBuffer)) registered = true;
+      void verify();
+    };
 
-    this.child.on('error', (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeout);
-        this.setStatus({ state: 'error', error: err.message });
-        reject(err);
-      } else {
-        this.setStatus({ state: 'error', error: err.message });
-      }
+    child.stdout?.on('data', onData);
+    child.stderr?.on('data', onData);
+
+    child.on('error', (err) => {
+      if (!settled) fail(err.message);
+      else this.setStatus({ state: 'error', error: err.message });
     });
 
-    this.child.on('close', (code, signal) => {
-      clearTimeout(timeout);
+    child.on('close', (code, signal) => {
+      if (this.child === child) this.child = undefined;
       const wasExpected = this.status.state === 'stopped';
       if (!settled) {
-        settled = true;
-        const reason = `cloudflared encerrou prematuramente (código: ${code}, sinal: ${signal}). Detalhes: ${this.logBuffer.slice(-500)}`;
-        this.setStatus({ state: 'error', error: reason });
-        reject(new Error(reason));
-      } else if (!wasExpected) {
-        this.setStatus({
-          state: 'error',
-          error: `Túnel desconectado (código: ${code}).`,
-        });
+        fail(`cloudflared encerrou prematuramente (código: ${code}, sinal: ${signal}). Detalhes: ${this.logBuffer.slice(-500)}`);
+      } else if (!wasExpected && this.status.state === 'connected') {
+        this.setStatus({ state: 'error', url: undefined, error: `Túnel desconectado (código: ${code}).` });
       }
     });
 
@@ -136,14 +174,10 @@ export class CloudflareTunnel {
   }
 
   async stop(): Promise<void> {
-    if (!this.child) {
-      this.setStatus({ state: 'stopped', url: undefined });
-      return;
-    }
-
-    this.setStatus({ state: 'stopped' });
     const proc = this.child;
     this.child = undefined;
+    this.setStatus({ state: 'stopped', url: undefined });
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
 
     const { promise, resolve } = Promise.withResolvers<void>();
     const killTimer = setTimeout(() => {

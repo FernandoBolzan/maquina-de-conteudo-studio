@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, AudioLines, Check, ChevronRight, CircleStop, Film, FolderOpen, Image, LayoutGrid, LoaderCircle, Monitor, Palette, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Smartphone, TerminalSquare, Wrench, X } from 'lucide-react';
+import { AlertCircle, AudioLines, Check, ChevronRight, CircleStop, Film, FolderOpen, Image, LayoutGrid, LoaderCircle, MessageSquarePlus, Monitor, Palette, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Smartphone, TerminalSquare, Wrench, X } from 'lucide-react';
 import type { Job, Project, Snapshot } from '../shared/contracts';
 import { api, errorMessage, invoke, jobStore, useJobs, type ChoiceRequest, type Choose, type Confirm, type Run } from './state';
 import { ChoiceDialog, ErrorNotice, Loading, Modal } from './components';
@@ -9,14 +9,15 @@ import { Brands } from './Brands';
 import { Setup, Preferences, type SetupSubmenu } from './Setup';
 import { JobsConsole } from './Console';
 import { MobileAccessModal } from './MobileAccessModal';
+import { FeedbackModal } from './FeedbackModal';
 import './shell-refined.css';
 
 type Page = 'projects' | 'studio' | 'brands' | 'setup' | 'settings';
 interface Consent { title: string; description: string; action: string; resolve: (answer: boolean) => void; }
 interface PendingChoice { id: number; request: ChoiceRequest; resolve: (value: string | undefined) => void; }
-type TerminalJobStatus = 'succeeded' | 'failed' | 'cancelled';
+type TerminalJobStatus = Exclude<Job['status'], 'running'>;
 interface JobNotice { id: string; projectId: string; title: string; status: TerminalJobStatus; }
-const NOTICE_LABELS: Record<TerminalJobStatus, string> = { succeeded: 'Concluído', failed: 'Falhou', cancelled: 'Cancelado' };
+const NOTICE_LABELS: Record<TerminalJobStatus, string> = { succeeded: 'Concluído', failed: 'Falhou', cancelled: 'Cancelado', interrupted: 'Interrompido' };
 const SUCCESS_NOTICE_MS = 8000;
 
 export function App() {
@@ -37,6 +38,7 @@ export function App() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [interactionResponse, setInteractionResponse] = useState('');
   const [mobileModalOpen, setMobileModalOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const jobs = useJobs();
   const [jobNotices, setJobNotices] = useState<JobNotice[]>([]);
@@ -91,7 +93,7 @@ export function App() {
 
   const queueJobNotice = useCallback((job: Job) => {
     const status = job.status;
-    if (!job.projectId || (status !== 'succeeded' && status !== 'failed' && status !== 'cancelled')) return;
+    if (!job.projectId || status === 'running') return;
     if (jobStore.get(job.id)?.status === status) return;
     const notice: JobNotice = { id: job.id, projectId: job.projectId, title: job.title, status };
     setJobNotices(list => list.some(item => item.id === notice.id) ? list : [...list, notice]);
@@ -104,6 +106,7 @@ export function App() {
     let timer: number | undefined;
     const unsubscribe = api.onEvent(event => {
       if (event.type === 'job' && event.job) queueJobNotice(event.job);
+      if (event.type === 'mobile' && event.mobile) { const mobile = event.mobile; setSnapshot(current => current ? { ...current, mobile } : current); }
       jobStore.event(event);
       if (event.type === 'refresh' || (event.type === 'job' && event.job?.status !== 'running')) {
         clearTimeout(timer);
@@ -258,6 +261,10 @@ export function App() {
           <button type="button" className={page === 'settings' ? 'active' : ''} aria-current={page === 'settings' ? 'page' : undefined} onClick={() => void goPage('settings')}>
             <Settings2 size={17} />
             <span>Preferências</span>
+          </button>
+          <button type="button" onClick={() => setFeedbackOpen(true)} title="Enviar um bug, sugestão ou dúvida como issue no GitHub">
+            <MessageSquarePlus size={17} />
+            <span>Enviar feedback</span>
           </button>
         </nav>
 
@@ -414,6 +421,7 @@ export function App() {
         </div>
       )}
       {mobileModalOpen && <MobileAccessModal snapshot={snapshot} refresh={refresh} run={run} busy={busy} onClose={() => setMobileModalOpen(false)} />}
+      {feedbackOpen && <FeedbackModal onClose={() => setFeedbackOpen(false)} onOpenSetup={() => { setFeedbackOpen(false); void goSetup('engines'); }} />}
       {busy.size > 0 && <span className="sr-only" role="status"><LoaderCircle />Operação em andamento</span>}
     </div>
   );
@@ -428,9 +436,10 @@ function JobToast({ notice, onOpen, onClose }: { notice: JobNotice; onOpen: () =
     const timer = window.setTimeout(() => closeRef.current(), SUCCESS_NOTICE_MS);
     return () => clearTimeout(timer);
   }, [status]);
-  const Icon = status === 'succeeded' ? Check : status === 'failed' ? AlertCircle : CircleStop;
+  const Icon = status === 'succeeded' ? Check : status === 'cancelled' ? CircleStop : AlertCircle;
+  const isError = status === 'failed' || status === 'interrupted';
   return (
-    <div className={`job-toast is-${status}`} role={status === 'failed' ? 'alert' : 'status'} aria-live={status === 'failed' ? undefined : 'polite'}>
+    <div className={`job-toast is-${status}`} role={isError ? 'alert' : 'status'} aria-live={isError ? 'assertive' : 'polite'}>
       <Icon size={17} aria-hidden="true" />
       <span className="job-toast-text"><strong>{NOTICE_LABELS[status]}:</strong> {notice.title}</span>
       <button type="button" className="button small secondary" onClick={onOpen}>Abrir projeto</button>

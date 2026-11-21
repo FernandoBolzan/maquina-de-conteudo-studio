@@ -9,6 +9,7 @@
 
 ## Histórico de publicação
 
+- v0.4.0: Acesso Mobile, Damas Brasileiras, fluxo de narração/vídeo e feedback pelo GitHub; atualização do detector de releases dos motores e normalização de IDs PostNow com acentos.
 - v0.2.0 publicada: primeira release com atualização automática. Conhecido: abas do submenu "Motores & CLIs" e "ElevenLabs & Voz" cortadas em janelas estreitas; corrigido em 0.2.1.
 - v0.2.1 publicada: correção das abas do submenu, screenshots e notas com downloads, avisos de instalação, open source e link do curso.
 - Antes de distribuir uma versão, repetir typecheck, lint, testes, smoke e build no conteúdo final. O workflow `release.yml` compila Linux, Windows e macOS antes de publicar; a validação dos instaladores em hosts nativos ainda não foi feita.

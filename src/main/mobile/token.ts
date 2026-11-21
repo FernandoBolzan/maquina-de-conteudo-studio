@@ -57,7 +57,12 @@ export class MobileAuthManager {
   regeneratePin(): string {
     this.activePin = generatePin();
     this.attempts.clear();
+    this.revokeAllSessions();
     return this.activePin;
+  }
+
+  revokeAllSessions(): void {
+    this.sessions.clear();
   }
 
   setPin(pin: string): void {
@@ -69,6 +74,7 @@ export class MobileAuthManager {
 
   verify(attempt: string, ip: string): { ok: true; sessionToken: string } | { ok: false; error: string; status: number } {
     const now = Date.now();
+    this.pruneAttempts(now);
     const tracker = this.attempts.get(ip);
 
     if (tracker && now < tracker.resetAt && tracker.count >= MAX_ATTEMPTS_PER_WINDOW) {
@@ -131,6 +137,12 @@ export class MobileAuthManager {
   getActiveSessionsCount(): number {
     this.cleanupExpiredSessions();
     return this.sessions.size;
+  }
+
+  private pruneAttempts(now: number): void {
+    for (const [ip, tracker] of this.attempts.entries()) {
+      if (now >= tracker.resetAt) this.attempts.delete(ip);
+    }
   }
 
   private cleanupExpiredSessions(): void {

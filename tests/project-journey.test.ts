@@ -93,3 +93,15 @@ test('video voice never completes while the script is not approved', () => {
   const approved = getProjectJourney(videoInput({ hasBrief: true, hasScript: true, voice }));
   assert.equal(approved.steps.find(step => step.id === 'voice')?.status, 'done');
 });
+
+test('a project that already has generated material opens on the review step, not the first pending one', () => {
+  const finishedImages = getProjectJourney(imageInput({ hasBrief: true, textsApproved: false, outputs: [{ approved: false }, { approved: true }], imagesReady: true }));
+  assert.equal(finishedImages.nextStep.id, 'review');
+  assert.equal(finishedImages.steps.find(step => step.id === 'texts')?.status, 'current');
+
+  const partialImages = getProjectJourney(imageInput({ hasBrief: true, textsApproved: true, outputs: [{ approved: false }], imagesReady: false }));
+  assert.equal(partialImages.nextStep.id, 'images');
+
+  const renderedVideo = getProjectJourney(videoInput({ hasBrief: true, hasScript: true, hasRender: true, voice: { selected: true, ready: false, needsKey: false }, outputs: [{ approved: false }] }));
+  assert.equal(renderedVideo.nextStep.id, 'review');
+});
