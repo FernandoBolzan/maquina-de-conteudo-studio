@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'rea
 import { Flag, RotateCcw, Undo2 } from 'lucide-react';
 import {
   BLACK, WHITE, currentPosition, explainMandatory, gameStatus, generateMoves, movableSquares, newGame, nextSquares, playMove, squareName,
-  type DrawReason, type Game, type GameStatus, type LevelId, type Move, type Side,
+  type DrawReason, type Game, type GameStatus, type LevelId, type Move, type Position, type Side,
 } from '../shared/damas';
 import { DAMAS_LEVELS, createSearch } from '../shared/damas-ai';
 import { clearSavedGame, loadPreferences, loadSavedGame, saveGame, savePreferences, type DamasStorage } from '../shared/damas-storage';
@@ -60,8 +60,8 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
   const [path, setPath] = useState<number[]>([]);
   const [note, setNote] = useState('');
   const [resigned, setResigned] = useState(false);
-  // Jogada da máquina em exibição: o tabuleiro ainda mostra a posição anterior e a peça percorre `move.path` salto a salto.
-  const [anim, setAnim] = useState<{ move: Move; hop: number } | undefined>(undefined);
+  // Jogada da máquina em exibição. O lance já está gravado na partida (e salvo); aqui só a animação, sobre `before`, a posição anterior.
+  const [anim, setAnim] = useState<{ move: Move; hop: number; before: Position } | undefined>(undefined);
 
   const pathRef = useRef(path);
   pathRef.current = path;
@@ -78,7 +78,7 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
   const position = currentPosition(game);
   const status: Resolved = resigned ? { state: 'resigned' } : gameStatus(game);
   const playing = status.state === 'playing';
-  const humanTurn = session !== undefined && playing && position.turn === session.color;
+  const humanTurn = session !== undefined && playing && anim === undefined && position.turn === session.color;
   const machineTurn = session !== undefined && playing && position.turn !== session.color;
 
   // A máquina pensa em fatias (cada `setTimeout` devolve o controle ao navegador); mudar a partida cancela a busca.
@@ -93,22 +93,22 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
       if (!search.done && !timedOut) { timer = window.setTimeout(tick, 0); return; }
       const move = search.best() ?? generateMoves(position)[0];
       if (!move) return;
-      setAnim({ move, hop: 0 });
+      setAnim({ move, hop: 0, before: position });
+      setGame(current => playMove(current, move));
     };
     timer = window.setTimeout(tick, THINK_DELAY_MS);
     return () => { search.cancel(); window.clearTimeout(timer); };
     // `position` muda junto com `game`; a busca recomeça só quando a vez ou a partida mudam.
   }, [game, session, machineTurn]);
 
-  // Anima a jogada (um salto por etapa) e só então a grava na partida.
+  // Anima a jogada já gravada, um salto por etapa.
   useEffect(() => {
     if (!anim) return;
-    const { move, hop } = anim;
+    const { move, hop, before } = anim;
     const timer = window.setTimeout(() => {
-      if (hop < move.path.length - 1) { setAnim({ move, hop: hop + 1 }); return; }
+      if (hop < move.path.length - 1) { setAnim({ move, hop: hop + 1, before }); return; }
       setNote(describeMove(move));
       setAnim(undefined);
-      setGame(current => playMove(current, move));
     }, hop === 0 ? ANIM_START_MS : hop < move.path.length - 1 ? HOP_MS : ANIM_END_MS);
     return () => window.clearTimeout(timer);
   }, [anim]);
@@ -204,10 +204,12 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
     );
   }
 
-  const lastMove = game.moves[game.moves.length - 1];
+  // Durante a animação o lance novo já está na partida; o destaque do "último lance" continua no anterior até ela terminar.
+  const lastMove = game.moves[game.moves.length - 1 - (anim ? 1 : 0)];
   let statusText: string;
-  if (!playing) statusText = resultText(status, session.color);
-  else if (machineTurn) statusText = anim ? 'A máquina está jogando…' : 'A máquina está pensando…';
+  if (anim) statusText = 'A máquina está jogando…';
+  else if (!playing) statusText = resultText(status, session.color);
+  else if (machineTurn) statusText = 'A máquina está pensando…';
   else if (mandatory?.mustCapture) {
     statusText = mandatory.hasShorterOptions
       ? `Lei da maioria: capture ${mandatory.maxCaptured} ${mandatory.maxCaptured === 1 ? 'peça' : 'peças'}.`
@@ -218,7 +220,7 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
     <div className="damas-play">
       <div className="damas-main">
         <DamasBoard
-          position={position}
+          position={anim ? anim.before : position}
           flipped={session.color === BLACK}
           selected={path}
           movable={movable}
@@ -232,7 +234,7 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
         <aside className="damas-side">
           <p className="damas-level">Nível {DAMAS_LEVELS[session.level].label}</p>
           <div className="damas-status" role="status" aria-live="polite">
-            <strong className={playing ? '' : 'over'}>{statusText}</strong>
+            <strong className={playing || anim ? '' : 'over'}>{statusText}</strong>
             {playing && note && <span>{note}</span>}
           </div>
           <div className="damas-controls">
