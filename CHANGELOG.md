@@ -13,6 +13,7 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 - A jogada da máquina agora é visível: ela espera um instante, a peça desliza pelo tabuleiro (cada salto de uma captura em cadeia, e a dama pela linha inteira até a casa escolhida), as peças capturadas somem na ordem, a origem e o destino ficam marcados e o painel diz o caminho, por exemplo "A máquina jogou c1 → f4 → d6 → b8 e capturou 3 peças.". Na sua vez, ao clicar os saltos de uma captura em cadeia, a peça já aparece na casa clicada e as peças capturadas até ali somem.
 - Corrigido: o tabuleiro ficava deformado (linhas desiguais, peças ovais) quando surgia uma dama; as linhas agora têm altura fixa e as peças são sempre redondas.
 - Corrigido: se você fechasse a janela de jogos enquanto a máquina ainda movia a peça, o lance dela se perdia e, ao continuar, a vez voltava para ela. Agora o lance é salvo no instante em que a máquina o escolhe; a animação é só visual.
+- Rebalanceado: o **Intermediário** estava difícil demais (olhava 5 jogadas à frente e nunca errava). Agora olha só a jogada seguinte e, em cerca de 3 de cada 10 lances, joga uma peça qualquer em vez da melhor, deixando peças soltas. Em 20 partidas de teste ele venceu o Iniciante 16 vezes, e o Avançado venceu todas as 20 contra ele. Avançado e Mestre não mudaram.
 - Sem dica e sem placar nesta versão. A máquina é determinística por nível (orçamento de nós, sem relógio), com um teto de 2,5 s por lance na interface.
 
 ### Publicado — v0.3.6

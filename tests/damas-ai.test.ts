@@ -203,6 +203,34 @@ test('força (teste de fumaça com orçamento reduzido): Mestre vence o Iniciant
   assert.ok(advanced.points >= 3.5, `Avançado x Intermediário: ${advanced.points} de 6`);
 });
 
+test('escada de força: o Intermediário vence o Iniciante na maioria das partidas, mas não sempre (6 partidas, 6 aberturas)', () => {
+  const score = playSeries('intermediario', 'iniciante', 6, 0.1);
+  assert.equal(score.openings, 6);
+  assert.ok(score.points >= 4, `Intermediário x Iniciante: ${score.points} de 6`);
+});
+
+test('descuido: o Intermediário às vezes joga um lance legal sorteado sem buscar; Avançado e Mestre nunca', () => {
+  const position = initialPosition();
+  const legal = generateMoves(position);
+  const always = (): number => 0;
+  const careless = createSearch(position, 'intermediario', always);
+  careless.step(1000);
+  assert.equal(careless.done, true);
+  assert.equal(careless.nodes, 0, 'o descuido não gasta busca');
+  assert.deepEqual(careless.best()?.path, legal[0]!.path, 'sorteio com rng 0 = primeiro lance legal');
+  const never = (): number => 0.999;
+  const attentive = createSearch(position, 'intermediario', never);
+  while (!attentive.done) attentive.step(1000);
+  assert.ok(attentive.nodes > 0, 'sem descuido ele busca');
+  for (const level of ['avancado', 'mestre'] as const) {
+    const strict = createSearch(position, level, always, { budgetScale: 0.01 });
+    while (!strict.done) strict.step(1000);
+    assert.ok(strict.nodes > 0, `${level} sempre busca`);
+  }
+  assert.equal(DAMAS_LEVELS.iniciante.mistakeRate + DAMAS_LEVELS.avancado.mistakeRate + DAMAS_LEVELS.mestre.mistakeRate, 0);
+  assert.ok(DAMAS_LEVELS.intermediario.mistakeRate > 0 && DAMAS_LEVELS.intermediario.mistakeRate < 0.5);
+});
+
 test('os níveis têm orçamento crescente e o Iniciante não busca', () => {
   assert.equal(DAMAS_LEVELS.iniciante.budget, 0);
   assert.ok(DAMAS_LEVELS.intermediario.budget < DAMAS_LEVELS.avancado.budget);

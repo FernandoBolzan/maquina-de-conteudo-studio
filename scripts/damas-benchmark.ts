@@ -52,7 +52,7 @@ for (const level of ['intermediario', 'avancado', 'mestre'] as const) {
   console.log(`${level.padEnd(13)} orçamento ${String(config.budget).padStart(6)} | nós/s ${Math.round(totalNodes / (totalMs / 1000))} | média ${Math.round(totalMs / positions.length)} ms | máx lance ${Math.round(maxMoveMs)} ms | máx nós ${maxNodes} (${nodesOk ? 'ok' : 'ACIMA de 4x'}) | máx fatia ${maxSliceMs.toFixed(1)} ms (${sliceOk ? 'ok' : 'ACIMA de 60 ms'})`);
 }
 
-const series: [LevelId, LevelId, number][] = process.env.ONLY_COST === '1' ? [] : [['mestre', 'iniciante', 5.0], ['avancado', 'intermediario', 3.5]];
+const series: [LevelId, LevelId, number][] = process.env.ONLY_COST === '1' ? [] : [['mestre', 'iniciante', 5.0], ['avancado', 'intermediario', 3.5], ['intermediario', 'iniciante', 4.0]];
 for (const [strong, weak, threshold] of series) {
   const started = performance.now();
   const score = playSeries(strong, weak, 6, 1);

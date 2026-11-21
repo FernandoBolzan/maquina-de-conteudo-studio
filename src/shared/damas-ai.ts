@@ -23,13 +23,15 @@ export interface LevelConfig {
   /** Nós por lance (portão entre iterações). */
   readonly budget: number;
   readonly useTT: boolean;
+  /** Probabilidade de jogar um lance legal sorteado em vez do melhor (descuido), decidida por `rng` antes da busca. */
+  readonly mistakeRate: number;
 }
 
 export const DAMAS_LEVELS: Readonly<Record<LevelId, LevelConfig>> = {
-  iniciante: { id: 'iniciante', label: 'Iniciante', summary: 'Joga quase ao acaso. Bom para aprender as regras.', maxDepth: 1, budget: 0, useTT: false },
-  intermediario: { id: 'intermediario', label: 'Intermediário', summary: 'Vê algumas jogadas à frente. Perdoa descuidos.', maxDepth: 5, budget: 8000, useTT: false },
-  avancado: { id: 'avancado', label: 'Avançado', summary: 'Calcula bem e pune erros de captura.', maxDepth: 8, budget: 40000, useTT: true },
-  mestre: { id: 'mestre', label: 'Mestre', summary: 'Joga fundo e raramente erra. Para quem quer desafio.', maxDepth: 10, budget: 160000, useTT: true },
+  iniciante: { id: 'iniciante', label: 'Iniciante', summary: 'Joga quase ao acaso. Bom para aprender as regras.', maxDepth: 1, budget: 0, useTT: false, mistakeRate: 0 },
+  intermediario: { id: 'intermediario', label: 'Intermediário', summary: 'Joga com atenção, mas deixa peças soltas de vez em quando. Dá para vencer com calma.', maxDepth: 2, budget: 1500, useTT: false, mistakeRate: 0.3 },
+  avancado: { id: 'avancado', label: 'Avançado', summary: 'Calcula bem e pune erros de captura.', maxDepth: 8, budget: 40000, useTT: true, mistakeRate: 0 },
+  mestre: { id: 'mestre', label: 'Mestre', summary: 'Joga fundo e raramente erra. Para quem quer desafio.', maxDepth: 10, budget: 160000, useTT: true, mistakeRate: 0 },
 };
 
 /** Probabilidade de o Iniciante escolher o melhor lance em profundidade 1 (senão sorteia entre os legais). */
@@ -332,11 +334,21 @@ export function createSearch(position: Position, level: LevelId, rng: () => numb
     }
   }
 
-  const generator = level === 'iniciante' ? undefined : run();
+  // Descuido: decidido de antemão (sem gastar busca); o sorteio vem de `rng`, então a busca em si continua determinística.
+  const mistake = config.mistakeRate > 0 && rng() < config.mistakeRate;
+  const generator = level === 'iniciante' || mistake ? undefined : run();
   return {
     step(maxNodes: number): void {
       if (done || cancelled) return;
-      if (!generator) { bestMove = chooseBeginner(position, rng); done = true; return; }
+      if (!generator) {
+        if (level === 'iniciante') bestMove = chooseBeginner(position, rng);
+        else {
+          const moves = generateMoves(position);
+          bestMove = moves[Math.min(moves.length - 1, Math.floor(rng() * moves.length))];
+        }
+        done = true;
+        return;
+      }
       const start = state.nodes;
       do {
         if (generator.next().done) { done = true; return; }
