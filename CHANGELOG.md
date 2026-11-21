@@ -4,6 +4,14 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 
 ## 2026-11-20
 
+### Novo — Damas Brasileiras contra a máquina
+- "Jogar enquanto aguarda" agora abre uma escolha entre **AI Escape 3D** e **Damas Brasileiras**. "Trocar de jogo" volta à escolha e fecha o jogo atual.
+- Damas Brasileiras (tabuleiro 8×8, captura obrigatória, lei da maioria, pedra captura para trás, dama voadora). Quatro níveis: Iniciante (joga quase ao acaso), Intermediário, Avançado e Mestre. Você escolhe a cor; desfazer, nova partida e desistir ficam no painel ao lado.
+- Empates automáticos pelas regras da CBJD: 20 lances de cada lado só com damas e sem captura; finais de 2 a 3 peças contra 1 dama sem decisão em 5 lances de cada lado; mesma posição três vezes. A confirmação do empate pelo jogador, prevista nos artigos 97 e 98, é simplificada em empate automático.
+- A partida em andamento é salva neste computador e volta por "Continuar partida", inclusive quando a geração termina e o app fecha a janela de jogos. Dados inválidos são descartados.
+- Teclado: Tab entra no tabuleiro; setas movem entre as casas; Enter ou Espaço seleciona e joga. Esc limpa a seleção e, sem seleção, fecha a janela. Leitores de tela anunciam a casa, a peça e se ela pode capturar. Sem animação com "reduzir movimento".
+- Sem dica e sem placar nesta versão. A máquina é determinística por nível (orçamento de nós, sem relógio), com um teto de 2,5 s por lance na interface.
+
 ### Publicado — v0.3.6
 - Inclui a regra de estrutura (capa só com gancho; imagem única com a chamada para a descrição) e a legenda única, descritas abaixo.
 

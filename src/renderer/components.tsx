@@ -12,16 +12,24 @@ export function Loading({ label = 'Carregando seu estúdio…' }: { label?: stri
 export function ErrorNotice({ message, onClose }: { message: string; onClose?: () => void }) {
   return <div className="notice error" role="alert"><AlertCircle size={18} /><span>{message}</span>{onClose && <button className="icon-button" aria-label="Fechar erro" onClick={onClose}><X size={16} /></button>}</div>;
 }
-export function Modal({ title, children, onClose, wide = false, className = '' }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string }) {
+export function Modal({ title, children, onClose, wide = false, className = '', focusKey, escapeGuard }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string; focusKey?: string; escapeGuard?: () => boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const guardRef = useRef(escapeGuard);
+  guardRef.current = escapeGuard;
   useEffect(() => {
     const dialog = ref.current;
     dialog?.showModal();
     return () => { dialog?.close(); };
   }, []);
-  return <dialog ref={ref} className={`modal${wide ? ' wide' : ''}${className ? ` ${className}` : ''}`} onCancel={event => { event.preventDefault(); closeRef.current(); }} aria-labelledby="dialog-title"><div className="modal-heading"><h2 id="dialog-title">{title}</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar diálogo"><X size={20} /></button></div>{children}</dialog>;
+  // Com `focusKey`, o foco vai para o título ao abrir e a cada troca de tela interna (leitor de tela anuncia o novo contexto).
+  useEffect(() => {
+    if (focusKey !== undefined) headingRef.current?.focus();
+  }, [focusKey]);
+  // Esc chega como o evento `cancel` do <dialog>; `escapeGuard` devolve true quando ele próprio tratou a tecla (ex.: limpar uma seleção).
+  return <dialog ref={ref} className={`modal${wide ? ' wide' : ''}${className ? ` ${className}` : ''}`} onCancel={event => { event.preventDefault(); if (guardRef.current?.()) return; closeRef.current(); }} aria-labelledby="dialog-title"><div className="modal-heading"><h2 id="dialog-title" ref={headingRef} tabIndex={focusKey === undefined ? undefined : -1}>{title}</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar diálogo"><X size={20} /></button></div>{children}</dialog>;
 }
 
 export function ChoiceDialog({ request, onResolve }: { request: ChoiceRequest; onResolve: (value: string | undefined) => void }) {

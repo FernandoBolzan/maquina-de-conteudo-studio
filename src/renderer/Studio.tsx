@@ -14,7 +14,7 @@ import { DEPICTED_PERSON_POLICY_LABELS, DEPICTED_PERSON_POLICY_VALUES, isDepicte
 import { IMAGE_BACKGROUND_OPTIONS, defaultImageBackgroundMode, isImageBackgroundMode, type ImageBackgroundMode } from '../shared/image-background';
 import { composeAgentFollowUp, formatAgentAnswers, lastAgentMessage, parseAgentQuestions, type AgentAnswer } from '../shared/agent-followup';
 import { GenerationProgress, type GenerationProgressState } from './GenerationProgress';
-import { AIEscapeDialog } from './AIEscapeDialog';
+import { ArcadeDialog } from './ArcadeDialog';
 import { VisualTextEditor } from './VisualTextEditor';
 import { CaptionPanel } from './CaptionPanel';
 import { VideoSceneEditor, type StoryboardSceneText } from './VideoSceneEditor';
@@ -1117,7 +1117,7 @@ export function Studio({ id, snapshot, run, busy, confirm, refresh, openJob, onO
 
   return (
     <>
-      {arcadeOpen && <AIEscapeDialog onClose={() => setArcadeOpen(false)} />}
+      {arcadeOpen && <ArcadeDialog onClose={() => setArcadeOpen(false)} />}
       {agentQuestionsOpen && agentQuestionsJob && (
         <AgentQuestionsDialog
           key={agentQuestionsJob.id}

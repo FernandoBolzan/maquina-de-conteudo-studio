@@ -3,12 +3,11 @@ import { Gamepad2, Keyboard, Sparkles } from 'lucide-react';
 import gameUrl from './ai-escape.html?url';
 import threeUrl from 'three/build/three.min.js?url';
 import rankingUrl from './ai-escape-ranking.js?url&no-inline';
-import { Modal } from './components';
 import { invoke } from './state';
 
 const gameSrc = `${gameUrl}?three=${encodeURIComponent(threeUrl)}&ranking=${encodeURIComponent(rankingUrl)}`;
 
-export function AIEscapeDialog({ onClose }: { onClose: () => void }) {
+export function AIEscapeGame() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const githubLoginRef = useRef<string | undefined>(undefined);
 
@@ -28,7 +27,7 @@ export function AIEscapeDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal title="AI Escape 3D" onClose={onClose} wide className="game-modal">
+    <>
       <div className="game-modal-meta">
         <span className="game-modal-kicker"><Sparkles size={14} aria-hidden="true" /> PAUSA CRIATIVA</span>
         <span className="game-modal-live"><i aria-hidden="true" />A geração continua em segundo plano</span>
@@ -45,6 +44,6 @@ export function AIEscapeDialog({ onClose }: { onClose: () => void }) {
         />
       </div>
       <p className="game-modal-hint"><Keyboard size={14} aria-hidden="true" /><span><strong>WASD / setas</strong> mover <span aria-hidden="true">·</span> <strong>Espaço / Shift</strong> dash <span aria-hidden="true">·</span> <strong>P</strong> pausar <span aria-hidden="true">·</span> toque no botão fechar para voltar</span><Gamepad2 size={15} aria-hidden="true" /></p>
-    </Modal>
+    </>
   );
 }
