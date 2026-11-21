@@ -10,6 +10,8 @@ Entradas agrupadas por data. Versões seguem SemVer. Releases são publicadas po
 - Empates automáticos pelas regras da CBJD: 20 lances de cada lado só com damas e sem captura; finais de 2 a 3 peças contra 1 dama sem decisão em 5 lances de cada lado; mesma posição três vezes. A confirmação do empate pelo jogador, prevista nos artigos 97 e 98, é simplificada em empate automático.
 - A partida em andamento é salva neste computador e volta por "Continuar partida", inclusive quando a geração termina e o app fecha a janela de jogos. Dados inválidos são descartados.
 - Teclado: Tab entra no tabuleiro; setas movem entre as casas; Enter ou Espaço seleciona e joga. Esc limpa a seleção e, sem seleção, fecha a janela. Leitores de tela anunciam a casa, a peça e se ela pode capturar. Sem animação com "reduzir movimento".
+- A jogada da máquina agora é visível: ela espera um instante, a peça desliza pelo tabuleiro (cada salto de uma captura em cadeia, e a dama pela linha inteira até a casa escolhida), as peças capturadas somem na ordem, a origem e o destino ficam marcados e o painel diz o caminho, por exemplo "A máquina jogou c1 → f4 → d6 → b8 e capturou 3 peças.". Na sua vez, ao clicar os saltos de uma captura em cadeia, a peça já aparece na casa clicada e as peças capturadas até ali somem.
+- Corrigido: o tabuleiro ficava deformado (linhas desiguais, peças ovais) quando surgia uma dama; as linhas agora têm altura fixa e as peças são sempre redondas.
 - Sem dica e sem placar nesta versão. A máquina é determinística por nível (orçamento de nós, sem relógio), com um teto de 2,5 s por lance na interface.
 
 ### Publicado — v0.3.6

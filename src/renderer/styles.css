@@ -3986,8 +3986,10 @@ dialog.modal.game-modal .modal-heading h2:focus-visible { outline: 2px solid #8f
 .damas-play { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; }
 .damas-main { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 24px; width: 100%; min-height: 0; }
 .damas-board {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-rows: repeat(8, minmax(0, 1fr));
   width: min(100%, calc(100vh - 250px), 640px);
   aspect-ratio: 1;
   border: 4px solid #1b1612;
@@ -3995,11 +3997,11 @@ dialog.modal.game-modal .modal-heading h2:focus-visible { outline: 2px solid #8f
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 255, 204, 0.25);
   overflow: hidden;
 }
-.damas-cell { position: relative; display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; border: 0; min-width: 0; min-height: 0; }
+.damas-cell { position: relative; display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; border: 0; min-width: 0; min-height: 0; overflow: hidden; }
 .damas-cell.light { background: #d6c8a4; }
 .damas-cell.dark { background: #2f4a3e; cursor: default; }
 button.damas-cell.dark[aria-disabled='false'] { cursor: pointer; }
-.damas-cell.last { background: #3d5f50; }
+.damas-cell.last { background: #4a7a63; box-shadow: inset 0 0 0 3px #ffd166; }
 .damas-cell.movable::after { content: ''; position: absolute; inset: 6%; border-radius: 50%; border: 2px solid rgba(143, 255, 232, 0.7); pointer-events: none; }
 .damas-cell.movable.must-capture::after { border-color: #fb923c; }
 .damas-cell.selected { background: #1f6b57; box-shadow: inset 0 0 0 3px #00ffcc; }
@@ -4009,12 +4011,27 @@ button.damas-cell.dark[aria-disabled='false'] { cursor: pointer; }
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   width: 76%;
-  height: 76%;
+  aspect-ratio: 1;
+  flex: none;
   border-radius: 50%;
   box-shadow: 0 3px 6px rgba(0, 0, 0, 0.55), inset 0 -3px 5px rgba(0, 0, 0, 0.25);
-  transition: transform 140ms ease;
+  transition: transform 140ms ease, opacity 450ms ease;
 }
+.damas-piece.fading { opacity: 0; transform: scale(0.55); }
+.damas-mover {
+  position: absolute;
+  z-index: 3;
+  width: 12.5%;
+  height: 12.5%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: left 560ms cubic-bezier(0.45, 0, 0.25, 1), top 560ms cubic-bezier(0.45, 0, 0.25, 1);
+}
+.damas-mover .damas-piece { transform: scale(1.1); box-shadow: 0 8px 14px rgba(0, 0, 0, 0.6), 0 0 0 3px #ffd166; }
 .damas-piece.white { background: radial-gradient(circle at 35% 30%, #fffdf6, #e6dcc6 70%); border: 2px solid #b8aa88; color: #6b5a2b; }
 .damas-piece.black { background: radial-gradient(circle at 35% 30%, #4a4a52, #16161a 70%); border: 2px solid #6e6e78; color: #f0c85a; }
 .damas-piece.king svg { width: 52%; height: 52%; }
@@ -4027,7 +4044,7 @@ button.damas-cell.dark[aria-disabled='false'] { cursor: pointer; }
 .damas-status span { color: var(--muted); font-size: 13px; }
 .damas-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (prefers-reduced-motion: reduce) {
-  .damas-piece, .arcade-card { transition: none; }
+  .damas-piece, .arcade-card, .damas-mover { transition: none; }
   .arcade-card:hover { transform: none; }
   .damas-cell.selected .damas-piece { transform: none; }
 }

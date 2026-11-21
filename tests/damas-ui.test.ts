@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BLACK, WHITE, applyMove, currentPosition, fromAscii, gameFrom, generateMoves, isDark, newGame, parseSquare, playMove, squareName } from '../src/shared/damas.js';
-import { clickSquare, neighborSquare, undoCount, undoForPlayer } from '../src/shared/damas-ui.js';
+import { animationFrame, clickSquare, neighborSquare, partialCapture, undoCount, undoForPlayer } from '../src/shared/damas-ui.js';
 
 const sq = parseSquare;
 
@@ -90,4 +90,43 @@ test('desfazer restaura a posição exata anterior', () => {
   assert.equal(undone.moves.length, 1);
   assert.equal(currentPosition(undone).hashLo, currentPosition(afterOpening).hashLo);
   assert.equal(currentPosition(undone).hashHi, currentPosition(afterOpening).hashHi);
+});
+
+test('animação: cada salto apaga a peça capturada na ordem e a peça em movimento termina no destino', () => {
+  const position = fromAscii(['........', '........', '........', '....b...', '........', '..b.....', '.w......', '........']);
+  const move = generateMoves(position)[0]!;
+  assert.equal(move.captured.length, 2);
+  const start = animationFrame(move, 0);
+  assert.equal(start.at, move.path[0]);
+  assert.deepEqual(start.captured, []);
+  const middle = animationFrame(move, 1);
+  assert.equal(middle.at, move.path[1]);
+  assert.deepEqual(middle.captured, [move.captured[0]]);
+  const end = animationFrame(move, 99);
+  assert.equal(end.at, move.path[move.path.length - 1]);
+  assert.deepEqual(end.captured, move.captured);
+});
+
+test('captura em cadeia clicada aos poucos: a peça aparece na última casa clicada e só as capturadas até ali somem', () => {
+  const position = fromAscii(['........', '........', '........', '....b...', '........', '..b.....', '.w......', '........']);
+  const moves = generateMoves(position);
+  assert.equal(partialCapture(moves, []), undefined);
+  assert.equal(partialCapture(moves, [sq('b2')]), undefined, 'só a origem escolhida: nada a mostrar ainda');
+  const partial = partialCapture(moves, [sq('b2'), sq('d4')]);
+  assert.ok(partial);
+  assert.equal(partial.hop, 1);
+  const frame = animationFrame(partial.move, partial.hop);
+  assert.equal(frame.at, sq('d4'));
+  assert.deepEqual(frame.captured, [sq('c3')]);
+  assert.equal(partialCapture(moves, [sq('b2'), sq('d4'), sq('f6')]), undefined, 'lance completo não é parcial');
+});
+
+test('dama voadora: captura de longe, pode pousar em qualquer casa livre depois e só em casas que continuam capturando quando há continuação', () => {
+  const simple = generateMoves(fromAscii(['........', '........', '........', '........', '...b....', '........', '........', 'W.......']));
+  assert.deepEqual(simple.map(move => squareName(move.path[1]!)).sort(), ['e5', 'f6', 'g7', 'h8']);
+  const chain = generateMoves(fromAscii(['........', '......b.', '........', '........', '...b....', '........', '........', 'W.......']));
+  assert.ok(chain.every(move => move.captured.length === 2));
+  assert.deepEqual(chain.map(move => squareName(move.path[1]!)).sort(), ['e5', 'f6']);
+  const first = clickSquare(currentPosition(gameFrom(fromAscii(['........', '......b.', '........', '........', '...b....', '........', '........', 'W.......']))), chain, [sq('a1')], sq('e5'));
+  assert.equal(first.play, undefined, 'a cadeia continua: ainda falta o salto seguinte');
 });

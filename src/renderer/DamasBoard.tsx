@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { Crown } from 'lucide-react';
-import { colOf, rowOf, squareAt, squareName, type Position } from '../shared/damas';
-import { neighborSquare, type ArrowKey } from '../shared/damas-ui';
+import { colOf, rowOf, squareAt, squareName, type Move, type Position } from '../shared/damas';
+import { animationFrame, neighborSquare, type ArrowKey } from '../shared/damas-ui';
 
 const ARROWS: Record<string, true> = { ArrowLeft: true, ArrowRight: true, ArrowUp: true, ArrowDown: true };
 const isArrow = (key: string): key is ArrowKey => key in ARROWS;
@@ -25,11 +25,13 @@ export interface DamasBoardProps {
   last: readonly number[];
   mustCapture: boolean;
   interactive: boolean;
+  /** Jogada em exibição: o tabuleiro mostra `position` (antes do lance) e uma peça percorre `move.path` até o salto `hop`. */
+  animation?: { move: Move; hop: number };
   onSquare: (square: number) => void;
 }
 
 /** Tabuleiro 8x8: 32 botões nas casas escuras, tabindex móvel e setas conforme o que o jogador vê. */
-export function DamasBoard({ position, flipped, selected, movable, targets, last, mustCapture, interactive, onSquare }: DamasBoardProps) {
+export function DamasBoard({ position, flipped, selected, movable, targets, last, mustCapture, interactive, animation, onSquare }: DamasBoardProps) {
   const buttons = useRef(new Map<number, HTMLButtonElement>());
   const [focused, setFocused] = useState(flipped ? squareAt(7, 7) : squareAt(0, 0));
 
@@ -44,6 +46,8 @@ export function DamasBoard({ position, flipped, selected, movable, targets, last
     buttons.current.get(target)?.focus();
   };
 
+  const frame = animation ? animationFrame(animation.move, animation.hop) : undefined;
+  const moving = animation ? position.board[animation.move.path[0]!]! : 0;
   const cells = [];
   for (let visualRow = 0; visualRow < 8; visualRow++) {
     for (let visualCol = 0; visualCol < 8; visualCol++) {
@@ -80,8 +84,8 @@ export function DamasBoard({ position, flipped, selected, movable, targets, last
           onFocus={() => setFocused(square)}
           onClick={() => { if (interactive) onSquare(square); }}
         >
-          {piece !== 0 && (
-            <span className={`damas-piece ${piece > 0 ? 'white' : 'black'}${Math.abs(piece) === 2 ? ' king' : ''}`} aria-hidden="true">
+          {piece !== 0 && square !== animation?.move.path[0] && (
+            <span className={`damas-piece ${piece > 0 ? 'white' : 'black'}${Math.abs(piece) === 2 ? ' king' : ''}${frame?.captured.includes(square) ? ' fading' : ''}`} aria-hidden="true">
               {Math.abs(piece) === 2 && <Crown size={18} />}
             </span>
           )}
@@ -89,5 +93,20 @@ export function DamasBoard({ position, flipped, selected, movable, targets, last
       );
     }
   }
-  return <div className={`damas-board${flipped ? ' flipped' : ''}`} role="group" aria-label="Tabuleiro de damas" onKeyDown={onKeyDown}>{cells}</div>;
+  const place = (square: number) => ({
+    left: `${(flipped ? 7 - colOf(square) : colOf(square)) * 12.5}%`,
+    top: `${(flipped ? rowOf(square) : 7 - rowOf(square)) * 12.5}%`,
+  });
+  return (
+    <div className={`damas-board${flipped ? ' flipped' : ''}`} role="group" aria-label="Tabuleiro de damas" onKeyDown={onKeyDown}>
+      {cells}
+      {frame && moving !== 0 && (
+        <span className="damas-mover" style={place(frame.at)} aria-hidden="true">
+          <span className={`damas-piece ${moving > 0 ? 'white' : 'black'}${Math.abs(moving) === 2 ? ' king' : ''}`}>
+            {Math.abs(moving) === 2 && <Crown size={18} />}
+          </span>
+        </span>
+      )}
+    </div>
+  );
 }

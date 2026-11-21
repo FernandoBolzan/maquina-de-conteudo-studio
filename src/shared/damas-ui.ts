@@ -60,3 +60,26 @@ export function undoForPlayer(game: Game, color: Side): Game {
   const count = undoCount(game, color);
   return count === 0 ? game : undoPlies(game, count);
 }
+
+export interface AnimationFrame {
+  /** Casa onde a peça em movimento está agora. */
+  readonly at: number;
+  /** Casas das peças já capturadas até aqui (somem com fade). */
+  readonly captured: readonly number[];
+}
+
+/** Quadro da animação de um lance depois de `hop` saltos: cada salto da cadeia captura uma peça, na ordem de `move.captured`. */
+export function animationFrame(move: Move, hop: number): AnimationFrame {
+  const clamped = Math.max(0, Math.min(hop, move.path.length - 1));
+  return { at: move.path[clamped]!, captured: move.captured.slice(0, clamped) };
+}
+
+/**
+ * Lance em andamento enquanto o jogador clica as casas de uma captura em cadeia: a peça já aparece na última casa clicada
+ * e as peças capturadas até ali ficam apagadas. Sem pelo menos um salto clicado não há nada a mostrar.
+ */
+export function partialCapture(moves: readonly Move[], path: readonly number[]): { move: Move; hop: number } | undefined {
+  if (path.length < 2) return undefined;
+  const move = moves.find(candidate => candidate.path.length > path.length && path.every((square, index) => candidate.path[index] === square));
+  return move ? { move, hop: path.length - 1 } : undefined;
+}

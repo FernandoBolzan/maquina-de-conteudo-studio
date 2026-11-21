@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { Flag, RotateCcw, Undo2 } from 'lucide-react';
 import {
-  BLACK, WHITE, currentPosition, explainMandatory, gameStatus, generateMoves, movableSquares, newGame, nextSquares, playMove,
-  type DrawReason, type Game, type GameStatus, type LevelId, type Side,
+  BLACK, WHITE, currentPosition, explainMandatory, gameStatus, generateMoves, movableSquares, newGame, nextSquares, playMove, squareName,
+  type DrawReason, type Game, type GameStatus, type LevelId, type Move, type Side,
 } from '../shared/damas';
 import { DAMAS_LEVELS, createSearch } from '../shared/damas-ai';
 import { clearSavedGame, loadPreferences, loadSavedGame, saveGame, savePreferences, type DamasStorage } from '../shared/damas-storage';
-import { clickSquare, undoCount, undoForPlayer } from '../shared/damas-ui';
+import { clickSquare, partialCapture, undoCount, undoForPlayer } from '../shared/damas-ui';
 import { DamasBoard } from './DamasBoard';
 
 /** Fatia de trabalho da busca entre dois respiros do navegador (≈ 50 ms no pior caso medido). */
 const SLICE_NODES = 8000;
-/** Atraso antes da máquina começar a pensar: a jogada do jogador aparece antes e a resposta não parece instantânea. */
-const THINK_DELAY_MS = 350;
+/** Pausa antes da máquina pensar: dá tempo de ver a jogada do jogador antes da resposta. */
+const THINK_DELAY_MS = 700;
+/** Animação da jogada da máquina: espera inicial, tempo por salto (capturas em cadeia têm vários) e pausa no destino. */
+const ANIM_START_MS = 150;
+const HOP_MS = 650;
+const ANIM_END_MS = 500;
 /** Teto de relógio: passado isso a máquina joga o melhor lance da última iteração completa. */
 const THINK_LIMIT_MS = 2500;
 
@@ -29,6 +33,12 @@ function browserStorage(): DamasStorage | undefined {
 }
 
 type Resolved = GameStatus | { state: 'resigned' };
+
+function describeMove(move: Move): string {
+  const captured = move.captured.length;
+  const route = move.path.map(squareName).join(' → ');
+  return captured === 0 ? `A máquina jogou ${route}.` : `A máquina jogou ${route} e capturou ${captured === 1 ? '1 peça' : `${captured} peças`}.`;
+}
 
 function resultText(status: Resolved, color: Side): string {
   if (status.state === 'resigned') return 'Você desistiu. A máquina venceu.';
@@ -50,6 +60,8 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
   const [path, setPath] = useState<number[]>([]);
   const [note, setNote] = useState('');
   const [resigned, setResigned] = useState(false);
+  // Jogada da máquina em exibição: o tabuleiro ainda mostra a posição anterior e a peça percorre `move.path` salto a salto.
+  const [anim, setAnim] = useState<{ move: Move; hop: number } | undefined>(undefined);
 
   const pathRef = useRef(path);
   pathRef.current = path;
@@ -81,13 +93,25 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
       if (!search.done && !timedOut) { timer = window.setTimeout(tick, 0); return; }
       const move = search.best() ?? generateMoves(position)[0];
       if (!move) return;
-      setNote(move.captured.length > 0 ? `A máquina capturou ${move.captured.length === 1 ? '1 peça' : `${move.captured.length} peças`}.` : '');
-      setGame(current => playMove(current, move));
+      setAnim({ move, hop: 0 });
     };
     timer = window.setTimeout(tick, THINK_DELAY_MS);
     return () => { search.cancel(); window.clearTimeout(timer); };
     // `position` muda junto com `game`; a busca recomeça só quando a vez ou a partida mudam.
   }, [game, session, machineTurn]);
+
+  // Anima a jogada (um salto por etapa) e só então a grava na partida.
+  useEffect(() => {
+    if (!anim) return;
+    const { move, hop } = anim;
+    const timer = window.setTimeout(() => {
+      if (hop < move.path.length - 1) { setAnim({ move, hop: hop + 1 }); return; }
+      setNote(describeMove(move));
+      setAnim(undefined);
+      setGame(current => playMove(current, move));
+    }, hop === 0 ? ANIM_START_MS : hop < move.path.length - 1 ? HOP_MS : ANIM_END_MS);
+    return () => window.clearTimeout(timer);
+  }, [anim]);
 
   // Persistência: partida em andamento volta pelo "Continuar partida"; terminada, é descartada.
   useEffect(() => {
@@ -100,6 +124,8 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
   const movable = useMemo(() => movableSquares(legalMoves), [legalMoves]);
   const targets = useMemo(() => new Set(path.length > 0 ? nextSquares(legalMoves, path) : []), [legalMoves, path]);
   const mandatory = humanTurn ? explainMandatory(position) : undefined;
+  // Em captura em cadeia, a peça já aparece na última casa clicada e as capturadas até ali somem.
+  const shown = anim ?? partialCapture(legalMoves, path);
 
   const begin = (color: Side, level: LevelId, from: Game) => {
     setSession({ color, level });
@@ -107,6 +133,7 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
     setPath([]);
     setNote('');
     setResigned(false);
+    setAnim(undefined);
   };
 
   const start = () => {
@@ -125,6 +152,7 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
   };
 
   const backToSetup = () => {
+    setAnim(undefined);
     setSession(undefined);
     setSaved(loadSavedGame(storage));
     setPath([]);
@@ -179,7 +207,7 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
   const lastMove = game.moves[game.moves.length - 1];
   let statusText: string;
   if (!playing) statusText = resultText(status, session.color);
-  else if (machineTurn) statusText = 'A máquina está pensando…';
+  else if (machineTurn) statusText = anim ? 'A máquina está jogando…' : 'A máquina está pensando…';
   else if (mandatory?.mustCapture) {
     statusText = mandatory.hasShorterOptions
       ? `Lei da maioria: capture ${mandatory.maxCaptured} ${mandatory.maxCaptured === 1 ? 'peça' : 'peças'}.`
@@ -198,6 +226,7 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
           last={lastMove ? lastMove.path : []}
           mustCapture={mandatory?.mustCapture ?? false}
           interactive={humanTurn}
+          animation={shown}
           onSquare={onSquare}
         />
         <aside className="damas-side">
@@ -207,14 +236,14 @@ export function DamasGame({ escapeRef }: { escapeRef: MutableRefObject<() => boo
             {playing && note && <span>{note}</span>}
           </div>
           <div className="damas-controls">
-            <button type="button" className="button secondary small" disabled={undoCount(game, session.color) === 0 || !playing} onClick={() => { setGame(undoForPlayer(game, session.color)); setPath([]); setNote(''); }}>
+            <button type="button" className="button secondary small" disabled={undoCount(game, session.color) === 0 || !playing || anim !== undefined} onClick={() => { setGame(undoForPlayer(game, session.color)); setPath([]); setNote(''); }}>
               <Undo2 size={15} aria-hidden="true" /> Desfazer
             </button>
             <button type="button" className="button secondary small" onClick={backToSetup}>
               <RotateCcw size={15} aria-hidden="true" /> Nova partida
             </button>
             {playing && (
-              <button type="button" className="button ghost small" onClick={() => { setResigned(true); setPath([]); clearSavedGame(storage); setSaved(undefined); }}>
+              <button type="button" className="button ghost small" onClick={() => { setAnim(undefined); setResigned(true); setPath([]); clearSavedGame(storage); setSaved(undefined); }}>
                 <Flag size={15} aria-hidden="true" /> Desistir
               </button>
             )}
