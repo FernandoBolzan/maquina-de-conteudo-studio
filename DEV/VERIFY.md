@@ -373,7 +373,9 @@ During CDP inspection, the test harness navigated an AppImage window to the deve
 - Gates: `npm run typecheck`, `npm run lint`, `npm test` (435/435), `npm run smoke` (`"ok": true`) e `npm run dist:linux` passaram. O smoke havia falhado por incompatibilidade de slug Unicode no Studio; `engineClientSlug` agora segue PostNow (`NFKD`, remove marcas combinantes), com regressão em `tests/depicted-person.test.ts`.
 - Limites: Safari/iOS real e Android real não foram testados (cobertura: Range/headers corretos e Chromium com perfil de celular); estados "vídeo aprovado" e "Entrega com vídeo aprovado" só foram exercitados em DOM falso e testes de servidor; `poster` do vídeo depende de `folha-contato.png`, que o projeto real não tem.
 
-## Pré-release Studio v0.4.0 (2026-11-21)
-- Linux: `npm run dist:linux` gerou `maquina-de-conteudo-0.4.0-x86_64.AppImage` e `maquina-de-conteudo-0.4.0-amd64.deb`; `dpkg-deb --info` confirma Version `0.4.0`, Architecture `amd64`. O AppImage iniciou em perfil XDG isolado e emitiu `ELECTRON_WINDOW_READY`.
-- CI de release fará os builds nativos Windows/NSIS (`.exe`) e macOS Apple Silicon (`.dmg`/`.zip`), fará merge dos manifests e validará nomes, tamanhos e SHA-512 antes de publicar a release.
-- Limites: não instalados em máquinas Windows/macOS; `.deb` não atualiza pelo updater do app e o `.dmg` ad-hoc não tem Developer ID para autoatualização.
+## Release Studio v0.4.0 (2026-11-21)
+- Linux local: `npm run dist:linux` gerou `maquina-de-conteudo-0.4.0-x86_64.AppImage` e `maquina-de-conteudo-0.4.0-amd64.deb`; `dpkg-deb --info` confirma Version `0.4.0`, Architecture `amd64`. O AppImage iniciou em perfil XDG isolado e emitiu `ELECTRON_WINDOW_READY`.
+- GitHub Actions run [44858117635](https://github.com/FernandoBolzan/maquina-de-conteudo-studio/actions/runs/44858117635): builds Linux (1m31s), macOS (3m14s) e Windows (3m42s) e job `publish` concluídos com sucesso. A verificação `scripts/verify-release-assets.mjs` passou antes da publicação.
+- Release pública `v0.4.0`: `.exe` x64, `.dmg` e `.zip` arm64, `.deb` amd64, AppImage x86_64, blockmaps e `latest.yml`, `latest-mac.yml`, `latest-linux.yml`; três manifests remotos confirmados com versão `0.4.0` e caminhos de assets existentes.
+- Checks locais: typecheck, lint, `npm test` (435/435), `npm run smoke` (`"ok": true`), `npm run dist:linux`; UI do feedback exercitada no preview e envio real com imagem validado e limpo.
+- Limites: Windows/macOS construídos e verificados pelo CI, mas não instalados em máquinas físicas. `.deb` atualiza pelo gerenciador de pacotes; o `.dmg` ad-hoc sem Developer ID não pode atualizar pelo app. Windows e AppImage baixam atualização automaticamente; instalação ocorre ao fechar o app ou ao escolher **Reiniciar e atualizar**.
